@@ -1,5 +1,6 @@
 
 
+
 export type ThrowableType = 'grenade' | 'flashbang';
 
 export interface Throwable {
@@ -19,6 +20,7 @@ export interface Weapon {
   description: string;
   category: 'primary' | 'secondary';
   type: 'projectile' | 'hitscan';
+  damage: number;
   fireRate: number; // seconds between shots
   bulletSpeed: number; // for projectiles, pixels/sec
   bulletRadius: number; // for projectiles

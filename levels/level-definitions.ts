@@ -92,7 +92,8 @@ export const deleteCustomLevel = (uuid: string): void => {
 const THE_OFFICE: LevelDefinition = {
   name: 'THE OFFICE',
   description: 'Infiltrate a corporate office and neutralize all hostile agents. Tight corridors and multiple rooms demand careful planning.',
-  playerStart: { x: 0.5, y: 0.75 },
+  playerStart: { x: 0.5, y: 0.85 },
+  enemyCount: 5,
   walls: [
     // Outer boundary walls are implicitly handled, but we define inner walls.
     // Vertical wall with door gap
@@ -117,6 +118,10 @@ const THE_OFFICE: LevelDefinition = {
     { x: 0.8, y: 0.25, direction: Math.PI, type: 'standard' },
     { x: 0.5, y: 0.5, direction: -Math.PI / 2, type: 'standard' },
     { x: 0.8, y: 0.8, direction: 3 * Math.PI / 2, type: 'standard' },
+    { x: 0.1, y: 0.8, direction: 0, type: 'standard' },
+    { x: 0.4, y: 0.1, direction: Math.PI/2, type: 'standard' },
+    { x: 0.6, y: 0.6, direction: Math.PI, type: 'advanced' },
+    { x: 0.9, y: 0.1, direction: 3*Math.PI/2, type: 'standard' },
   ],
 };
 
@@ -124,6 +129,7 @@ const THE_WAREHOUSE: LevelDefinition = {
   name: 'THE WAREHOUSE',
   description: 'A large, open warehouse with shipping containers for cover. Longer sightlines make this a different kind of challenge.',
   playerStart: { x: 0.1, y: 0.5 },
+  enemyCount: 5,
   walls: [
     // Central container block
     { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
@@ -139,6 +145,10 @@ const THE_WAREHOUSE: LevelDefinition = {
     { x: 0.8, y: 0.5, direction: Math.PI, type: 'standard' },
     { x: 0.5, y: 0.8, direction: -Math.PI / 2, type: 'standard' },
     { x: 0.3, y: 0.5, direction: 0, type: 'standard' },
+    { x: 0.15, y: 0.15, direction: Math.PI/4, type: 'advanced' },
+    { x: 0.8, y: 0.8, direction: -3*Math.PI/4, type: 'standard' },
+    { x: 0.8, y: 0.1, direction: -Math.PI/2, type: 'standard' },
+    { x: 0.5, y: 0.5, direction: 0, type: 'advanced' },
   ],
 };
 
@@ -146,6 +156,7 @@ const THE_COMPLEX: LevelDefinition = {
   name: 'THE COMPLEX',
   description: 'A sprawling multi-wing facility. Neutralize all targets in this high-threat environment.',
   playerStart: { x: 0.5, y: 0.95 },
+  enemyCount: 10,
   walls: [
     // --- Main Structure Walls ---
     // Left vertical wall
@@ -200,87 +211,115 @@ const THE_COMPLEX: LevelDefinition = {
     { x: 0.4, y: 0.85, direction: -Math.PI / 2, type: 'standard' },
     { x: 0.6, y: 0.85, direction: -Math.PI / 2, type: 'standard' },
     // Left wing
-    { x: 0.15, y: 0.15, direction: Math.PI / 4, type: 'standard' }, // Top-left office
-    { x: 0.25, y: 0.45, direction: Math.PI, type: 'standard' },     // Hallway
-    { x: 0.15, y: 0.7, direction: 0, type: 'standard' },         // Bottom-left office
+    { x: 0.15, y: 0.15, direction: Math.PI / 4, type: 'standard' },
+    { x: 0.25, y: 0.45, direction: Math.PI, type: 'standard' },
+    { x: 0.15, y: 0.7, direction: 0, type: 'standard' },
     // Right wing
-    { x: 0.8, y: 0.3, direction: Math.PI, type: 'standard' },
+    { x: 0.8, y: 0.3, direction: Math.PI, type: 'advanced' },
     { x: 0.8, y: 0.6, direction: Math.PI, type: 'standard' },
     { x: 0.9, y: 0.5, direction: 3 * Math.PI / 2, type: 'standard' },
     // Top area patrol
-    { x: 0.5, y: 0.15, direction: 0, type: 'standard' },
+    { x: 0.5, y: 0.15, direction: 0, type: 'advanced' },
+    // Additional spawns
+    { x: 0.5, y: 0.7, direction: -Math.PI / 2, type: 'standard' },
+    { x: 0.2, y: 0.5, direction: 0, type: 'standard' },
+    { x: 0.8, y: 0.8, direction: Math.PI, type: 'standard' },
+    { x: 0.9, y: 0.15, direction: Math.PI, type: 'advanced' },
+    { x: 0.1, y: 0.2, direction: 0, type: 'standard' },
+    { x: 0.1, y: 0.8, direction: 0, type: 'standard' },
   ],
 };
 
 const THE_FACTORY: LevelDefinition = {
   name: 'THE FACTORY',
   description: 'An abandoned industrial complex has been taken over by hostiles. Breach the facility, clear the factory floor, and neutralize all threats. Watch out for reinforced doors.',
-  playerStart: { x: 0.5, y: 0.95 },
-  enemyCount: 12,
+  playerStart: { x: 0.45, y: 0.95 },
+  enemyCount: 11,
   walls: [
-    // --- Exterior Fence ---
-    { x: 0.05, y: 0.9, width: 0.9, height: 0.01 },
-    // --- Main Building Shell ---
-    { x: 0.1, y: 0.1, width: 0.8, height: 0.015 }, // Top
-    { x: 0.1, y: 0.1, width: 0.01, height: 0.75 }, // Left
-    { x: 0.89, y: 0.1, width: 0.01, height: 0.75 }, // Right
-    // Bottom wall with door gaps
-    { x: 0.1, y: 0.835, width: 0.2, height: 0.015 },
-    { x: 0.38, y: 0.835, width: 0.24, height: 0.015 },
-    { x: 0.7, y: 0.835, width: 0.19, height: 0.015 },
+    // Outer Shell
+    { x: 0.05, y: 0.05, width: 0.9, height: 0.015 }, // Top
+    { x: 0.05, y: 0.05, width: 0.01, height: 0.85 }, // Left
+    { x: 0.94, y: 0.05, width: 0.01, height: 0.85 }, // Right
+    // Bottom wall (with main entrance gap)
+    { x: 0.05, y: 0.885, width: 0.35, height: 0.015 },
+    { x: 0.5, y: 0.885, width: 0.44, height: 0.015 },
 
-    // --- Interior Walls ---
-    // Office block (top left)
-    { x: 0.11, y: 0.35, width: 0.25, height: 0.015 }, // Office bottom wall
-    { x: 0.23, y: 0.1, width: 0.01, height: 0.25 },  // Office vertical divider
-    // Warehouse area (right side)
-    { x: 0.65, y: 0.1, width: 0.01, height: 0.5 }, // Warehouse dividing wall
-    // Warehouse shelving
-    { x: 0.7, y: 0.15, width: 0.15, height: 0.04 },
-    { x: 0.7, y: 0.25, width: 0.15, height: 0.04 },
-    { x: 0.7, y: 0.35, width: 0.15, height: 0.04 },
-    { x: 0.7, y: 0.45, width: 0.15, height: 0.04 },
+    // --- Room 1 & 2 Walls ---
+    // Vertical divider between room 1 and 2 (with door gap)
+    { x: 0.25, y: 0.05, width: 0.01, height: 0.15 }, 
+    { x: 0.25, y: 0.30, width: 0.01, height: 0.1 }, 
+    // Small horizontal walls in Room 1
+    { x: 0.15, y: 0.15, width: 0.05, height: 0.02 }, // New small cover
+    { x: 0.05, y: 0.25, width: 0.05, height: 0.02 },
+    { x: 0.15, y: 0.25, width: 0.05, height: 0.02 },
+    
+    // Bottom wall of rooms 1 & 2 (with window gaps)
+    { x: 0.05, y: 0.385, width: 0.05, height: 0.015 },
+    { x: 0.15, y: 0.385, width: 0.05, height: 0.015 },
+    { x: 0.25, y: 0.385, width: 0.05, height: 0.015 },
+    { x: 0.35, y: 0.385, width: 0.05, height: 0.015 },
+    
+    // --- Dividing Walls between major sections (Blue walls from image) ---
+    // Wall between Room 2 and 3 (with doorway)
+    { x: 0.4, y: 0.05, width: 0.01, height: 0.15 },
+    { x: 0.4, y: 0.3, width: 0.01, height: 0.1 },
+    // Wall between Room 3 and corridor for 4/5 (with doorway)
+    { x: 0.6, y: 0.05, width: 0.01, height: 0.2 },
+    { x: 0.6, y: 0.35, width: 0.01, height: 0.3 }, // Corridor choke point
+    { x: 0.6, y: 0.75, width: 0.01, height: 0.135 },
+    { x: 0.61, y: 0.65, width: 0.05, height: 0.015 }, // Corridor choke point horizontal part
+    
+    // --- Wall defining top of room 5 ---
+    { x: 0.6, y: 0.2, width: 0.05, height: 0.015 },
 
-    // --- Main Factory Floor Cover (Machinery) ---
-    { x: 0.2, y: 0.5, width: 0.1, height: 0.2 },
-    { x: 0.35, y: 0.6, width: 0.2, height: 0.1 },
-    { x: 0.45, y: 0.25, width: 0.15, height: 0.15 },
-    { x: 0.58, y: 0.45, width: 0.05, height: 0.25 },
+    // --- Room 5 Shelving ---
+    { x: 0.65, y: 0.25, width: 0.25, height: 0.04 },
+    { x: 0.75, y: 0.4, width: 0.04, height: 0.2 }, // Rotated shelf
+    { x: 0.65, y: 0.55, width: 0.25, height: 0.04 },
+    { x: 0.65, y: 0.7, width: 0.25, height: 0.04 },
+
+    // --- Room 3 Cover Objects ---
+    { x: 0.45, y: 0.2, width: 0.1, height: 0.1 },
+    { x: 0.30, y: 0.6, width: 0.1, height: 0.02 }, // L-Shape cover horizontal
+    { x: 0.30, y: 0.6, width: 0.02, height: 0.15 }, // L-Shape cover vertical
+    { x: 0.5, y: 0.45, width: 0.08, height: 0.2 },
   ],
   doors: [
-    // --- Main Entrances ---
-    { id: 1, hinge: { x: 0.31, y: 0.835 }, length: 0.07, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
-    { id: 2, hinge: { x: 0.38, y: 0.835 }, length: 0.07, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    { id: 3, hinge: { x: 0.62, y: 0.835 }, length: 0.08, closedAngle: -Math.PI / 2, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
-    
-    // --- Office Doors ---
-    { id: 4, hinge: { x: 0.2, y: 0.35 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    { id: 5, hinge: { x: 0.3, y: 0.35 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
+    // Main Double Doors (White)
+    { id: 1, hinge: { x: 0.4, y: 0.8925 }, length: 0.089, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
+    { id: 8, hinge: { x: 0.5, y: 0.8925 }, length: 0.089, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
 
-    // --- Warehouse Destructible Door ---
-    { id: 6, hinge: { x: 0.65, y: 0.5 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
+    // Locked Doors (Red)
+    { id: 3, hinge: { x: 0.94, y: 0.25 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
+    { id: 4, hinge: { x: 0.94, y: 0.65 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
+
+    // --- Internal Doors (for blue walls) ---
+    { id: 5, hinge: { x: 0.41, y: 0.2 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
+    { id: 6, hinge: { x: 0.61, y: 0.25 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
+    // New door between room 1 and 2
+    { id: 7, hinge: { x: 0.25, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
   ],
   enemies: [
-    // This is now a pool of potential spawn points.
-    // Office spawns
-    { x: 0.16, y: 0.2, direction: 0, type: 'standard' },
-    { x: 0.3, y: 0.2, direction: Math.PI, type: 'advanced' },
-    { x: 0.18, y: 0.3, direction: -Math.PI/2, type: 'standard' },
-    // Warehouse spawns
-    { x: 0.75, y: 0.2, direction: Math.PI, type: 'advanced' },
-    { x: 0.82, y: 0.3, direction: Math.PI, type: 'standard' },
-    { x: 0.75, y: 0.4, direction: Math.PI/2, type: 'advanced' },
-    { x: 0.78, y: 0.55, direction: 0, type: 'standard' },
-    // Main floor spawns
-    { x: 0.25, y: 0.45, direction: Math.PI / 4, type: 'standard' },
-    { x: 0.22, y: 0.75, direction: -Math.PI / 2, type: 'advanced' },
-    { x: 0.4, y: 0.5, direction: 0, type: 'standard' },
-    { x: 0.5, y: 0.7, direction: Math.PI, type: 'advanced' },
-    { x: 0.55, y: 0.4, direction: -Math.PI, type: 'standard' },
-    { x: 0.6, y: 0.2, direction: Math.PI, type: 'standard' },
-    { x: 0.4, y: 0.2, direction: 3 * Math.PI / 2, type: 'advanced' },
-    { x: 0.58, y: 0.78, direction: Math.PI, type: 'standard' },
-    { x: 0.15, y: 0.6, direction: 0, type: 'advanced' },
+    // --- Spawn Pool ---
+    // Room 1 (2 AI Crossfire)
+    { x: 0.13, y: 0.15, direction: 5 * Math.PI / 4, type: 'standard' },
+    { x: 0.22, y: 0.35, direction: Math.PI / 4, type: 'standard' },
+    // Room 2 (2 AI Crossfire)
+    { x: 0.28, y: 0.15, direction: 3 * Math.PI / 2, type: 'advanced' },
+    { x: 0.37, y: 0.35, direction: Math.PI, type: 'standard' },
+    // Room 3 (5 AI, defensive positions)
+    { x: 0.35, y: 0.7, direction: 0, type: 'advanced' }, // Behind new L-cover
+    { x: 0.55, y: 0.6, direction: Math.PI, type: 'standard' },
+    { x: 0.47, y: 0.3, direction: Math.PI / 2, type: 'advanced' },
+    { x: 0.57, y: 0.25, direction: Math.PI, type: 'standard' },
+    { x: 0.45, y: 0.8, direction: -Math.PI / 2, type: 'advanced' },
+    // Room 4 (2 AI Crossfire)
+    { x: 0.75, y: 0.15, direction: Math.PI, type: 'standard' },
+    { x: 0.85, y: 0.3, direction: 3 * Math.PI / 2, type: 'advanced' },
+    // Room 5 (3 AI, trickier)
+    { x: 0.75, y: 0.45, direction: Math.PI, type: 'standard' }, // Behind rotated shelf
+    { x: 0.85, y: 0.6, direction: 0, type: 'advanced' },
+    { x: 0.68, y: 0.75, direction: -Math.PI / 2, type: 'standard' },
   ],
 };
 

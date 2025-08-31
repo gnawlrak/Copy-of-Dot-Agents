@@ -24,6 +24,7 @@ export interface WeaponDefinition {
     description: string;
     category: 'primary' | 'secondary';
     type: 'projectile' | 'hitscan';
+    damage: number;
     fireRate: number;
     bulletSpeed: number;
     bulletRadius: number;
@@ -49,6 +50,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'Standard issue sidearm. Reliable and versatile.',
         category: 'secondary',
         type: 'projectile',
+        damage: 51,
         fireRate: 0.25,
         bulletSpeed: 1420,
         bulletRadius: 3,
@@ -104,6 +106,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'High-caliber sidearm. Slower fire rate, but packs a punch.',
         category: 'secondary',
         type: 'projectile',
+        damage: 76,
         fireRate: 0.4,
         bulletSpeed: 1600,
         bulletRadius: 3.5,
@@ -159,6 +162,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'Devastating at close range. Wide spread.',
         category: 'primary',
         type: 'projectile',
+        damage: 20, // Per pellet
         fireRate: 0.83,
         bulletSpeed: 1600,
         bulletRadius: 2.5,
@@ -215,6 +219,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'High fire rate, best for close to medium encounters.',
         category: 'primary',
         type: 'projectile',
+        damage: 51,
         fireRate: 0.1,
         bulletSpeed: 1600,
         bulletRadius: 2.5,
@@ -270,6 +275,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'A balanced weapon for all situations. Accurate and effective.',
         category: 'primary',
         type: 'hitscan',
+        damage: 51,
         fireRate: 0.12,
         bulletSpeed: 0,
         bulletRadius: 1, // 'Impact' for hitscan
@@ -325,6 +331,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'Large magazine capacity for sustained suppressive fire.',
         category: 'primary',
         type: 'hitscan',
+        damage: 51,
         fireRate: 0.08,
         bulletSpeed: 0,
         bulletRadius: 1.2, // 'Impact' for hitscan

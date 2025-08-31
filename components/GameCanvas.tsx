@@ -31,13 +31,15 @@ type Bullet = {
   dy: number;
   radius: number;
   speed: number;
+  damage: number;
   owner: 'player' | 'enemy';
 };
 type Enemy = {
   x: number;
   y: number;
   radius: number;
-  isHit?: boolean;
+  health: number;
+  maxHealth: number;
   direction: number; // Angle in radians
   fov: number; // Field of view in radians
   viewDistance: number;
@@ -48,6 +50,7 @@ type Enemy = {
   shootCooldown: number;
   shootCooldownMax: number;
   stunTimer?: number;
+  suppressionTimer?: number;
   type: 'standard' | 'advanced';
   lastSeenTime?: number;
   // Advanced AI fields
@@ -62,9 +65,10 @@ type Enemy = {
   patrolStartX?: number;
   patrolStartY?: number;
   patrolStartDirection?: number;
+  isInvestigating?: boolean;
   searchTimer?: number;
   isReturningToPost?: boolean;
-  stuckTimer?: number;
+  reactionTimer?: number;
 };
 type Player = {
     x: number;
@@ -341,7 +345,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     const cx = ax + t * vx;
     const cy = ay + t * vy;
     const dx = px - cx;
-    const dy = py - cy;
+    const dy = py - ay;
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
@@ -364,6 +368,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const mousePosRef = useRef({ x: 0, y: 0 });
   const bulletsRef = useRef<Array<Bullet>>([]);
   const enemiesRef = useRef<Array<Enemy>>([]);
+  const initialEnemyCountRef = useRef<number>(0);
+  const missionTimeRef = useRef<number>(0);
   const lightsRef = useRef<Array<Light>>([]);
   const sparksRef = useRef<Array<Spark>>([]);
   const throwablesRef = useRef<Array<Throwable>>([]);
@@ -423,6 +429,41 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     const distanceY = circle.y - closestY;
     const distanceSquared = (distanceX * distanceX) + (distanceY * distanceY);
     return distanceSquared < (circle.radius * circle.radius);
+  };
+  
+  // New robust wall collision solver
+  const resolveCollisionWithWall = (circle: { x: number; y: number; radius: number }, rect: Wall): Point | null => {
+      const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width));
+      const closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.height));
+      const dx = circle.x - closestX;
+      const dy = circle.y - closestY;
+      const distanceSquared = (dx * dx) + (dy * dy);
+
+      if (distanceSquared >= circle.radius * circle.radius) {
+          return null; // No collision
+      }
+
+      const distance = Math.sqrt(distanceSquared);
+      const penetrationDepth = circle.radius - distance;
+      
+      // Handle the case where the circle center is inside the rectangle.
+      if (distance < 1e-6) {
+          const distToLeft = circle.x - rect.x;
+          const distToRight = (rect.x + rect.width) - circle.x;
+          const distToTop = circle.y - rect.y;
+          const distToBottom = (rect.y + rect.height) - circle.y;
+          const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+
+          if (minDist === distToLeft) return { x: rect.x - circle.radius - 0.1, y: circle.y };
+          if (minDist === distToRight) return { x: rect.x + rect.width + circle.radius + 0.1, y: circle.y };
+          if (minDist === distToTop) return { x: circle.x, y: rect.y - circle.radius - 0.1 };
+          return { x: circle.x, y: rect.y + rect.height + circle.radius + 0.1 };
+      }
+
+      const pushX = (dx / distance) * (penetrationDepth + 0.1);
+      const pushY = (dy / distance) * (penetrationDepth + 0.1);
+
+      return { x: circle.x + pushX, y: circle.y + pushY };
   };
 
   // Circle-Rotated Rectangle collision for doors
@@ -538,7 +579,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
             let hitEnemy = null, nearestEnemyT = nearestWallT;
             for (const enemy of enemiesRef.current) {
-                if (enemy.isHit) continue;
+                if (enemy.health <= 0) continue;
                 const dx = enemy.x - player.x, dy = enemy.y - player.y;
                 const t = dx * finalUx + dy * finalUy;
                 if (t > 0 && t < nearestEnemyT) {
@@ -559,8 +600,11 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             tracersRef.current.push({ x1: muzzleX, y1: muzzleY, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
             
             if (hitEnemy) {
-                hitEnemy.isHit = true;
-                hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
+                const healthBefore = hitEnemy.health;
+                hitEnemy.health -= currentWeapon.damage;
+                if (hitEnemy.health <= 0 && healthBefore > 0) {
+                  hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
+                }
                 impact(hitEnemy.x, hitEnemy.y);
             } else {
                 lightsRef.current.push({ x: hitX, y: hitY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
@@ -588,6 +632,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                     dy: Math.sin(finalAngle),
                     radius: currentWeapon.bulletRadius,
                     speed: speed,
+                    damage: currentWeapon.damage,
                     owner: 'player'
                 });
             }
@@ -601,6 +646,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 dy: Math.sin(finalAngle),
                 radius: currentWeapon.bulletRadius,
                 speed: currentWeapon.bulletSpeed,
+                damage: currentWeapon.damage,
                 owner: 'player'
             });
         }
@@ -675,6 +721,39 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     if (!context) return;
     
     let animationFrameId: number;
+
+    const isPlayerCampingDoor = (door: Door, enemy: Enemy): boolean => {
+        const player = playerRef.current;
+        
+        // 1. Check if they are on opposite sides of the closed door's line.
+        const doorVecX = Math.cos(door.closedAngle);
+        const doorVecY = Math.sin(door.closedAngle);
+
+        const aiVecX = enemy.x - door.hinge.x;
+        const aiVecY = enemy.y - door.hinge.y;
+
+        const playerVecX = player.x - door.hinge.x;
+        const playerVecY = player.y - door.hinge.y;
+
+        const crossAI = doorVecX * aiVecY - doorVecY * aiVecX;
+        const crossPlayer = doorVecX * playerVecY - doorVecY * playerVecX;
+
+        // If signs are the same or one is zero, they are on the same side. Not camping from opposite side.
+        if (Math.sign(crossAI) * Math.sign(crossPlayer) >= 0) {
+            return false;
+        }
+
+        // 2. Check if player is close to the door.
+        const endX = door.hinge.x + door.length * Math.cos(door.closedAngle);
+        const endY = door.hinge.y + door.length * Math.sin(door.closedAngle);
+        
+        const distToDoor = pointToSegmentDistance({ x: player.x, y: player.y }, door.hinge, { x: endX, y: endY });
+        
+        // Player radius + half door thickness + a generous buffer
+        const campingThreshold = player.radius + (door.thickness / 2) + (30 * scaleRef.current); 
+
+        return distToDoor < campingThreshold;
+    };
 
     const getLaserEndpoint = (): Point => {
         const player = playerRef.current;
@@ -785,17 +864,21 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         const enemyPool = shuffleArray(level.enemies);
         const enemyCount = level.enemyCount || level.enemies.length;
         const chosenSpawns = enemyPool.slice(0, enemyCount);
+        initialEnemyCountRef.current = chosenSpawns.length;
 
         enemiesRef.current = chosenSpawns.map(e => {
             const startX = e.x * canvas.width;
             const startY = e.y * canvas.height;
             const enemyType = e.type || 'standard';
+            const maxHealth = enemyType === 'advanced' ? 150 : 100;
 
             const baseEnemy: Enemy = {
                 x: startX,
                 y: startY,
                 direction: e.direction,
                 radius: 12 * scale,
+                health: maxHealth,
+                maxHealth: maxHealth,
                 fov: 130 * (Math.PI / 180), // 130 degrees in radians
                 viewDistance,
                 isAlert: false,
@@ -803,14 +886,26 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 shootCooldown: Math.random() * shootCooldownMax,
                 shootCooldownMax,
                 stunTimer: 0,
+                suppressionTimer: 0,
                 type: enemyType,
                 patrolStartX: startX,
                 patrolStartY: startY,
                 patrolStartDirection: e.direction,
+                isInvestigating: false,
                 searchTimer: 0,
                 isReturningToPost: false,
-                stuckTimer: 0,
             };
+
+            // Spawn protection: ensure enemies don't spawn inside walls.
+            let finalPos = { x: baseEnemy.x, y: baseEnemy.y };
+            for (const wall of wallsRef.current) {
+                const resolved = resolveCollisionWithWall({ ...finalPos, radius: baseEnemy.radius }, wall);
+                if (resolved) {
+                    finalPos = resolved;
+                }
+            }
+            baseEnemy.x = finalPos.x;
+            baseEnemy.y = finalPos.y;
 
             if (enemyType === 'advanced') {
                 return {
@@ -932,6 +1027,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       isMissionCompleteRef.current = false;
       missionEndTimeRef.current = null;
       isExtractionActiveRef.current = false;
+      missionTimeRef.current = 0;
       const parent = canvas.parentElement;
       if (parent) {
           canvas.width = parent.clientWidth;
@@ -993,6 +1089,9 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
       if (isEnded && missionEndTimeRef.current === null) {
         missionEndTimeRef.current = now;
+      }
+      if (!isEnded) {
+        missionTimeRef.current += dt;
       }
       const visionRadius = Math.max(220, Math.min(520, Math.max(canvas.width, canvas.height) * 0.45)) * scale;
 
@@ -1073,8 +1172,12 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                         isGameOverRef.current = true;
                     }
                 } else {
-                    (unit as Enemy).isHit = true;
-                     hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                    const enemy = unit as Enemy;
+                    const healthBefore = enemy.health;
+                    enemy.health -= damage;
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                      hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                    }
                 }
             } else { // flashbang
                 if (isPlayer) {
@@ -1124,7 +1227,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
         affectUnit(playerRef.current, true);
         enemiesRef.current.forEach(e => {
-            if (!e.isHit) {
+            if (e.health > 0) {
                 affectUnit(e, false)
             }
         });
@@ -1259,7 +1362,7 @@ doorsRef.current.forEach(door => {
     // Resolve enemy collisions if not already blocked
     if (!isBlocked) {
         for (const enemy of enemiesRef.current) {
-            if (enemy.isHit) continue;
+            if (enemy.health <= 0) continue;
             const enemyPushedPos = resolveCollisionWithDoor(enemy, tempDoor);
             if (enemyPushedPos) {
                 let pushedPosIsValid = true;
@@ -1323,24 +1426,38 @@ doorsRef.current.forEach(door => {
         if (keys.has('s') || keys.has('arrowdown')) dy += 1;
         if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
         if (keys.has('d') || keys.has('arrowright')) dx += 1;
+
         if (dx !== 0 || dy !== 0) {
           playerMoveSoundTimerRef.current -= dt;
           if (playerMoveSoundTimerRef.current <= 0) {
               playerMoveSoundTimerRef.current = 0.3; // sound every 0.3s
               soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2 });
           }
-          if (dx !== 0 && dy !== 0) {
-              const length = Math.hypot(dx, dy); dx /= length; dy /= length;
+          const len = Math.hypot(dx, dy);
+          if (len > 0) {
+            dx /= len;
+            dy /= len;
           }
-          const newPos = { x: player.x + dx * player.speed * dt, y: player.y + dy * player.speed * dt };
-          let collisionX = false;
-          for (const wall of wallsRef.current) { if (checkCollision({ x: newPos.x, y: player.y, radius: player.radius }, wall)) { collisionX = true; break; } }
-          if (!collisionX) { for (const door of doorsRef.current) { if(checkCollisionWithDoor({ x: newPos.x, y: player.y, radius: player.radius }, door)) { collisionX = true; break; } } }
-          if (!collisionX) player.x = newPos.x;
-          let collisionY = false;
-          for (const wall of wallsRef.current) { if (checkCollision({ x: player.x, y: newPos.y, radius: player.radius }, wall)) { collisionY = true; break; } }
-          if(!collisionY) { for (const door of doorsRef.current) { if(checkCollisionWithDoor({ x: player.x, y: newPos.y, radius: player.radius }, door)) { collisionY = true; break; } } }
-          if (!collisionY) player.y = newPos.y;
+          
+          let newX = player.x + dx * player.speed * dt;
+          let newY = player.y + dy * player.speed * dt;
+          
+          let tempPos = { x: newX, y: newY };
+          
+          // Iteratively resolve collisions for stability
+          for (let i = 0; i < 3; i++) {
+              for (const wall of wallsRef.current) {
+                  const resolved = resolveCollisionWithWall({ ...tempPos, radius: player.radius }, wall);
+                  if (resolved) tempPos = resolved;
+              }
+              for (const door of doorsRef.current) {
+                  const resolved = resolveCollisionWithDoor({ ...tempPos, radius: player.radius }, door);
+                  if (resolved) tempPos = resolved;
+              }
+          }
+
+          player.x = tempPos.x;
+          player.y = tempPos.y;
         }
       }
 
@@ -1351,7 +1468,7 @@ doorsRef.current.forEach(door => {
         let closestDistSq = takedownDist * takedownDist;
     
         for (const enemy of enemiesRef.current) {
-            if (enemy.isHit || enemy.isAlert) continue;
+            if (enemy.health <= 0 || enemy.isAlert) continue;
     
             const dx = enemy.x - player.x;
             const dy = enemy.y - player.y;
@@ -1408,7 +1525,7 @@ doorsRef.current.forEach(door => {
             // 2. Check for unit impacts (enemies or player) that happen before the wall impact
             if (bullet.owner === 'player') {
                 for (const enemy of enemiesRef.current) {
-                    if (enemy.isHit) continue;
+                    if (enemy.health <= 0) continue;
                     const enemyHit = intersectSegCircle(
                         bullet.x, bullet.y, nextX, nextY,
                         enemy.x, enemy.y, bullet.radius + enemy.radius
@@ -1441,13 +1558,16 @@ doorsRef.current.forEach(door => {
 
                 if (hitUnitType === 'enemy') {
                     const enemy = hitUnit as Enemy;
-                    enemy.isHit = true;
+                    const healthBefore = enemy.health;
+                    enemy.health -= bullet.damage;
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                      hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                    }
                     impact(impactX, impactY);
                     soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
-                    hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                 } else { // hitUnitType === 'player'
                     const playerUnit = hitUnit as Player;
-                    playerUnit.health -= 25;
+                    playerUnit.health -= bullet.damage;
                     playerUnit.hitTimer = 0.17;
 
                     // Add a distinct, directional screen shake for getting hit
@@ -1545,7 +1665,7 @@ doorsRef.current.forEach(door => {
         slashArcsRef.current.push({ x:player.x, y:player.y, a1: a1 - slash.width*0.5, a2: a2 + slash.width*0.5, inner: slash.inner, outer, ttl: 0.13, life: 0.13 });
 
         for (const enemy of enemiesRef.current) {
-            if (enemy.isHit || slashHitThisSwingRef.current.has(enemy)) continue;
+            if (enemy.health <= 0 || slashHitThisSwingRef.current.has(enemy)) continue;
             const dx = enemy.x - player.x, dy = enemy.y - player.y; const dist=Math.hypot(dx,dy);
             if (dist < slash.inner || dist > slash.range) continue;
             const ang = Math.atan2(dy,dx);
@@ -1554,9 +1674,13 @@ doorsRef.current.forEach(door => {
             const dClear = raycast(player.x, player.y, ang, dist);
             if (dClear < dist - 1e-3) continue;
 
-            enemy.isHit = true; slashHitThisSwingRef.current.add(enemy);
-            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-            shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+            const healthBefore = enemy.health;
+            enemy.health = 0; // Slash is an instant kill
+            if (healthBefore > 0) {
+              slashHitThisSwingRef.current.add(enemy);
+              hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+              shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+            }
         }
 
         if (castDist < slash.range - 0.5){
@@ -1611,16 +1735,22 @@ doorsRef.current.forEach(door => {
 
       const activeEnemies: Enemy[] = [];
         for (const enemy of enemiesRef.current) {
-            if (enemy.isHit) {
-                // Keep hit enemies out of the active list for the next frame
+            if (enemy.health <= 0) {
+                // Keep dead enemies out of the active list
             } else {
                 const wasAlert = enemy.isAlert;
 
                 if (!isEnded) {
-                    // Handle stun timer first as it overrides everything
+                    // Handle timers
+                    if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
+                    if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
+                    if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
+
+
+                    // Stun overrides everything
                     if (enemy.stunTimer && enemy.stunTimer > 0) {
-                        enemy.stunTimer -= dt;
                         enemy.isAlert = false;
+                        enemy.isInvestigating = false;
                         enemy.targetX = undefined;
                         enemy.targetY = undefined;
                         enemy.searchTimer = 0;
@@ -1629,7 +1759,7 @@ doorsRef.current.forEach(door => {
                         // --- AI LOGIC ---
                         const lastKnownTargetX = enemy.targetX;
 
-                        // 1. HIGHEST PRIORITY: SIGHT
+                        // 1. SIGHT
                         let canSeePlayer = false;
                         const dxPlayer = player.x - enemy.x;
                         const dyPlayer = player.y - enemy.y;
@@ -1655,120 +1785,131 @@ doorsRef.current.forEach(door => {
                             }
                         }
 
-                        // React to seeing or losing sight of the player
                         if (canSeePlayer) {
-                            enemy.isAlert = true; // Active combat
+                            enemy.isAlert = true;
+                            enemy.isInvestigating = false;
                             enemy.targetX = player.x;
                             enemy.targetY = player.y;
                             enemy.searchTimer = 0;
                             enemy.isReturningToPost = false;
                             enemy.lastSeenTime = now;
                         } else {
-                            enemy.isAlert = false; // Not in active combat
-                            // If we just lost the player, the last targetX/Y is where we should investigate
-                            if (wasAlert) {
-                                enemy.targetX = lastKnownTargetX;
+                            if (enemy.isAlert) {
+                                enemy.searchTimer = 5; // Start searching if player is lost
+                            }
+                             enemy.isAlert = false;
+                        }
+                        
+                         // Check for nearby player fire to trigger suppression
+                        if (!enemy.isAlert && !enemy.suppressionTimer) {
+                            for (const wave of soundWavesRef.current) {
+                                if (wave.maxRadius > 300 * scale && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
+                                    enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
+                                    break;
+                                }
                             }
                         }
 
                         // --- STATE MACHINE ---
                         if (enemy.isAlert) {
                             // --- COMBAT STATE ---
-                             enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+                            enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
 
-                            if (enemy.type === 'advanced') {
-                                // --- ADVANCED AI COMBAT ---
-                                if (enemy.axeState !== 'idle') {
-                                    enemy.axeTimer! -= dt;
-                                    if (enemy.axeTimer! <= 0) {
-                                        if (enemy.axeState === 'windup') {
-                                            enemy.axeState = 'swing';
-                                            enemy.axeTimer = AXE_SWING_DURATION;
-                                            const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
-                                            const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
-                                            soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2 });
-                                        } else if (enemy.axeState === 'swing') {
-                                            enemy.axeState = 'recover';
-                                            enemy.axeTimer = AXE_RECOVER_DURATION;
-                                        } else if (enemy.axeState === 'recover') {
-                                            enemy.axeState = 'idle';
-                                        }
-                                    }
-                                }
-                                
-                                if (enemy.axeState === 'swing') {
-                                     const axeArc = 90 * (Math.PI / 180);
-                                     const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-                                     let angleDiff = Math.abs(enemy.direction - angleToPlayer);
-                                     if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-                                     if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
-                                        player.health = 0;
-                                        isGameOverRef.current = true;
-                                     }
-                                     const outer = (AXE_RANGE * scale);
-                                     slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
-                                } else if (distToPlayer < AXE_RANGE * scale && enemy.axeState === 'idle') {
-                                    enemy.axeState = 'windup';
-                                    enemy.axeTimer = AXE_WINDUP_DURATION;
-                                } else if (enemy.axeState === 'idle') {
-                                    if (enemy.isReloadingRifle) {
-                                        enemy.reloadRifleTimer! -= dt;
-                                        if (enemy.reloadRifleTimer! <= 0) {
-                                            enemy.isReloadingRifle = false;
-                                            enemy.rifleAmmo = 30;
-                                        }
-                                    } else if (enemy.rifleAmmo! <= 0) {
-                                        enemy.isReloadingRifle = true;
-                                        enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
-                                    } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
-                                        const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
-                                        let nearestWallT = 9999;
-                                        dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
-                                        
-                                        let hitPlayer = false, playerT = nearestWallT;
-                                        const dx = player.x - enemy.x, dy = player.y - enemy.y;
-                                        const t = dx * finalUx + dy * finalUy;
-                                        if (t > 0 && t < nearestWallT) {
-                                            const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
-                                            if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
-                                                hitPlayer = true; playerT = t;
+                            if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
+                                if (enemy.type === 'advanced') {
+                                    // --- ADVANCED AI COMBAT ---
+                                    if (enemy.axeState !== 'idle') {
+                                        enemy.axeTimer! -= dt;
+                                        if (enemy.axeTimer! <= 0) {
+                                            if (enemy.axeState === 'windup') {
+                                                enemy.axeState = 'swing';
+                                                enemy.axeTimer = AXE_SWING_DURATION;
+                                                const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
+                                                const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
+                                                soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2 });
+                                            } else if (enemy.axeState === 'swing') {
+                                                enemy.axeState = 'recover';
+                                                enemy.axeTimer = AXE_RECOVER_DURATION;
+                                            } else if (enemy.axeState === 'recover') {
+                                                enemy.axeState = 'idle';
                                             }
                                         }
-                                        const hitDist = playerT;
-                                        const hitX = enemy.x + finalUx * hitDist;
-                                        const hitY = enemy.y + finalUy * hitDist;
-                                        tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
-                                        
-                                        if (hitPlayer) {
-                                            player.health -= 15;
-                                            player.hitTimer = 0.17;
-                                            shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
-                                            if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
-                                        } else {
-                                           // wall impact fx from enemy
-                                        }
+                                    }
+                                    
+                                    if (enemy.axeState === 'swing') {
+                                         const axeArc = 90 * (Math.PI / 180);
+                                         const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+                                         let angleDiff = Math.abs(enemy.direction - angleToPlayer);
+                                         if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                                         if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
+                                            player.health = 0;
+                                            isGameOverRef.current = true;
+                                         }
+                                         const outer = (AXE_RANGE * scale);
+                                         slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
+                                    } else if (distToPlayer < AXE_RANGE * scale && enemy.axeState === 'idle') {
+                                        enemy.axeState = 'windup';
+                                        enemy.axeTimer = AXE_WINDUP_DURATION;
+                                    } else if (enemy.axeState === 'idle') {
+                                        if (enemy.isReloadingRifle) {
+                                            enemy.reloadRifleTimer! -= dt;
+                                            if (enemy.reloadRifleTimer! <= 0) {
+                                                enemy.isReloadingRifle = false;
+                                                enemy.rifleAmmo = 30;
+                                            }
+                                        } else if (enemy.rifleAmmo! <= 0) {
+                                            enemy.isReloadingRifle = true;
+                                            enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
+                                        } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
+                                            const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
+                                            let nearestWallT = 9999;
+                                            dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
+                                            
+                                            let hitPlayer = false, playerT = nearestWallT;
+                                            const dx = player.x - enemy.x, dy = player.y - enemy.y;
+                                            const t = dx * finalUx + dy * finalUy;
+                                            if (t > 0 && t < nearestWallT) {
+                                                const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
+                                                if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
+                                                    hitPlayer = true; playerT = t;
+                                                }
+                                            }
+                                            const hitDist = playerT;
+                                            const hitX = enemy.x + finalUx * hitDist;
+                                            const hitY = enemy.y + finalUy * hitDist;
+                                            tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
+                                            
+                                            if (hitPlayer) {
+                                                player.health -= 11;
+                                                player.hitTimer = 0.17;
+                                                shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
+                                                if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
+                                            } else {
+                                               // wall impact fx from enemy
+                                            }
 
-                                        enemy.rifleAmmo!--;
-                                        enemy.burstShotsFired!++;
-                                        enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
-                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
-                                        lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
+                                            enemy.rifleAmmo!--;
+                                            enemy.burstShotsFired!++;
+                                            enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
+                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
+                                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
 
-                                        if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
-                                            enemy.burstShotsFired = 0;
-                                            enemy.burstCooldown = RIFLE_BURST_PAUSE;
+                                            if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
+                                                enemy.burstShotsFired = 0;
+                                                enemy.burstCooldown = RIFLE_BURST_PAUSE;
+                                            }
                                         }
                                     }
-                                }
-                                if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
+                                    if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
 
-                            } else {
-                                // --- STANDARD AI COMBAT ---
-                                if (enemy.shootCooldown <= 0) {
-                                    bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, owner: 'enemy' });
-                                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
-                                    lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
-                                    enemy.shootCooldown = enemy.shootCooldownMax;
+                                } else {
+                                    // --- STANDARD AI COMBAT ---
+                                    if (enemy.shootCooldown <= 0) {
+                                        bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
+                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
+                                        lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
+                                        enemy.shootCooldown = enemy.shootCooldownMax;
+                                    }
                                 }
                             }
 
@@ -1785,98 +1926,75 @@ doorsRef.current.forEach(door => {
                                     enemy.targetY = enemy.patrolStartY;
                                 }
                             }
-                        } else if (enemy.targetX !== undefined && enemy.targetY !== undefined) {
+                        } else if ((enemy.isInvestigating || enemy.isReturningToPost) && enemy.targetX !== undefined && enemy.targetY !== undefined) {
                             // --- MOVING STATE (Investigating or Returning) ---
                             const targetDist = Math.hypot(enemy.x - enemy.targetX, enemy.y - enemy.targetY);
 
-                            if (targetDist > enemy.radius * 1.5) {
-                                // Move towards target
-                                const prevX = enemy.x;
-                                const prevY = enemy.y;
-
+                            if (targetDist > enemy.radius * 1.5 && (!enemy.suppressionTimer || enemy.suppressionTimer <= 0)) {
                                 let dxTarget = enemy.targetX - enemy.x, dyTarget = enemy.targetY - enemy.y;
                                 const distToTarget = Math.hypot(dxTarget, dyTarget);
-                                dxTarget /= distToTarget; dyTarget /= distToTarget;
-                                enemy.direction = Math.atan2(dyTarget, dxTarget);
-                                const newPos = { x: enemy.x + dxTarget * enemy.speed * dt, y: enemy.y + dyTarget * enemy.speed * dt };
-
-                                let collisionX = false;
-                                for (const wall of wallsRef.current) { if (checkCollision({ x: newPos.x, y: enemy.y, radius: enemy.radius }, wall)) { collisionX = true; break; } }
-                                if (!collisionX) {
-                                    for (const door of doorsRef.current) {
-                                        if (checkCollisionWithDoor({ x: newPos.x, y: enemy.y, radius: enemy.radius }, door)) {
-                                            const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
-                                            if (isClosed && !door.locked) door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
-                                            collisionX = true; break;
-                                        }
-                                    }
+                                if (distToTarget > 0) {
+                                    dxTarget /= distToTarget;
+                                    dyTarget /= distToTarget;
                                 }
-                                if (!collisionX) enemy.x = newPos.x;
-
-                                let collisionY = false;
-                                for (const wall of wallsRef.current) { if (checkCollision({ x: enemy.x, y: newPos.y, radius: enemy.radius }, wall)) { collisionY = true; break; } }
-                                if (!collisionY) {
-                                    for (const door of doorsRef.current) {
-                                        if (checkCollisionWithDoor({ x: enemy.x, y: newPos.y, radius: enemy.radius }, door)) {
-                                            const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
-                                            if (isClosed && !door.locked) door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
-                                            collisionY = true; break;
-                                        }
-                                    }
-                                }
-                                if (!collisionY) enemy.y = newPos.y;
                                 
-                                // Check if stuck
-                                const movedDistance = Math.hypot(enemy.x - prevX, enemy.y - prevY);
-                                if (movedDistance < enemy.speed * dt * 0.1) {
-                                    enemy.stuckTimer = (enemy.stuckTimer ?? 0) + dt;
-                                } else {
-                                    enemy.stuckTimer = 0;
-                                }
-
-                                if ((enemy.stuckTimer ?? 0) > 1.5) { // Stuck for 1.5s, give up and change state
-                                    enemy.stuckTimer = 0;
-                                    enemy.searchTimer = 0;
-                                    enemy.targetX = undefined;
-                                    enemy.targetY = undefined;
-
-                                    // If we were already trying to return home, stop trying to prevent loops.
-                                    // Otherwise, try to return home.
-                                    if (!enemy.isReturningToPost && enemy.patrolStartX !== undefined) {
-                                        enemy.isReturningToPost = true;
-                                        enemy.targetX = enemy.patrolStartX;
-                                        enemy.targetY = enemy.patrolStartY;
-                                    } else {
-                                        enemy.isReturningToPost = false;
+                                enemy.direction = Math.atan2(dyTarget, dxTarget);
+                                const moveSpeed = enemy.speed * (enemy.isInvestigating ? 0.7 : 1.0);
+                                let newX = enemy.x + dxTarget * moveSpeed * dt;
+                                let newY = enemy.y + dyTarget * moveSpeed * dt;
+                                
+                                let tempPos = { x: newX, y: newY };
+                                
+                                for(let i=0; i<2; i++) {
+                                    for (const wall of wallsRef.current) {
+                                        const resolved = resolveCollisionWithWall({ ...tempPos, radius: enemy.radius }, wall);
+                                        if (resolved) tempPos = resolved;
+                                    }
+                                    for (const door of doorsRef.current) {
+                                        const resolved = resolveCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                        if (resolved) {
+                                             tempPos = resolved;
+                                        } else {
+                                             // Check if trying to move through a closed door
+                                            const doorIsBlocking = checkCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                            if (doorIsBlocking) {
+                                                const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
+                                                if (isClosed && !door.locked && !isPlayerCampingDoor(door, enemy)) {
+                                                    door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+
+                                enemy.x = tempPos.x;
+                                enemy.y = tempPos.y;
 
                             } else {
-                                // Reached target
-                                enemy.targetX = undefined;
-                                enemy.targetY = undefined;
-                                enemy.stuckTimer = 0; // Reset timer on arrival
-                                if (enemy.isReturningToPost) {
-                                    enemy.isReturningToPost = false;
-                                    enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
-                                } else {
-                                    enemy.searchTimer = 3; // Search for 3 seconds
+                                // Reached target or is suppressed
+                                if (targetDist <= enemy.radius * 1.5) {
+                                    enemy.targetX = undefined;
+                                    enemy.targetY = undefined;
+                                    if (enemy.isReturningToPost) {
+                                        enemy.isReturningToPost = false;
+                                        enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
+                                    } else {
+                                        enemy.searchTimer = 3; 
+                                    }
+                                    enemy.isInvestigating = false;
                                 }
                             }
                         } else {
                             // --- IDLE STATE ---
-                            // Check for new sounds
                             for (const wave of soundWavesRef.current) {
-                                if (Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
+                                if (!enemy.isInvestigating && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
+                                    enemy.isInvestigating = true;
                                     enemy.targetX = wave.x;
                                     enemy.targetY = wave.y;
                                     enemy.isReturningToPost = false;
                                     enemy.searchTimer = 0;
                                     break;
                                 }
-                            }
-                            if (enemy.targetX === undefined) {
-                                enemy.direction += 0.03 * dt;
                             }
                         }
                     }
@@ -1886,6 +2004,7 @@ doorsRef.current.forEach(door => {
 
                 if (!wasAlert && enemy.isAlert) {
                     soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4 });
+                    enemy.reactionTimer = 0.75;
                 }
 
                 activeEnemies.push(enemy);
@@ -1943,7 +2062,7 @@ doorsRef.current.forEach(door => {
         });
   
         enemiesRef.current.forEach(enemy => {
-          if (enemy.isHit) return;
+          if (enemy.health <= 0) return;
           const brightness = getBrightnessByDistance(enemy.x, enemy.y, visionRadius);
 
           const bodyColor = enemy.isAlert ? `rgba(238, 238, 238, ${brightness})` : `rgba(153, 153, 153, ${brightness})`;
@@ -1967,6 +2086,13 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'center';
               context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
               context.fillText('???', enemy.x, enemy.y - enemy.radius - (10 * scale));
+              context.shadowBlur = 0;
+          } else if (enemy.isInvestigating) {
+              context.font = `bold ${16 * scale}px mono`;
+              context.fillStyle = `rgba(255, 255, 0, ${brightness})`;
+              context.textAlign = 'center';
+              context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+              context.fillText('?', enemy.x, enemy.y - enemy.radius - (10 * scale));
               context.shadowBlur = 0;
           }
         });
@@ -2069,15 +2195,16 @@ doorsRef.current.forEach(door => {
           wallsRef.current.forEach(wall => {
               context.strokeRect(wall.x, wall.y, wall.width, wall.height);
           });
-          
+
           doorsRef.current.forEach(door => {
-              context.save();
-              context.translate(door.hinge.x, door.hinge.y);
-              context.rotate(door.currentAngle);
-              context.beginPath();
-              context.rect(0, -door.thickness / 2, door.length, door.thickness);
-              context.stroke();
-              context.restore();
+            context.save();
+            context.translate(door.hinge.x, door.hinge.y);
+            context.rotate(door.currentAngle);
+            context.beginPath();
+            context.moveTo(0,0);
+            context.lineTo(door.length, 0);
+            context.stroke();
+            context.restore();
           });
 
           context.shadowBlur = 0;
@@ -2108,6 +2235,21 @@ doorsRef.current.forEach(door => {
       context.save();
       drawPathFromPoly(context, viewPoly);
       context.clip();
+
+      // --- NEW: Apply Field of View Mask ---
+      // This second clip intersects with the existing visibility polygon,
+      // ensuring we only see what's both in line-of-sight AND in front of the player.
+      const mouse = mousePosRef.current;
+      const playerDirection = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+      const fovAngle = 170 * (Math.PI / 180); // 170-degree field of view
+      const viewDistance = Math.hypot(canvas.width, canvas.height); // A distance larger than the screen
+
+      context.beginPath();
+      context.moveTo(player.x, player.y);
+      context.arc(player.x, player.y, viewDistance, playerDirection - fovAngle / 2, playerDirection + fovAngle / 2);
+      context.closePath();
+      context.clip();
+      // --- END NEW ---
 
       context.fillStyle = 'black';
       context.fillRect(0, 0, canvas.width, canvas.height); // Clear clipped area
@@ -2456,7 +2598,7 @@ doorsRef.current.forEach(door => {
         context.fillRect(0, 0, canvas.width, canvas.height);
 
         const boxWidth = Math.min(600 * scale, canvas.width * 0.8);
-        const boxHeight = 250 * scale;
+        const boxHeight = 320 * scale;
         const boxX = canvas.width / 2 - boxWidth / 2;
         const boxY = canvas.height / 2 - boxHeight / 2 - 20 * scale;
 
@@ -2479,23 +2621,73 @@ doorsRef.current.forEach(door => {
             if(isComplete) {
                 context.fillStyle = '#2dd4bf'; // teal-400
                 context.shadowColor = '#2dd4bf';
-                context.fillText('MISSION COMPLETE', canvas.width / 2, boxY + 80 * scale);
+                context.fillText('MISSION COMPLETE', canvas.width / 2, boxY + 60 * scale);
             } else {
                 context.fillStyle = '#f87171'; // red-400
                 context.shadowColor = '#f87171';
-                context.fillText('MISSION FAILED', canvas.width / 2, boxY + 80 * scale);
+                context.fillText('MISSION FAILED', canvas.width / 2, boxY + 60 * scale);
             }
             context.shadowBlur = 0;
 
-            // Divider line
             context.fillStyle = '#334155'; // slate-700
-            context.fillRect(boxX + 40 * scale, boxY + 120 * scale, boxWidth - 80 * scale, 2 * scale);
+            context.fillRect(boxX + 40 * scale, boxY + 90 * scale, boxWidth - 80 * scale, 2 * scale);
+            
+            context.font = `${18 * scale}px mono`;
+            context.fillStyle = '#cbd5e1';
+            context.textAlign = 'left';
+
+            const missionTime = missionTimeRef.current;
+            const minutes = Math.floor(missionTime / 60);
+            const seconds = Math.floor(missionTime % 60);
+            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            const enemiesKilled = initialEnemyCountRef.current - enemiesRef.current.length;
+            const killBonus = enemiesKilled * 100;
+            const survivalBonus = isComplete ? Math.floor(missionTime * 10) : 0;
+            const totalScore = killBonus + survivalBonus;
+
+            const statYStart = boxY + 120 * scale;
+            const statLineHeight = 28 * scale;
+            const statLabelX = boxX + 50 * scale;
+            const statValueX = boxX + boxWidth - 50 * scale;
+
+            context.fillText('MISSION TIME', statLabelX, statYStart);
+            context.fillText('HOSTILES KILLED', statLabelX, statYStart + statLineHeight);
+
+            context.textAlign = 'right';
+            context.fillText(timeString, statValueX, statYStart);
+            context.fillText(`${enemiesKilled} / ${initialEnemyCountRef.current}`, statValueX, statYStart + statLineHeight);
+            
+            if (isComplete) {
+                context.fillStyle = '#334155';
+                context.fillRect(boxX + 40 * scale, statYStart + statLineHeight * 1.6, boxWidth - 80 * scale, 1 * scale);
+                
+                context.fillStyle = '#cbd5e1';
+                context.textAlign = 'left';
+                context.fillText('KILL BONUS', statLabelX, statYStart + statLineHeight * 2.5);
+                context.fillText('SURVIVAL BONUS', statLabelX, statYStart + statLineHeight * 3.5);
+                
+                context.textAlign = 'right';
+                context.fillText(`${killBonus}`, statValueX, statYStart + statLineHeight * 2.5);
+                context.fillText(`${survivalBonus}`, statValueX, statYStart + statLineHeight * 3.5);
+
+                context.fillStyle = '#334155';
+                context.fillRect(boxX + 40 * scale, statYStart + statLineHeight * 4.3, boxWidth - 80 * scale, 1 * scale);
+                
+                context.font = `bold ${22 * scale}px mono`;
+                context.fillStyle = '#e2e8f0';
+                context.textAlign = 'left';
+                context.fillText('TOTAL SCORE', statLabelX, statYStart + statLineHeight * 5.5);
+                context.textAlign = 'right';
+                context.fillText(`${totalScore}`, statValueX, statYStart + statLineHeight * 5.5);
+            }
 
             context.font = `${24 * scale}px mono`;
-            context.fillStyle = '#e2e8f0'; // slate-200
+            context.fillStyle = '#e2e8f0';
             const promptAlpha = (Math.sin(performance.now() / 400) * 0.25 + 0.75);
             context.globalAlpha = contentAlpha * promptAlpha;
-            context.fillText("Press [R] to Return", canvas.width / 2, boxY + 180 * scale);
+            context.textAlign = 'center';
+            context.fillText("Press [R] to Return", canvas.width / 2, boxY + boxHeight + 40 * scale);
 
             context.restore();
         }
@@ -2558,12 +2750,11 @@ doorsRef.current.forEach(door => {
       if (key === 'e') {
           if (takedownHintEnemyRef.current) {
               const enemy = takedownHintEnemyRef.current;
-              // Takedowns are silent
-              takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
-              
-              const activeEnemies = enemiesRef.current.filter(e => e !== enemy);
-              enemiesRef.current = activeEnemies;
-
+              const healthBefore = enemy.health;
+              enemy.health = 0;
+              if (healthBefore > 0) {
+                takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
+              }
               takedownHintEnemyRef.current = null;
               return;
           }
