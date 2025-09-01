@@ -21,22 +21,22 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         >
           START MISSION
         </button>
-        <div className="flex justify-center gap-4">
+        <div className="flex justify-center gap-6">
           <button
             onClick={onGoToLoadout}
-            className="px-6 py-2 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
           >
             LOADOUT
           </button>
           <button
             onClick={onGoToEditor}
-            className="px-6 py-2 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
           >
             MAP EDITOR
           </button>
           <button
             onClick={onGoToSettings}
-            className="px-6 py-2 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
           >
             SETTINGS
           </button>

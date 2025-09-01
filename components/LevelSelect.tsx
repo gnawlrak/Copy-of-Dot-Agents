@@ -27,9 +27,9 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel
         <p className="text-gray-400 mt-1">{level.description}</p>
       </button>
       {isCustom && level.uuid && (
-        <div className="flex flex-col gap-2">
-          <button onClick={() => onEditLevel(level)} className="px-4 py-2 bg-blue-800 text-white rounded hover:bg-blue-700 transition-colors">Edit</button>
-          <button onClick={() => onDeleteLevel(level.uuid!)} className="px-4 py-2 bg-red-800 text-white rounded hover:bg-red-700 transition-colors">Delete</button>
+        <div className="flex flex-col gap-3">
+          <button onClick={() => onEditLevel(level)} className="px-5 py-3 bg-blue-800 text-white rounded hover:bg-blue-700 transition-colors">Edit</button>
+          <button onClick={() => onDeleteLevel(level.uuid!)} className="px-5 py-3 bg-red-800 text-white rounded hover:bg-red-700 transition-colors">Delete</button>
         </div>
       )}
     </div>
@@ -50,7 +50,7 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel
        <div className="flex items-center justify-center gap-4">
         <button
           onClick={onBack}
-          className="px-6 py-2 bg-gray-800 text-gray-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-gray-500 transition-colors duration-200"
+          className="px-8 py-3 bg-gray-800 text-gray-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-gray-500 transition-colors duration-200"
         >
           BACK TO MENU
         </button>

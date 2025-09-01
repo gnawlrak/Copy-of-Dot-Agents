@@ -164,12 +164,12 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                                         <button 
                                           onClick={() => handleThrowableChange(item.type, -1)} 
                                           disabled={(currentLoadout.throwables[item.type] || 0) === 0}
-                                          className="w-8 h-8 rounded-full bg-gray-700 text-lg font-bold disabled:opacity-50 hover:bg-gray-600">-</button>
+                                          className="w-10 h-10 rounded-full bg-gray-700 text-lg font-bold disabled:opacity-50 hover:bg-gray-600">-</button>
                                         <span className="text-2xl w-8 text-center">{currentLoadout.throwables[item.type] || 0}</span>
                                         <button 
                                           onClick={() => handleThrowableChange(item.type, 1)} 
                                           disabled={throwableTotal >= 5}
-                                          className="w-8 h-8 rounded-full bg-gray-700 text-lg font-bold disabled:opacity-50 hover:bg-gray-600">+</button>
+                                          className="w-10 h-10 rounded-full bg-gray-700 text-lg font-bold disabled:opacity-50 hover:bg-gray-600">+</button>
                                     </div>
                                 </div>
                             ))}
@@ -180,7 +180,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                 {/* Center Column: Visual display */}
                 <div className="flex flex-col items-center justify-center h-full pt-8 md:pt-0">
                     <div className="flex items-center justify-center gap-4">
-                        <button onClick={() => handleSkinChange('prev')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-12 h-12 flex items-center justify-center" aria-label="Previous skin">&lt;</button>
+                        <button onClick={() => handleSkinChange('prev')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-14 h-14 flex items-center justify-center" aria-label="Previous skin">&lt;</button>
                         
                         <div className="w-48 h-96 relative flex items-center justify-center" aria-live="polite">
                             {/* Agent Body */}
@@ -195,7 +195,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                             <div className="absolute w-32 h-4 bg-gray-700 rounded-sm" style={{ transform: 'translateY(25px)' }}></div>
                         </div>
 
-                        <button onClick={() => handleSkinChange('next')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-12 h-12 flex items-center justify-center" aria-label="Next skin">&gt;</button>
+                        <button onClick={() => handleSkinChange('next')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-14 h-14 flex items-center justify-center" aria-label="Next skin">&gt;</button>
                     </div>
                     <p className="mt-4 text-xl text-teal-300 tracking-wider h-7">{currentSkin.name}</p>
                 </div>

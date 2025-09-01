@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout } from '../App';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
@@ -353,6 +353,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
 // This can help with type inference and avoid some issues with React.FC.
 const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
   const lastTimeRef = useRef(performance.now());
   const playerRef = useRef<Player>({
@@ -389,6 +390,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const cookingThrowableRef = useRef<{ type: ThrowableType; timer: number; maxTimer: number; } | null>(null);
   let nextThrowableId = 0;
   const combatModeRef = useRef<'gun' | 'slash'>('gun');
+  const isThrowableModeRef = useRef<boolean>(false);
   const slashStateRef = useRef({
     active: false, t: 0, dur: 0.15, // seconds
     startA: 0, endA: 0, curA: 0, prevA: 0,
@@ -419,6 +421,18 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         return {ox, oy, rot};
       }
   });
+  
+    const touchStateRef = useRef({
+        movement: { id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0, dx: 0, dy: 0 },
+        aim: { id: null as number | null, lastX: 0, lastY: 0, angle: 0 },
+        fire: { id: null as number | null, lastX: 0, lastY: 0, angle: 0 },
+        reload: { id: null as number | null },
+        interact: { id: null as number | null },
+        switchWeapon: { id: null as number | null },
+        melee: { id: null as number | null },
+        throwableSelect: { id: null as number | null },
+    });
+    const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
 
 
   // Circle-Rectangle collision detection helper function
@@ -539,7 +553,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
   const fireWeapon = (dynamicSegments: Segment[]) => {
     const player = playerRef.current;
-    if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isAimingThrowableRef.current || combatModeRef.current === 'slash') return;
+    if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isThrowableModeRef.current || combatModeRef.current === 'slash') return;
     
     const currentWeapon = player.weapons[player.currentWeaponIndex];
     if (currentWeapon.ammoInMag === 0) {
@@ -1019,6 +1033,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       player.currentThrowableIndex = 0;
       player.flashTimer = 0;
       combatModeRef.current = 'gun';
+      isThrowableModeRef.current = false;
     };
     
     const resetGame = () => {
@@ -1048,6 +1063,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       isAimingThrowableRef.current = false;
       cookingThrowableRef.current = null;
       combatModeRef.current = 'gun';
+      isThrowableModeRef.current = false;
       tracersRef.current = [];
       soundWavesRef.current = [];
       shakerRef.current.waves = [];
@@ -1241,6 +1257,19 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
       const player = playerRef.current;
       const keys = keysPressedRef.current;
+      const touchState = touchStateRef.current;
+
+      if (touchState.aim.id !== null) {
+          const aimDistance = 300 * scale;
+          const angle = touchState.aim.angle;
+          mousePosRef.current.x = player.x + Math.cos(angle) * aimDistance;
+          mousePosRef.current.y = player.y + Math.sin(angle) * aimDistance;
+      } else if (touchState.fire.id !== null) {
+          const aimDistance = 300 * scale;
+          const angle = touchState.fire.angle;
+          mousePosRef.current.x = player.x + Math.cos(angle) * aimDistance;
+          mousePosRef.current.y = player.y + Math.sin(angle) * aimDistance;
+      }
 
       if(player.shootCooldown > 0) player.shootCooldown -= dt;
       if (player.flashTimer > 0) player.flashTimer -= dt;
@@ -1279,7 +1308,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
               currentWeapon.reserveAmmo -= ammoToReload;
           }
       }
-      if (isShootingRef.current && currentWeapon.automatic) {
+      if ((isShootingRef.current || touchState.fire.id !== null) && currentWeapon.automatic) {
           fireWeapon(dynamicSegments);
       }
       
@@ -1422,10 +1451,16 @@ doorsRef.current.forEach(door => {
 
       if (!isEnded) {
         let dx = 0; let dy = 0;
-        if (keys.has('w') || keys.has('arrowup')) dy -= 1;
-        if (keys.has('s') || keys.has('arrowdown')) dy += 1;
-        if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
-        if (keys.has('d') || keys.has('arrowright')) dx += 1;
+        if (touchState.movement.id !== null) {
+            dx = touchState.movement.dx;
+            dy = touchState.movement.dy;
+        } else {
+            if (keys.has('w') || keys.has('arrowup')) dy -= 1;
+            if (keys.has('s') || keys.has('arrowdown')) dy += 1;
+            if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
+            if (keys.has('d') || keys.has('arrowright')) dx += 1;
+        }
+
 
         if (dx !== 0 || dy !== 0) {
           playerMoveSoundTimerRef.current -= dt;
@@ -2098,7 +2133,8 @@ doorsRef.current.forEach(door => {
         });
         context.shadowBlur = 0;
   
-        if (!isEnded && !isAimingThrowableRef.current && combatModeRef.current === 'gun') {
+        const isAimingWithTouch = touchStateRef.current.aim.id !== null;
+        if (!isEnded && !isAimingThrowableRef.current && combatModeRef.current === 'gun' && (isAimingWithTouch || touchStateRef.current.movement.id === null)) {
           const laserEnd = getLaserEndpoint();
           const brightness = getBrightnessByDistance(laserEnd.x, laserEnd.y, visionRadius);
           context.beginPath();
@@ -2545,39 +2581,41 @@ doorsRef.current.forEach(door => {
     context.font = `${14 * scale}px mono`;
     context.fillStyle = '#a3a3a3';
     if (isAimingThrowableRef.current) {
-      context.fillText(`Release [RMB] to throw`, canvas.width - margin, weaponTextY + (20 * scale));
+      context.fillText(`Release to throw`, canvas.width - margin, weaponTextY + (20 * scale));
     } else {
-      context.fillText(`Hold [RMB] to cook`, canvas.width - margin, weaponTextY + (20 * scale));
+      context.fillText(`Hold to cook`, canvas.width - margin, weaponTextY + (20 * scale));
     }
   }
 
-      const hintTextPos = { x: player.x, y: player.y - player.radius - (20 * scale) };
-      // Display only one context hint at a time, with priority.
-      if (takedownHintEnemyRef.current) { // Priority 1: Takedown
-        const enemy = takedownHintEnemyRef.current;
-        if(pointInPoly(enemy.x, enemy.y, viewPoly)) {
-            hintTextPos.x = enemy.x;
-            hintTextPos.y = enemy.y - enemy.radius - (15 * scale);
-            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-            context.fillText("[E] Takedown", hintTextPos.x, hintTextPos.y);
-            context.shadowBlur = 0;
+      if (touchState.movement.id === null) {
+        const hintTextPos = { x: player.x, y: player.y - player.radius - (20 * scale) };
+        // Display only one context hint at a time, with priority.
+        if (takedownHintEnemyRef.current) { // Priority 1: Takedown
+          const enemy = takedownHintEnemyRef.current;
+          if(pointInPoly(enemy.x, enemy.y, viewPoly)) {
+              hintTextPos.x = enemy.x;
+              hintTextPos.y = enemy.y - enemy.radius - (15 * scale);
+              context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+              context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+              context.fillText("[E] Takedown", hintTextPos.x, hintTextPos.y);
+              context.shadowBlur = 0;
+          }
+        } else if (interactionHintDoorIdRef.current !== null && !isEnded) { // Priority 2: Door interaction
+          context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+          context.fillText("[E] Door", hintTextPos.x, hintTextPos.y);
+          context.shadowBlur = 0;
+        } else if (lockedDoorHintIdRef.current !== null && !isEnded) { // Priority 2.5: Locked Door
+          context.font = `bold ${20 * scale}px mono`; context.fillStyle = '#ef4444'; context.textAlign = 'center';
+          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+          context.fillText("LOCKED", hintTextPos.x, hintTextPos.y);
+          context.shadowBlur = 0;
+        } else if (!isEnded && !player.isReloading && currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && currentWeapon.reserveAmmo > 0) { // Priority 3: Reload
+          context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+          context.fillText("[R]", hintTextPos.x, hintTextPos.y);
+          context.shadowBlur = 0;
         }
-      } else if (interactionHintDoorIdRef.current !== null && !isEnded) { // Priority 2: Door interaction
-        context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-        context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-        context.fillText("[E] Door", hintTextPos.x, hintTextPos.y);
-        context.shadowBlur = 0;
-      } else if (lockedDoorHintIdRef.current !== null && !isEnded) { // Priority 2.5: Locked Door
-        context.font = `bold ${20 * scale}px mono`; context.fillStyle = '#ef4444'; context.textAlign = 'center';
-        context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-        context.fillText("LOCKED", hintTextPos.x, hintTextPos.y);
-        context.shadowBlur = 0;
-      } else if (!isEnded && !player.isReloading && currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && currentWeapon.reserveAmmo > 0) { // Priority 3: Reload
-        context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-        context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-        context.fillText("[R]", hintTextPos.x, hintTextPos.y);
-        context.shadowBlur = 0;
       }
       
       if (isExtractionActiveRef.current) {
@@ -2586,6 +2624,165 @@ doorsRef.current.forEach(door => {
           context.fillStyle = 'white'; context.shadowColor = '#34d399'; context.shadowBlur = 15 * scale;
           context.fillText('ALL HOSTILES NEUTRALIZED. PROCEED TO EXTRACTION.', canvas.width / 2, 50 * scale);
           context.shadowBlur = 0;
+      }
+      
+      const w = canvas.width;
+      const h = canvas.height;
+      if (isPortrait) {
+        touchButtonRectsRef.current = {
+            fire:           { x: w - 80 * scale,  y: h - 100 * scale, r: 50 * scale },
+            reload:         { x: w - 100 * scale, y: h - 210 * scale, r: 35 * scale },
+            switchWeapon:   { x: w - 180 * scale, y: h - 100 * scale, r: 35 * scale },
+            interact:       { x: w - 180 * scale, y: h - 180 * scale, r: 35 * scale },
+            melee:          { x: w - 250 * scale, y: h - 180 * scale, r: 30 * scale },
+            throwableSelect:{ x: w - 250 * scale, y: h - 100 * scale, r: 35 * scale },
+        };
+      } else { // Landscape
+        touchButtonRectsRef.current = {
+            fire:           { x: w - 80 * scale,  y: h - 80 * scale,  r: 45 * scale },
+            reload:         { x: w - 160 * scale, y: h - 150 * scale, r: 30 * scale },
+            interact:       { x: w - 80 * scale,  y: h - 160 * scale, r: 30 * scale },
+            switchWeapon:   { x: w - 220 * scale, y: h - 80 * scale,  r: 30 * scale },
+            melee:          { x: w - 220 * scale, y: h - 150 * scale, r: 30 * scale },
+            throwableSelect:{ x: w - 150 * scale, y: h - 80 * scale, r: 30 * scale },
+        };
+      }
+
+      if (touchStateRef.current.movement.id !== null || touchStateRef.current.aim.id !== null) {
+          const { movement } = touchState;
+          const joystickBaseRadius = 70 * scale;
+          const joystickNubRadius = 30 * scale;
+
+          if(movement.id !== null){
+              context.fillStyle = 'rgba(255, 255, 255, 0.1)';
+              context.beginPath();
+              context.arc(movement.startX, movement.startY, joystickBaseRadius, 0, Math.PI * 2);
+              context.fill();
+              
+              context.fillStyle = 'rgba(255, 255, 255, 0.3)';
+              context.beginPath();
+              context.arc(movement.currentX, movement.currentY, joystickNubRadius, 0, Math.PI * 2);
+              context.fill();
+          }
+
+          const drawTouchButton = (name: string, icon: string | (() => void), text?: string, glow?: boolean) => {
+            const rect = touchButtonRectsRef.current[name];
+            if (!rect) return;
+            const isPressed = (touchState as any)[name].id !== null;
+
+            context.save();
+            if(isPressed) context.globalAlpha = 0.8;
+            else context.globalAlpha = 0.5;
+
+            context.beginPath();
+            context.arc(rect.x, rect.y, rect.r, 0, Math.PI * 2);
+            context.fillStyle = isPressed ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.1)';
+            context.fill();
+            context.strokeStyle = glow ? '#2dd4bf' : 'rgba(255, 255, 255, 0.4)';
+            context.lineWidth = glow ? 4 * scale : 2 * scale;
+            if (glow) {
+                context.shadowColor = '#2dd4bf';
+                context.shadowBlur = 15 * scale;
+            }
+            context.stroke();
+            context.restore();
+
+            const iconSize = rect.r * 0.9;
+            if (typeof icon === 'function') {
+                icon();
+            } else {
+                drawIcon(context, icon, rect.x, rect.y, iconSize, 'white');
+            }
+
+            if(text) {
+                context.fillStyle = 'white';
+                context.font = `bold ${rect.r * 0.4}px mono`;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                const textX = rect.x + rect.r * 0.5;
+                const textY = rect.y - rect.r * 0.5;
+                context.shadowColor = 'black';
+                context.shadowBlur = 5 * scale;
+                context.fillText(text, textX, textY);
+                context.shadowBlur = 0;
+            }
+          }
+
+          const drawIcon = (ctx: CanvasRenderingContext2D, iconName: string, x: number, y: number, size: number, color: string) => {
+              ctx.save();
+              ctx.strokeStyle = color;
+              ctx.lineWidth = Math.max(1.5, size * 0.08);
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.translate(x, y);
+              ctx.scale(size / 24, size / 24); // Standard 24x24 grid
+              ctx.beginPath();
+              
+              switch(iconName) {
+                  case 'fire':
+                      ctx.arc(0, 0, 8, 0, Math.PI * 2);
+                      ctx.moveTo(0, -10); ctx.lineTo(0, -6);
+                      ctx.moveTo(0, 10); ctx.lineTo(0, 6);
+                      ctx.moveTo(-10, 0); ctx.lineTo(-6, 0);
+                      ctx.moveTo(10, 0); ctx.lineTo(6, 0);
+                      break;
+                  case 'reload':
+                      ctx.arc(0, 0, 8, -Math.PI/2, Math.PI);
+                      ctx.moveTo(0, -8); ctx.lineTo(3, -11); ctx.lineTo(0, -14);
+                      ctx.rect(-3, -2, 6, 4);
+                      break;
+                  case 'interact':
+                      ctx.moveTo(-6, 10); ctx.lineTo(-6, -5); ctx.arc(-4.5, -5, 1.5, Math.PI, 0);
+                      ctx.lineTo(-3, 3); ctx.arc(-1.5, 3, 1.5, Math.PI, 0);
+                      ctx.lineTo(0, -5); ctx.arc(1.5, -5, 1.5, Math.PI, 0);
+                      ctx.lineTo(3, 3); ctx.arc(4.5, 3, 1.5, Math.PI, 0);
+                      ctx.lineTo(6, -8); ctx.arc(2, -9, 4, 0, -Math.PI * 0.8, true);
+                      break;
+                  case 'switchWeapon':
+                      ctx.moveTo(-9, -4); ctx.lineTo(9, -4); ctx.lineTo(5, -8);
+                      ctx.moveTo(-9, 4); ctx.lineTo(9, 4); ctx.lineTo(5, 8);
+                      break;
+                  case 'melee':
+                      ctx.moveTo(-8, 8); ctx.lineTo(0, 0); ctx.lineTo(8, -8);
+                      ctx.lineTo(5, -11); ctx.lineTo(-11, 5); ctx.closePath();
+                      break;
+                  case 'grenade':
+                      ctx.arc(0, 2, 8, 0, Math.PI * 2);
+                      ctx.rect(-2.5, -10, 5, 4);
+                      break;
+                  case 'flashbang':
+                      ctx.rect(-5, -8, 10, 16);
+                      ctx.moveTo(-5, -8); ctx.lineTo(5, -8);
+                      break;
+                  case 'throw':
+                      ctx.arc(-2, 0, 8, Math.PI * 0.6, -Math.PI * 0.6);
+                      ctx.moveTo(6, -8); ctx.lineTo(10, -5); ctx.lineTo(6, -2);
+                      break;
+              }
+              ctx.stroke();
+              ctx.restore();
+          };
+
+          const buttons = touchButtonRectsRef.current;
+          let mainActionIcon = 'fire';
+          if(isThrowableModeRef.current) mainActionIcon = 'throw';
+          else if(combatModeRef.current === 'slash') mainActionIcon = 'melee';
+
+          drawTouchButton('fire', mainActionIcon);
+          drawTouchButton('reload', 'reload', undefined, playerRef.current.isReloading);
+          const isInteracting = !!(takedownHintEnemyRef.current || interactionHintDoorIdRef.current);
+          drawTouchButton('interact', 'interact', undefined, isInteracting);
+          drawTouchButton('switchWeapon', 'switchWeapon');
+          drawTouchButton('melee', 'melee', undefined, combatModeRef.current === 'slash');
+
+          const throwableType = player.throwableTypes[player.currentThrowableIndex];
+          const throwableCount = player.throwables[throwableType] ?? 0;
+          const drawThrowableIcon = () => {
+            if(!throwableType) return;
+            const iconSize = buttons.throwableSelect.r * 0.8;
+            drawIcon(context, throwableType, buttons.throwableSelect.x, buttons.throwableSelect.y, iconSize, 'white');
+          };
+          drawTouchButton('throwableSelect', drawThrowableIcon, `${throwableCount}`, isThrowableModeRef.current);
       }
 
       if (isEnded) {
@@ -2687,7 +2884,7 @@ doorsRef.current.forEach(door => {
             const promptAlpha = (Math.sin(performance.now() / 400) * 0.25 + 0.75);
             context.globalAlpha = contentAlpha * promptAlpha;
             context.textAlign = 'center';
-            context.fillText("Press [R] to Return", canvas.width / 2, boxY + boxHeight + 40 * scale);
+            context.fillText("Tap or Press [R] to Return", canvas.width / 2, boxY + boxHeight + 40 * scale);
 
             context.restore();
         }
@@ -2732,6 +2929,7 @@ doorsRef.current.forEach(door => {
             player.reloadTimer = 0; 
             isShootingRef.current = false;
             combatModeRef.current = 'gun';
+            isThrowableModeRef.current = false;
             isAimingThrowableRef.current = false;
             cookingThrowableRef.current = null;
         }
@@ -2814,7 +3012,12 @@ doorsRef.current.forEach(door => {
         }
         keysPressedRef.current.delete(key);
     };
-    const handleResize = () => { resetGame(); };
+    
+    const handleResize = () => { 
+        setIsPortrait(window.innerHeight > window.innerWidth);
+        resetGame(); 
+    };
+
     const handleMouseMove = (event: MouseEvent) => {
         if (isGameOverRef.current || isMissionCompleteRef.current) return;
         const rect = canvas.getBoundingClientRect();
@@ -2868,28 +3071,261 @@ const handleMouseUp = (event: MouseEvent) => {
     }
 };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+const handleTouchStart = (event: TouchEvent) => {
+    event.preventDefault();
+    if (isGameOverRef.current || isMissionCompleteRef.current) {
+      onMissionEnd();
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const w = canvas.width;
+
+    for (const touch of Array.from(event.changedTouches)) {
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        // Buttons
+        let consumed = false;
+        for(const [name, rect] of Object.entries(touchButtonRectsRef.current)) {
+            if (Math.hypot(x - rect.x, y - rect.y) < rect.r) {
+                if((touchStateRef.current as any)[name].id === null) {
+                    
+                    // Special handling for fire button to enable aim-dragging
+                    if (name === 'fire') {
+                        const fireState = touchStateRef.current.fire;
+                        fireState.id = touch.identifier;
+                        fireState.lastX = x;
+                        fireState.lastY = y;
+                        const aimState = touchStateRef.current.aim;
+                        // Initialize angle from dedicated aim stick if active, otherwise from current aim point
+                        if (aimState.id !== null) {
+                            fireState.angle = aimState.angle;
+                        } else {
+                            fireState.angle = Math.atan2(mousePosRef.current.y - playerRef.current.y, mousePosRef.current.x - playerRef.current.x);
+                        }
+                    } else {
+                        (touchStateRef.current as any)[name].id = touch.identifier;
+                    }
+                    
+                    // Handle immediate actions
+                    if (name === 'fire') {
+                        if (isThrowableModeRef.current) {
+                            const player = playerRef.current;
+                            const throwableType = player.throwableTypes[player.currentThrowableIndex];
+                            if ((player.throwables[throwableType] ?? 0) > 0 && !cookingThrowableRef.current) {
+                                isAimingThrowableRef.current = true;
+                                const maxTimer = throwableType === 'grenade' ? 4.0 : 2.5;
+                                cookingThrowableRef.current = { type: throwableType, timer: maxTimer, maxTimer: maxTimer };
+                            }
+                        } else if (combatModeRef.current === 'slash') {
+                            startSlash();
+                        } else {
+                            isShootingRef.current = true;
+                            if (!playerRef.current.weapons[playerRef.current.currentWeaponIndex].automatic) {
+                                const dynamicSegments = [...wallSegmentsRef.current];
+                                doorsRef.current.forEach(door => {
+                                    const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
+                                    const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
+                                    dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
+                                });
+                                fireWeapon(dynamicSegments);
+                            }
+                        }
+                    } else if (name === 'reload') {
+                         const player = playerRef.current;
+                         const weapon = player.weapons[player.currentWeaponIndex];
+                         if (!player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && weapon.reserveAmmo > 0) {
+                            player.isReloading = true;
+                            player.reloadTimer = weapon.reloadTime;
+                         }
+                    } else if (name === 'interact') {
+                        if (takedownHintEnemyRef.current) {
+                            const enemy = takedownHintEnemyRef.current;
+                            enemy.health = 0; // Takedown is instant kill
+                            takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
+                            takedownHintEnemyRef.current = null;
+                        } else {
+                            const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                            if (doorToInteract && !doorToInteract.locked) {
+                                const openPosition = doorToInteract.closedAngle + doorToInteract.maxOpenAngle * doorToInteract.swingDirection;
+                                const isMostlyOpen = Math.abs(doorToInteract.currentAngle - doorToInteract.closedAngle) > doorToInteract.maxOpenAngle / 2;
+                                doorToInteract.targetAngle = isMostlyOpen ? doorToInteract.closedAngle : openPosition;
+                            }
+                        }
+                    } else if (name === 'switchWeapon') {
+                        const player = playerRef.current;
+                        player.currentWeaponIndex = (player.currentWeaponIndex + 1) % player.weapons.length;
+                        player.isReloading = false; 
+                        player.reloadTimer = 0; 
+                        isShootingRef.current = false;
+                        combatModeRef.current = 'gun';
+                        isThrowableModeRef.current = false;
+                        isAimingThrowableRef.current = false;
+                        cookingThrowableRef.current = null;
+                    } else if (name === 'melee') {
+                        combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun';
+                        isThrowableModeRef.current = false;
+                        if (isAimingThrowableRef.current) {
+                            isAimingThrowableRef.current = false;
+                            cookingThrowableRef.current = null;
+                        }
+                    } else if (name === 'throwableSelect') {
+                        const player = playerRef.current;
+                        if (player.throwableTypes.length > 0) {
+                            if (isThrowableModeRef.current) {
+                                player.currentThrowableIndex = (player.currentThrowableIndex + 1) % player.throwableTypes.length;
+                            } else {
+                                isThrowableModeRef.current = true;
+                                combatModeRef.current = 'gun';
+                            }
+                        }
+                    }
+                    consumed = true;
+                    break;
+                }
+            }
+        }
+
+        if (consumed) continue;
+
+        // Aiming (right side of screen)
+        if (touchStateRef.current.aim.id === null && x > w / 2) {
+            const aim = touchStateRef.current.aim;
+            aim.id = touch.identifier;
+            aim.lastX = x;
+            aim.lastY = y;
+            aim.angle = Math.atan2(mousePosRef.current.y - playerRef.current.y, mousePosRef.current.x - playerRef.current.x);
+        }
+
+        // Movement (left side of screen)
+        if (touchStateRef.current.movement.id === null && x <= w / 2) {
+            const movement = touchStateRef.current.movement;
+            movement.id = touch.identifier;
+            movement.startX = x;
+            movement.startY = y;
+            movement.currentX = x;
+            movement.currentY = y;
+            movement.dx = 0;
+            movement.dy = 0;
+        }
+    }
+};
+
+const handleTouchMove = (event: TouchEvent) => {
+    event.preventDefault();
+    if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+
+    for (const touch of Array.from(event.changedTouches)) {
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        if (touch.identifier === touchStateRef.current.movement.id) {
+            const movement = touchStateRef.current.movement;
+            movement.currentX = x;
+            movement.currentY = y;
+            const dx = movement.currentX - movement.startX;
+            const dy = movement.currentY - movement.startY;
+            const dist = Math.hypot(dx, dy);
+            const maxDist = 60 * scaleRef.current;
+
+            if (dist > 0) {
+                const limitedDist = Math.min(dist, maxDist);
+                movement.dx = (dx / dist) * (limitedDist / maxDist);
+                movement.dy = (dy / dist) * (limitedDist / maxDist);
+                
+                movement.currentX = movement.startX + movement.dx * maxDist;
+                movement.currentY = movement.startY + movement.dy * maxDist;
+            } else {
+                movement.dx = 0;
+                movement.dy = 0;
+            }
+        } else if (touch.identifier === touchStateRef.current.aim.id) {
+            const aim = touchStateRef.current.aim;
+            const dx = x - aim.lastX;
+            // dy is not used for aiming in a top-down shooter, but we update lastY
+            const sensitivity = 0.008; // Radians per pixel
+            aim.angle += dx * sensitivity;
+            
+            aim.lastX = x;
+            aim.lastY = y;
+        } else if (touch.identifier === touchStateRef.current.fire.id) {
+            const fireState = touchStateRef.current.fire;
+            const dx = x - fireState.lastX;
+            const sensitivity = 0.008; // Radians per pixel
+            fireState.angle += dx * sensitivity;
+            
+            fireState.lastX = x;
+            fireState.lastY = y;
+        }
+    }
+};
+
+const handleTouchEnd = (event: TouchEvent) => {
+    event.preventDefault();
+    for (const touch of Array.from(event.changedTouches)) {
+        const id = touch.identifier;
+        if (id === touchStateRef.current.movement.id) {
+            const movement = touchStateRef.current.movement;
+            movement.id = null;
+            movement.dx = 0;
+            movement.dy = 0;
+        } else if (id === touchStateRef.current.aim.id) {
+            touchStateRef.current.aim.id = null;
+        } else if (id === touchStateRef.current.fire.id) {
+            touchStateRef.current.fire.id = null;
+            isShootingRef.current = false;
+            if (cookingThrowableRef.current) {
+                throwThrowable();
+                isAimingThrowableRef.current = false;
+                cookingThrowableRef.current = null;
+            }
+        } else {
+            // Reset any other buttons this touch might have been on
+            for (const key in touchStateRef.current) {
+                const state = (touchStateRef.current as any)[key];
+                if (state && state.id === id) {
+                    state.id = null;
+                }
+            }
+        }
+    }
+};
+
     window.addEventListener('resize', handleResize);
-    canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd);
+    canvas.addEventListener('touchcancel', handleTouchEnd);
 
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('resize', handleResize);
-      canvas.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+      
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('contextmenu', e => e.preventDefault());
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('contextmenu', e => e.preventDefault());
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor]);
+  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait]);
 
-  return <canvas ref={canvasRef} className="w-full h-full rounded-md" aria-label="Dot Agents game area" role="img"/>;
+  // FIX: Added a return statement to provide the canvas element, fulfilling the component's `JSX.Element` return type.
+  return <canvas ref={canvasRef} className="w-full h-full" />;
 };
 
+// FIX: Added a default export to make the component importable in other files like App.tsx.
 export default GameCanvas;
