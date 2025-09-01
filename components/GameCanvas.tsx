@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
-import { PlayerLoadout } from '../App';
+// FIX: Import VoiceCommand type from App.tsx
+import { PlayerLoadout, VoiceCommand } from '../App';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
 
@@ -69,6 +70,7 @@ type Enemy = {
   searchTimer?: number;
   isReturningToPost?: boolean;
   reactionTimer?: number;
+  moveSoundTimer?: number;
 };
 type Player = {
     x: number;
@@ -158,6 +160,7 @@ type SoundWave = {
     x: number; y: number;
     radius: number; maxRadius: number;
     lifetime: number; maxLifetime: number; // seconds
+    type: 'player_move' | 'player_shoot' | 'enemy_move' | 'enemy_shoot' | 'impact' | 'explosion' | 'door' | 'bounce' | 'slash';
 };
 type ShakeWave = {
     t: number; // time elapsed
@@ -170,12 +173,18 @@ type ShakeWave = {
     phase: number;
 };
 
+// FIX: Add voice-related props to GameCanvasProps to resolve type error in App.tsx.
 interface GameCanvasProps {
     level: LevelDefinition;
     loadout: PlayerLoadout;
     onMissionEnd: () => void;
     showSoundWaves: boolean;
     agentSkinColor: string;
+    isListening: boolean;
+    voiceStatus: string;
+    lastVoiceCommand: VoiceCommand | null;
+    onClearLastVoiceCommand: () => void;
+    onToggleVoiceRecognition: () => void;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
@@ -333,6 +342,8 @@ const drawArcWedge = (ctx: CanvasRenderingContext2D, x: number, y: number, a1: n
 }
 
 // Helper: squared distance from point (px, py) to segment (ax, ay) - (bx, by)
+// FIX: Corrected a typo in the distance calculation.
+// `const dy = py - ay;` was incorrect and has been changed to `const dy = py - cy;`.
 const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
     const vx = bx - ax;
     const vy = by - ay;
@@ -345,13 +356,14 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     const cx = ax + t * vx;
     const cy = ay + t * vy;
     const dx = px - cx;
-    const dy = py - ay;
+    const dy = py - cy;
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
 // FIX: Changed component definition from React.FC to a standard function component with an explicit JSX.Element return type.
 // This can help with type inference and avoid some issues with React.FC.
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor }: GameCanvasProps): JSX.Element => {
+// FIX: Destructure new voice-related props.
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isListening, voiceStatus, lastVoiceCommand, onClearLastVoiceCommand, onToggleVoiceRecognition }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -623,7 +635,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             } else {
                 lightsRef.current.push({ x: hitX, y: hitY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
                 impact(hitX, hitY);
-                soundWavesRef.current.push({ x: hitX, y: hitY, radius: 0, maxRadius: 200 * scaleRef.current, lifetime: 0.3, maxLifetime: 0.3 });
+                soundWavesRef.current.push({ x: hitX, y: hitY, radius: 0, maxRadius: 200 * scaleRef.current, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
                 const sparkCount = 10 + Math.floor(Math.random() * 6);
                 for (let j = 0; j < sparkCount; j++) {
                     const sparkAngle = Math.atan2(-finalUy, -finalUx) + (Math.random() - 0.5) * 1.1;
@@ -666,7 +678,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         }
     }
     
-    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: currentWeapon.soundRadius * scaleRef.current, lifetime: 0.5, maxLifetime: 0.5 });
+    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: currentWeapon.soundRadius * scaleRef.current, lifetime: 0.5, maxLifetime: 0.5, type: 'player_shoot' });
 
     lightsRef.current.push({ x: muzzleX, y: muzzleY, ttl: 0.08, life: 0.08, power: 1.0 + currentWeapon.pellets * 0.1, type: 'muzzle', openWindow: true });
     
@@ -681,7 +693,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     const mouse = mousePosRef.current;
     const ang = Math.atan2(mouse.y - player.y, mouse.x - player.x);
     const sweep = 120 * Math.PI / 180;
-    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 80 * scaleRef.current, lifetime: 0.2, maxLifetime: 0.2 });
+    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 80 * scaleRef.current, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
 
     slash.startA = ang - sweep * 0.5;
     slash.endA   = ang + sweep * 0.5;
@@ -865,7 +877,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
         // Shuffle array function
         // FIX: Changed generic arrow function to a standard generic function declaration.
-        // The `<T>` in an arrow function can sometimes be misinterpreted by the TSX parser as a JSX tag, causing a cascade of parsing errors.
+        // The `<T>` in an arrow function can sometimes be misinterpreted by the TSX parser as a cascade of parsing errors.
         function shuffleArray<T>(array: T[]): T[] {
             const shuffled = [...array];
             for (let i = shuffled.length - 1; i > 0; i--) {
@@ -908,6 +920,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 isInvestigating: false,
                 searchTimer: 0,
                 isReturningToPost: false,
+                moveSoundTimer: 0,
             };
 
             // Spawn protection: ensure enemies don't spawn inside walls.
@@ -1131,7 +1144,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         explosionsRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: rad, lifetime: 0.5, maxLifetime: 0.5, type: n.type });
         
         const soundRadius = n.type === 'grenade' ? 800 : 600;
-        soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.67, maxLifetime: 0.67 });
+        soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
         
         if (n.type === 'grenade') {
             const doorsToDestroy = new Set<number>();
@@ -1339,7 +1352,7 @@ doorsRef.current.forEach(door => {
         const soundRadius = angularSpeed > 3.0 ? 250 : 100; // Fast vs slow swing
         const midX = door.hinge.x + door.length / 2 * Math.cos(newAngle);
         const midY = door.hinge.y + door.length / 2 * Math.sin(newAngle);
-        soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.3, maxLifetime: 0.3 });
+        soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.3, maxLifetime: 0.3, type: 'door' });
         door.lastSoundTime = now;
     }
 
@@ -1466,7 +1479,7 @@ doorsRef.current.forEach(door => {
           playerMoveSoundTimerRef.current -= dt;
           if (playerMoveSoundTimerRef.current <= 0) {
               playerMoveSoundTimerRef.current = 0.3; // sound every 0.3s
-              soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2 });
+              soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'player_move' });
           }
           const len = Math.hypot(dx, dy);
           if (len > 0) {
@@ -1599,7 +1612,7 @@ doorsRef.current.forEach(door => {
                       hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                     }
                     impact(impactX, impactY);
-                    soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
+                    soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
                 } else { // hitUnitType === 'player'
                     const playerUnit = hitUnit as Player;
                     playerUnit.health -= bullet.damage;
@@ -1623,7 +1636,7 @@ doorsRef.current.forEach(door => {
             } else if (wallHit && closestT === wallHit.t) { // Wall hit is the closest
                 removed = true;
                 impact(wallHit.x, wallHit.y);
-                soundWavesRef.current.push({ x: wallHit.x, y: wallHit.y, radius: 0, maxRadius: 200 * scale, lifetime: 0.3, maxLifetime: 0.3 });
+                soundWavesRef.current.push({ x: wallHit.x, y: wallHit.y, radius: 0, maxRadius: 200 * scale, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
                 const ix = wallHit.x; const iy = wallHit.y;
                 const apx = bullet.x - ix; const apy = bullet.y - iy;
                 const al = Math.hypot(apx, apy) || 1;
@@ -1669,7 +1682,7 @@ doorsRef.current.forEach(door => {
           
           if ((collisionX || collisionY) && !throwable.hasBounced) {
             throwable.hasBounced = true;
-            soundWavesRef.current.push({ x: throwable.x, y: throwable.y, radius: 0, maxRadius: 120 * scale, lifetime: 0.2, maxLifetime: 0.2 });
+            soundWavesRef.current.push({ x: throwable.x, y: throwable.y, radius: 0, maxRadius: 120 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'bounce' });
           }
 
           if (collisionX) { throwable.vx *= bounceDamping; } else { throwable.x = newX; }
@@ -1720,7 +1733,7 @@ doorsRef.current.forEach(door => {
 
         if (castDist < slash.range - 0.5){
             const ix = player.x + Math.cos(slash.curA)*castDist; const iy = player.y + Math.sin(slash.curA)*castDist;
-            soundWavesRef.current.push({ x: ix, y: iy, radius: 0, maxRadius: 150 * scale, lifetime: 0.25, maxLifetime: 0.25 });
+            soundWavesRef.current.push({ x: ix, y: iy, radius: 0, maxRadius: 150 * scale, lifetime: 0.25, maxLifetime: 0.25, type: 'impact' });
             const angle = slash.curA + Math.PI; const sparkCount = 5;
             for (let i = 0; i < sparkCount; i++) {
                 const spread = 0.9; const finalAngle = angle + (Math.random() - 0.5) * spread;
@@ -1780,6 +1793,7 @@ doorsRef.current.forEach(door => {
                     if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
                     if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
                     if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
+                    if (enemy.moveSoundTimer && enemy.moveSoundTimer > 0) enemy.moveSoundTimer -= dt;
 
 
                     // Stun overrides everything
@@ -1838,7 +1852,7 @@ doorsRef.current.forEach(door => {
                          // Check for nearby player fire to trigger suppression
                         if (!enemy.isAlert && !enemy.suppressionTimer) {
                             for (const wave of soundWavesRef.current) {
-                                if (wave.maxRadius > 300 * scale && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
+                                if (wave.type === 'player_shoot' && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
                                     enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
                                     break;
                                 }
@@ -1861,7 +1875,7 @@ doorsRef.current.forEach(door => {
                                                 enemy.axeTimer = AXE_SWING_DURATION;
                                                 const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
                                                 const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
-                                                soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2 });
+                                                soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
                                             } else if (enemy.axeState === 'swing') {
                                                 enemy.axeState = 'recover';
                                                 enemy.axeTimer = AXE_RECOVER_DURATION;
@@ -1926,7 +1940,7 @@ doorsRef.current.forEach(door => {
                                             enemy.rifleAmmo!--;
                                             enemy.burstShotsFired!++;
                                             enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
-                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
+                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
                                             lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
 
                                             if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
@@ -1941,7 +1955,7 @@ doorsRef.current.forEach(door => {
                                     // --- STANDARD AI COMBAT ---
                                     if (enemy.shootCooldown <= 0) {
                                         bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
-                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5 });
+                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
                                         lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
                                         enemy.shootCooldown = enemy.shootCooldownMax;
                                     }
@@ -1971,6 +1985,19 @@ doorsRef.current.forEach(door => {
                                 if (distToTarget > 0) {
                                     dxTarget /= distToTarget;
                                     dyTarget /= distToTarget;
+                                }
+                                
+                                if ((enemy.moveSoundTimer || 0) <= 0) {
+                                    soundWavesRef.current.push({
+                                        x: enemy.x,
+                                        y: enemy.y,
+                                        radius: 0,
+                                        maxRadius: 120 * scale,
+                                        lifetime: 0.3,
+                                        maxLifetime: 0.3,
+                                        type: 'enemy_move'
+                                    });
+                                    enemy.moveSoundTimer = 0.4; // Cooldown
                                 }
                                 
                                 enemy.direction = Math.atan2(dyTarget, dxTarget);
@@ -2038,7 +2065,7 @@ doorsRef.current.forEach(door => {
                 if (enemy.shootCooldown > 0) enemy.shootCooldown -= dt;
 
                 if (!wasAlert && enemy.isAlert) {
-                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4 });
+                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4, type: 'enemy_shoot' });
                     enemy.reactionTimer = 0.75;
                 }
 
@@ -2121,13 +2148,6 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'center';
               context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
               context.fillText('???', enemy.x, enemy.y - enemy.radius - (10 * scale));
-              context.shadowBlur = 0;
-          } else if (enemy.isInvestigating) {
-              context.font = `bold ${16 * scale}px mono`;
-              context.fillStyle = `rgba(255, 255, 0, ${brightness})`;
-              context.textAlign = 'center';
-              context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-              context.fillText('?', enemy.x, enemy.y - enemy.radius - (10 * scale));
               context.shadowBlur = 0;
           }
         });
@@ -2380,16 +2400,74 @@ doorsRef.current.forEach(door => {
       });
       context.globalCompositeOperation = 'source-over';
 
-      if (showSoundWaves) {
+      if (showSoundWaves && !isEnded) {
+        const radarRadius = 40 * scale;
+        
+        context.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        context.lineWidth = 1 * scale;
+        context.beginPath();
+        context.arc(player.x, player.y, radarRadius, 0, Math.PI * 2);
+        context.stroke();
+        
         soundWavesRef.current.forEach(sw => {
-          // Radius is now calculated in the main logic loop for AI.
-          // We just need to calculate opacity for rendering.
           const lifeRemainingRatio = Math.max(0, sw.lifetime / sw.maxLifetime);
-          context.strokeStyle = `rgba(0, 150, 255, ${0.3 * lifeRemainingRatio})`;
-          context.lineWidth = 2 * scale;
-          context.beginPath();
-          context.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
-          context.stroke();
+
+          if (sw.type === 'enemy_shoot' || sw.type === 'enemy_move') {
+            const dx = sw.x - player.x;
+            const dy = sw.y - player.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > sw.maxRadius || dist < player.radius) return;
+
+            const angle = Math.atan2(dy, dx);
+            const distanceFade = Math.max(0, 1 - dist / sw.maxRadius);
+            const alpha = lifeRemainingRatio * distanceFade * 0.9;
+            
+            if (alpha <= 0) return;
+
+            const color = sw.type === 'enemy_shoot' ? `rgba(255, 50, 50, ${alpha})` : `rgba(255, 255, 0, ${alpha})`;
+            const arcWidth = sw.type === 'enemy_shoot' ? Math.PI / 9 : Math.PI / 12;
+            const startAngle = angle - arcWidth / 2;
+            const endAngle = angle + arcWidth / 2;
+            
+            context.lineCap = 'round';
+            context.strokeStyle = color;
+            context.lineWidth = 4 * scale;
+            context.beginPath();
+            context.arc(player.x, player.y, radarRadius, startAngle, endAngle);
+            context.stroke();
+            context.lineCap = 'butt';
+
+          } else {
+            let color: string;
+            let lineWidth = 2 * scale;
+
+            switch (sw.type) {
+                case 'player_shoot':
+                    color = `rgba(173, 216, 230, ${0.3 * lifeRemainingRatio})`;
+                    break;
+                case 'player_move':
+                    color = `rgba(255, 255, 255, ${0.2 * lifeRemainingRatio})`;
+                    break;
+                case 'explosion':
+                    color = `rgba(255, 165, 0, ${0.4 * lifeRemainingRatio})`;
+                    lineWidth = 3 * scale;
+                    break;
+                case 'impact':
+                case 'door':
+                case 'bounce':
+                case 'slash':
+                default:
+                    color = `rgba(160, 160, 160, ${0.25 * lifeRemainingRatio})`;
+                    break;
+            }
+            
+            context.strokeStyle = color;
+            context.lineWidth = lineWidth;
+            context.beginPath();
+            context.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+            context.stroke();
+          }
         });
       }
 

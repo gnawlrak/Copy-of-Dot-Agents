@@ -5,9 +5,12 @@ interface MainMenuProps {
   onGoToLoadout: () => void;
   onGoToEditor: () => void;
   onGoToSettings: () => void;
+  isListening: boolean;
+  voiceStatus: string;
+  onToggleVoice: () => void;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToSettings }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToSettings, isListening, voiceStatus, onToggleVoice }) => {
   return (
     <div className="text-center flex flex-col items-center justify-center w-full h-full">
       <div className="mb-12">
@@ -21,7 +24,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         >
           START MISSION
         </button>
-        <div className="flex justify-center gap-6">
+        <div className="flex justify-center gap-4">
           <button
             onClick={onGoToLoadout}
             className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
@@ -40,8 +43,22 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
           >
             SETTINGS
           </button>
+            <button
+              onClick={onToggleVoice}
+              className={`px-4 py-3 rounded-md border-2 transition-colors duration-200 ${
+                isListening
+                  ? 'bg-green-500 border-green-300 text-black animate-pulse'
+                  : 'bg-gray-800 border-gray-600 text-teal-300 hover:bg-gray-700 hover:border-teal-500'
+              }`}
+              title="Toggle Voice Commands"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+            </button>
         </div>
       </div>
+       <p className="text-gray-500 mt-6 h-6">{voiceStatus}</p>
     </div>
   );
 };

@@ -1,5 +1,7 @@
 {
   "name": "Dot Agents CQB",
   "description": "INTDGYISGOD + gnaWlraK",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
