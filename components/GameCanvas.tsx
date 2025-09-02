@@ -182,6 +182,7 @@ interface GameCanvasProps {
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
+const AIM_SENSITIVITY = 0.0025; // Sensitivity for mouse and touch aiming
 
 // --- Advanced AI Constants ---
 const AXE_RANGE = 50; // pixels
@@ -428,7 +429,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   
     const touchStateRef = useRef({
         movement: { id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0, dx: 0, dy: 0 },
-        aim: { id: null as number | null },
+        aim: { id: null as number | null, lastX: 0, lastY: 0 },
         fire: { id: null as number | null, lastX: 0, lastY: 0 },
         fixedFire: { id: null as number | null },
         reload: { id: null as number | null },
@@ -1165,10 +1166,11 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       const cx = canvas.width / 2;
       const cy = canvas.height / 2;
 
-      // --- New: View Rotation & Coordinate Logic ---
-      const playerDirection = Math.atan2(mouseScreenPosRef.current.y - cy, mouseScreenPosRef.current.x - cx);
-      playerDirectionRef.current = playerDirection;
+      // --- View Rotation & Coordinate Logic ---
+      const playerDirection = playerDirectionRef.current;
 
+      // Calculate world coordinates of the mouse based on its screen position
+      // This is still needed for things that use an absolute target, like throwing grenades
       const mx_s = mouseScreenPosRef.current.x - cx; // mouse screen vector
       const my_s = mouseScreenPosRef.current.y - cy;
       const rot_inv = playerDirection + Math.PI / 2; // inverse camera rotation
@@ -1180,7 +1182,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           x: mx_w + player.x,
           y: my_w + player.y,
       };
-      // --- End New ---
 
       const dynamicSegments = [...wallSegmentsRef.current];
       doorsRef.current.forEach(door => {
@@ -3134,6 +3135,12 @@ doorsRef.current.forEach(door => {
 
     const handleMouseMove = (event: MouseEvent) => {
         if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
+        
+        // --- Relative Aiming for Mouse ---
+        // event.movementX provides the delta, which is perfect for relative controls.
+        playerDirectionRef.current += event.movementX * AIM_SENSITIVITY;
+        
+        // We still need the absolute screen position for aiming throwables.
         const rect = canvas.getBoundingClientRect();
         mouseScreenPosRef.current = {
             x: event.clientX - rect.left,
@@ -3212,11 +3219,8 @@ const handleTouchStart = (event: TouchEvent) => {
                     if (name === 'fire') {
                         const fireState = touchStateRef.current.fire;
                         fireState.id = touch.identifier;
-                        fireState.lastX = x;
-                        fireState.lastY = y;
-                        if(touchStateRef.current.aim.id === null) {
-                            mouseScreenPosRef.current = { x, y };
-                        }
+                        fireState.lastX = touch.clientX;
+                        fireState.lastY = touch.clientY;
                     } else if (name === 'fixedFire') {
                         touchStateRef.current.fixedFire.id = touch.identifier;
                     } else {
@@ -3310,8 +3314,10 @@ const handleTouchStart = (event: TouchEvent) => {
         }
         
         if (touchStateRef.current.aim.id === null) {
-            touchStateRef.current.aim.id = touch.identifier;
-            mouseScreenPosRef.current = { x, y };
+            const aimState = touchStateRef.current.aim;
+            aimState.id = touch.identifier;
+            aimState.lastX = touch.clientX;
+            aimState.lastY = touch.clientY;
         }
     }
 };
@@ -3347,12 +3353,17 @@ const handleTouchMove = (event: TouchEvent) => {
             }
         } else if (touch.identifier === touchStateRef.current.fire.id) {
             const fireState = touchStateRef.current.fire;
-            fireState.lastX = x;
-            fireState.lastY = y;
-            if (touchStateRef.current.aim.id === null) {
-                mouseScreenPosRef.current = { x, y };
-            }
+            const dx = touch.clientX - fireState.lastX;
+            playerDirectionRef.current += dx * AIM_SENSITIVITY;
+            fireState.lastX = touch.clientX;
+            fireState.lastY = touch.clientY;
+            mouseScreenPosRef.current = { x, y };
         } else if (touch.identifier === touchStateRef.current.aim.id) {
+            const aimState = touchStateRef.current.aim;
+            const dx = touch.clientX - aimState.lastX;
+            playerDirectionRef.current += dx * AIM_SENSITIVITY;
+            aimState.lastX = touch.clientX;
+            aimState.lastY = touch.clientY;
             mouseScreenPosRef.current = { x, y };
         }
     }
