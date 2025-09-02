@@ -2230,10 +2230,19 @@ doorsRef.current.forEach(door => {
       
       context.save();
 
+      // Apply camera shake and center view on player
       const { ox, oy, rot } = shakerRef.current.sample(dt);
-      const cx = canvas.width / 2, cy = canvas.height / 2;
-      context.translate(cx, cy); context.rotate(rot); context.translate(-cx, -cy);
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      // Apply screen-space transformations for shake
+      context.translate(cx, cy);
+      context.rotate(rot);
+      context.translate(-cx, -cy);
       context.translate(ox, oy);
+
+      // Apply camera transformation to center on the player
+      context.translate(cx - player.x, cy - player.y);
       
       const lightPolys = lightsRef.current.map(light => ({
         light,
@@ -3087,9 +3096,21 @@ doorsRef.current.forEach(door => {
     };
 
     const handleMouseMove = (event: MouseEvent) => {
-        if (isGameOverRef.current || isMissionCompleteRef.current) return;
+        if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
         const rect = canvas.getBoundingClientRect();
-        mousePosRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top, };
+        
+        const cameraX = playerRef.current.x;
+        const cameraY = playerRef.current.y;
+        const screenCenterX = canvas.width / 2;
+        const screenCenterY = canvas.height / 2;
+        
+        const mouseScreenX = event.clientX - rect.left;
+        const mouseScreenY = event.clientY - rect.top;
+        
+        mousePosRef.current = {
+            x: mouseScreenX - screenCenterX + cameraX,
+            y: mouseScreenY - screenCenterY + cameraY,
+        };
     };
 const handleMouseDown = (event: MouseEvent) => {
     if (isGameOverRef.current || isMissionCompleteRef.current) return;
@@ -3264,7 +3285,14 @@ const handleTouchStart = (event: TouchEvent) => {
         
         if (touchStateRef.current.aim.id === null) {
             touchStateRef.current.aim.id = touch.identifier;
-            mousePosRef.current = { x, y };
+             const cameraX = playerRef.current.x;
+            const cameraY = playerRef.current.y;
+            const screenCenterX = canvas.width / 2;
+            const screenCenterY = canvas.height / 2;
+            mousePosRef.current = {
+                x: x - screenCenterX + cameraX,
+                y: y - screenCenterY + cameraY,
+            };
         }
     }
 };
@@ -3303,10 +3331,24 @@ const handleTouchMove = (event: TouchEvent) => {
             fireState.lastX = x;
             fireState.lastY = y;
             if (touchStateRef.current.aim.id === null) {
-                mousePosRef.current = { x, y };
+                const cameraX = playerRef.current.x;
+                const cameraY = playerRef.current.y;
+                const screenCenterX = canvas.width / 2;
+                const screenCenterY = canvas.height / 2;
+                 mousePosRef.current = {
+                    x: x - screenCenterX + cameraX,
+                    y: y - screenCenterY + cameraY,
+                };
             }
         } else if (touch.identifier === touchStateRef.current.aim.id) {
-            mousePosRef.current = { x, y };
+            const cameraX = playerRef.current.x;
+            const cameraY = playerRef.current.y;
+            const screenCenterX = canvas.width / 2;
+            const screenCenterY = canvas.height / 2;
+            mousePosRef.current = {
+                x: x - screenCenterX + cameraX,
+                y: y - screenCenterY + cameraY,
+            };
         }
     }
 };
