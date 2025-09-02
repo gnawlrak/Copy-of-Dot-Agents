@@ -1115,6 +1115,36 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       ctx.closePath();
     };
 
+    const startDoorInteraction = () => {
+        const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+        if (!doorToInteract || doorToInteract.locked) return;
+
+        interactingDoorIdRef.current = doorToInteract.id;
+        doorToInteract.isPlayerHolding = true;
+        doorToInteract.targetAngle = null;
+
+        const relX = playerRef.current.x - doorToInteract.hinge.x;
+        const relY = playerRef.current.y - doorToInteract.hinge.y;
+        const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
+        const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
+        const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
+        
+        const pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
+        
+        doorToInteract.angularVelocity = 1.8 * pushDirection;
+    };
+
+    const stopDoorInteraction = () => {
+        if (interactingDoorIdRef.current !== null) {
+            const door = doorsRef.current.find(d => d.id === interactingDoorIdRef.current);
+            if (door) {
+                door.isPlayerHolding = false;
+                door.angularVelocity = 0;
+            }
+            interactingDoorIdRef.current = null;
+        }
+    };
+
     const gameLoop = () => {
       const now = performance.now();
       const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
@@ -3053,23 +3083,7 @@ doorsRef.current.forEach(door => {
               
               lastEKeyPressTimeRef.current = now;
               lastInteractedDoorIdRef.current = doorToInteract.id;
-              interactingDoorIdRef.current = doorToInteract.id;
-              doorToInteract.isPlayerHolding = true;
-              doorToInteract.targetAngle = null;
-
-              const relX = playerRef.current.x - doorToInteract.hinge.x;
-              const relY = playerRef.current.y - doorToInteract.hinge.y;
-              const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
-              const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
-              const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
-              
-              let pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
-              
-              if (event.shiftKey) {
-                  pushDirection = -1;
-              }
-
-              doorToInteract.angularVelocity = 1.8 * pushDirection;
+              startDoorInteraction();
           }
       }
 
@@ -3078,14 +3092,7 @@ doorsRef.current.forEach(door => {
     const handleKeyUp = (event: KeyboardEvent) => {
         const key = event.key.toLowerCase();
         if (key === 'e') {
-            if (interactingDoorIdRef.current !== null) {
-                const door = doorsRef.current.find(d => d.id === interactingDoorIdRef.current);
-                if (door) {
-                    door.isPlayerHolding = false;
-                    door.angularVelocity = 0; 
-                }
-                interactingDoorIdRef.current = null;
-            }
+            stopDoorInteraction();
         }
         keysPressedRef.current.delete(key);
     };
@@ -3228,12 +3235,7 @@ const handleTouchStart = (event: TouchEvent) => {
                             takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
                             takedownHintEnemyRef.current = null;
                         } else {
-                            const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-                            if (doorToInteract && !doorToInteract.locked) {
-                                const openPosition = doorToInteract.closedAngle + doorToInteract.maxOpenAngle * doorToInteract.swingDirection;
-                                const isMostlyOpen = Math.abs(doorToInteract.currentAngle - doorToInteract.closedAngle) > doorToInteract.maxOpenAngle / 2;
-                                doorToInteract.targetAngle = isMostlyOpen ? doorToInteract.closedAngle : openPosition;
-                            }
+                            startDoorInteraction();
                         }
                     } else if (name === 'switchWeapon') {
                         const player = playerRef.current;
@@ -3357,34 +3359,39 @@ const handleTouchEnd = (event: TouchEvent) => {
     event.preventDefault();
     for (const touch of Array.from(event.changedTouches)) {
         const id = touch.identifier;
-        if (id === touchStateRef.current.movement.id) {
-            const movement = touchStateRef.current.movement;
-            movement.id = null;
-            movement.dx = 0;
-            movement.dy = 0;
-        } else if (id === touchStateRef.current.fire.id) {
-            touchStateRef.current.fire.id = null;
+        const touchState = touchStateRef.current;
+
+        if (id === touchState.movement.id) {
+            touchState.movement.id = null;
+            touchState.movement.dx = 0;
+            touchState.movement.dy = 0;
+        } else if (id === touchState.fire.id) {
+            touchState.fire.id = null;
             if (cookingThrowableRef.current) {
                 throwThrowable();
                 isAimingThrowableRef.current = false;
                 cookingThrowableRef.current = null;
             }
-        } else if (id === touchStateRef.current.fixedFire.id) {
-            touchStateRef.current.fixedFire.id = null;
+        } else if (id === touchState.fixedFire.id) {
+            touchState.fixedFire.id = null;
             if (cookingThrowableRef.current) {
                 throwThrowable();
                 isAimingThrowableRef.current = false;
                 cookingThrowableRef.current = null;
             }
-        } else if (id === touchStateRef.current.aim.id) {
-            touchStateRef.current.aim.id = null;
-        } else {
-            for (const key in touchStateRef.current) {
-                const state = (touchStateRef.current as any)[key];
-                if (state && state.id === id) {
-                    state.id = null;
-                }
-            }
+        } else if (id === touchState.aim.id) {
+            touchState.aim.id = null;
+        } else if (id === touchState.reload.id) {
+            touchState.reload.id = null;
+        } else if (id === touchState.interact.id) {
+            touchState.interact.id = null;
+            stopDoorInteraction();
+        } else if (id === touchState.switchWeapon.id) {
+            touchState.switchWeapon.id = null;
+        } else if (id === touchState.melee.id) {
+            touchState.melee.id = null;
+        } else if (id === touchState.throwableSelect.id) {
+            touchState.throwableSelect.id = null;
         }
     }
 };
