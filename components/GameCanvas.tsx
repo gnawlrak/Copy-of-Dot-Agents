@@ -357,6 +357,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
   const lastTimeRef = useRef(performance.now());
+  const playerDirectionRef = useRef<number>(0);
   const playerRef = useRef<Player>({
       x: 100, y: 100, radius: 10, speed: 240, health: 100, maxHealth: 100, hitTimer: 0,
       weapons: [], currentWeaponIndex: 0, shootCooldown: 0, isReloading: false, reloadTimer: 0,
@@ -367,7 +368,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const wallsRef = useRef<Array<Wall>>([]);
   const doorsRef = useRef<Array<Door>>([]);
   const wallSegmentsRef = useRef<Array<Segment>>([]); // Static wall segments for raycasting
-  const mousePosRef = useRef({ x: 0, y: 0 });
+  const mousePosRef = useRef({ x: 0, y: 0 }); // World coordinates
+  const mouseScreenPosRef = useRef({ x: 0, y: 0 }); // Screen coordinates
   const bulletsRef = useRef<Array<Bullet>>([]);
   const enemiesRef = useRef<Array<Enemy>>([]);
   const initialEnemyCountRef = useRef<number>(0);
@@ -566,8 +568,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         currentWeapon.ammoInMag--;
     }
 
-    const mouse = mousePosRef.current;
-    const baseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    const baseAngle = playerDirectionRef.current;
     
     const ux = Math.cos(baseAngle), uy = Math.sin(baseAngle);
     currentWeapon.shake(ux, uy);
@@ -680,8 +681,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     if (slash.active || slash.cdLeft > 0) return;
 
     const player = playerRef.current;
-    const mouse = mousePosRef.current;
-    const ang = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    const ang = playerDirectionRef.current;
     const sweep = 120 * Math.PI / 180;
     soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 80 * scaleRef.current, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
 
@@ -771,9 +771,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         return distToDoor < campingThreshold;
     };
 
-    const getLaserEndpoint = (): Point => {
+    const getLaserEndpoint = (playerDirection: number): Point => {
         const player = playerRef.current;
-        const mouse = mousePosRef.current;
         const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
         doorsRef.current.forEach(door => {
             const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
@@ -781,13 +780,12 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
         });
     
-        const dx = mouse.x - player.x;
-        const dy = mouse.y - player.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len;
-        const uy = dy / len;
+        // The laser direction is now fixed to the player's forward direction
+        const ux = Math.cos(playerDirection);
+        const uy = Math.sin(playerDirection);
     
-        let nearestT = len; // Default to mouse position
+        // Raycast to a long distance
+        let nearestT = Math.hypot(canvas.width, canvas.height); 
         for (const s of dynamicSegments) {
             const hit = intersectRaySegment(player.x, player.y, ux, uy, s);
             if (hit && hit.t < nearestT) {
@@ -1050,6 +1048,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           canvas.width = parent.clientWidth;
           canvas.height = parent.clientHeight;
           scaleRef.current = canvas.height / BASE_LOGICAL_HEIGHT;
+          mouseScreenPosRef.current = { x: canvas.width / 2, y: canvas.height / 2 };
       }
 
       // Calculate touch button positions right after sizing the canvas
@@ -1159,6 +1158,29 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         missionTimeRef.current += dt;
       }
       const visionRadius = Math.max(220, Math.min(520, Math.max(canvas.width, canvas.height) * 0.45)) * scale;
+      
+      const player = playerRef.current;
+      const keys = keysPressedRef.current;
+      const touchState = touchStateRef.current;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      // --- New: View Rotation & Coordinate Logic ---
+      const playerDirection = Math.atan2(mouseScreenPosRef.current.y - cy, mouseScreenPosRef.current.x - cx);
+      playerDirectionRef.current = playerDirection;
+
+      const mx_s = mouseScreenPosRef.current.x - cx; // mouse screen vector
+      const my_s = mouseScreenPosRef.current.y - cy;
+      const rot_inv = playerDirection + Math.PI / 2; // inverse camera rotation
+      const cos_rot_inv = Math.cos(rot_inv);
+      const sin_rot_inv = Math.sin(rot_inv);
+      const mx_w = mx_s * cos_rot_inv - my_s * sin_rot_inv; // mouse world vector from player
+      const my_w = mx_s * sin_rot_inv + my_s * cos_rot_inv;
+      mousePosRef.current = {
+          x: mx_w + player.x,
+          y: my_w + player.y,
+      };
+      // --- End New ---
 
       const dynamicSegments = [...wallSegmentsRef.current];
       doorsRef.current.forEach(door => {
@@ -1303,10 +1325,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           for(const s of dynamicSegments){ const hit=intersectRaySegment(px,py,dx,dy,s); if(hit) best=Math.min(best, hit.t); }
           return best;
       }
-
-      const player = playerRef.current;
-      const keys = keysPressedRef.current;
-      const touchState = touchStateRef.current;
 
       if(player.shootCooldown > 0) player.shootCooldown -= dt;
       if (player.flashTimer > 0) player.flashTimer -= dt;
@@ -1493,6 +1511,7 @@ doorsRef.current.forEach(door => {
 
       if (!isEnded) {
         let dx = 0; let dy = 0;
+        // Get screen-relative input vector
         if (touchState.movement.id !== null) {
             dx = touchState.movement.dx;
             dy = touchState.movement.dy;
@@ -1503,21 +1522,33 @@ doorsRef.current.forEach(door => {
             if (keys.has('d') || keys.has('arrowright')) dx += 1;
         }
 
-
         if (dx !== 0 || dy !== 0) {
+          // Rotate movement vector to be relative to the player's aiming direction (the camera's "up").
+          const cos_rot_move = Math.cos(playerDirection);
+          const sin_rot_move = Math.sin(playerDirection);
+
+          // The player's aiming direction is now "forward".
+          // Input (dx, dy) is from screen coordinates (WASD), where -y is forward ('W').
+          // We map screen-right (dx) to the world vector perpendicular to the aim,
+          // and screen-forward (-dy) to the world vector parallel to the aim.
+          const world_dx = (dx * -sin_rot_move) - (dy * cos_rot_move);
+          const world_dy = (dx * cos_rot_move) - (dy * sin_rot_move);
+
           playerMoveSoundTimerRef.current -= dt;
           if (playerMoveSoundTimerRef.current <= 0) {
               playerMoveSoundTimerRef.current = 0.3; // sound every 0.3s
               soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'player_move' });
           }
-          const len = Math.hypot(dx, dy);
+
+          const len = Math.hypot(world_dx, world_dy);
+          let final_dx = world_dx, final_dy = world_dy;
           if (len > 0) {
-            dx /= len;
-            dy /= len;
+            final_dx /= len;
+            final_dy /= len;
           }
           
-          let newX = player.x + dx * player.speed * dt;
-          let newY = player.y + dy * player.speed * dt;
+          let newX = player.x + final_dx * player.speed * dt;
+          let newY = player.y + final_dy * player.speed * dt;
           
           let tempPos = { x: newX, y: newY };
           
@@ -2183,7 +2214,7 @@ doorsRef.current.forEach(door => {
         context.shadowBlur = 0;
   
         if (!isEnded && !isAimingThrowableRef.current && combatModeRef.current === 'gun' && (hasUsedTouchRef.current || touchStateRef.current.movement.id === null)) {
-          const laserEnd = getLaserEndpoint();
+          const laserEnd = getLaserEndpoint(playerDirection);
           const brightness = getBrightnessByDistance(laserEnd.x, laserEnd.y, visionRadius);
           context.beginPath();
           context.moveTo(player.x, player.y);
@@ -2262,17 +2293,15 @@ doorsRef.current.forEach(door => {
 
       // Apply camera shake and center view on player
       const { ox, oy, rot } = shakerRef.current.sample(dt);
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
-
-      // Apply screen-space transformations for shake
-      context.translate(cx, cy);
-      context.rotate(rot);
-      context.translate(-cx, -cy);
+      
+      // Screen-space shake effect
       context.translate(ox, oy);
 
-      // Apply camera transformation to center on the player
-      context.translate(cx - player.x, cy - player.y);
+      // Apply camera transformation to center on the player and rotate the view
+      context.translate(cx, cy);
+      // Combine camera rotation and shake rotation
+      context.rotate(-(playerDirection + Math.PI / 2) + rot);
+      context.translate(-player.x, -player.y);
       
       const lightPolys = lightsRef.current.map(light => ({
         light,
@@ -2332,8 +2361,6 @@ doorsRef.current.forEach(door => {
       // --- NEW: Apply Field of View Mask ---
       // This second clip intersects with the existing visibility polygon,
       // ensuring we only see what's both in line-of-sight AND in front of the player.
-      const mouse = mousePosRef.current;
-      const playerDirection = Math.atan2(mouse.y - player.y, mouse.x - player.x);
       const fovAngle = 170 * (Math.PI / 180); // 170-degree field of view
       const viewDistance = Math.hypot(canvas.width, canvas.height); // A distance larger than the screen
 
@@ -2703,35 +2730,38 @@ doorsRef.current.forEach(door => {
   }
 
       if (touchState.movement.id === null) {
-        const hintTextPos = { x: player.x, y: player.y - player.radius - (20 * scale) };
-        // Display only one context hint at a time, with priority.
-        if (takedownHintEnemyRef.current) { // Priority 1: Takedown
-          const enemy = takedownHintEnemyRef.current;
-          if(pointInPoly(enemy.x, enemy.y, viewPoly)) {
-              hintTextPos.x = enemy.x;
-              hintTextPos.y = enemy.y - enemy.radius - (15 * scale);
-              context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-              context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-              context.fillText("[E] Takedown", hintTextPos.x, hintTextPos.y);
-              context.shadowBlur = 0;
+          const hintTextPos = { x: player.x, y: player.y - player.radius - (20 * scale) };
+          // Display only one context hint at a time, with priority.
+          if (takedownHintEnemyRef.current) { // Priority 1: Takedown
+            const enemy = takedownHintEnemyRef.current;
+            if(pointInPoly(enemy.x, enemy.y, viewPoly)) {
+                // Convert world pos to screen pos for hint
+                const enemyScreenPos = {
+                    x: (enemy.x - player.x) * Math.cos(-(playerDirection + Math.PI/2)) - (enemy.y - player.y) * Math.sin(-(playerDirection + Math.PI/2)) + cx,
+                    y: (enemy.x - player.x) * Math.sin(-(playerDirection + Math.PI/2)) + (enemy.y - player.y) * Math.cos(-(playerDirection + Math.PI/2)) + cy,
+                }
+                context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+                context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+                context.fillText("[E] Takedown", enemyScreenPos.x, enemyScreenPos.y - enemy.radius - (15 * scale));
+                context.shadowBlur = 0;
+            }
+          } else if (interactionHintDoorIdRef.current !== null && !isEnded) { // Priority 2: Door interaction
+            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+            context.fillText("[E] Door", cx, cy - player.radius - (20 * scale));
+            context.shadowBlur = 0;
+          } else if (lockedDoorHintIdRef.current !== null && !isEnded) { // Priority 2.5: Locked Door
+            context.font = `bold ${20 * scale}px mono`; context.fillStyle = '#ef4444'; context.textAlign = 'center';
+            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+            context.fillText("LOCKED", cx, cy - player.radius - (20 * scale));
+            context.shadowBlur = 0;
+          } else if (!isEnded && !player.isReloading && currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && currentWeapon.reserveAmmo > 0) { // Priority 3: Reload
+            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+            context.fillText("[R]", cx, cy - player.radius - (20 * scale));
+            context.shadowBlur = 0;
           }
-        } else if (interactionHintDoorIdRef.current !== null && !isEnded) { // Priority 2: Door interaction
-          context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-          context.fillText("[E] Door", hintTextPos.x, hintTextPos.y);
-          context.shadowBlur = 0;
-        } else if (lockedDoorHintIdRef.current !== null && !isEnded) { // Priority 2.5: Locked Door
-          context.font = `bold ${20 * scale}px mono`; context.fillStyle = '#ef4444'; context.textAlign = 'center';
-          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-          context.fillText("LOCKED", hintTextPos.x, hintTextPos.y);
-          context.shadowBlur = 0;
-        } else if (!isEnded && !player.isReloading && currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && currentWeapon.reserveAmmo > 0) { // Priority 3: Reload
-          context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-          context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-          context.fillText("[R]", hintTextPos.x, hintTextPos.y);
-          context.shadowBlur = 0;
         }
-      }
       
       if (isExtractionActiveRef.current) {
           context.textAlign = 'center';
@@ -3105,18 +3135,9 @@ doorsRef.current.forEach(door => {
     const handleMouseMove = (event: MouseEvent) => {
         if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
         const rect = canvas.getBoundingClientRect();
-        
-        const cameraX = playerRef.current.x;
-        const cameraY = playerRef.current.y;
-        const screenCenterX = canvas.width / 2;
-        const screenCenterY = canvas.height / 2;
-        
-        const mouseScreenX = event.clientX - rect.left;
-        const mouseScreenY = event.clientY - rect.top;
-        
-        mousePosRef.current = {
-            x: mouseScreenX - screenCenterX + cameraX,
-            y: mouseScreenY - screenCenterY + cameraY,
+        mouseScreenPosRef.current = {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
         };
     };
 const handleMouseDown = (event: MouseEvent) => {
@@ -3193,6 +3214,9 @@ const handleTouchStart = (event: TouchEvent) => {
                         fireState.id = touch.identifier;
                         fireState.lastX = x;
                         fireState.lastY = y;
+                        if(touchStateRef.current.aim.id === null) {
+                            mouseScreenPosRef.current = { x, y };
+                        }
                     } else if (name === 'fixedFire') {
                         touchStateRef.current.fixedFire.id = touch.identifier;
                     } else {
@@ -3287,14 +3311,7 @@ const handleTouchStart = (event: TouchEvent) => {
         
         if (touchStateRef.current.aim.id === null) {
             touchStateRef.current.aim.id = touch.identifier;
-             const cameraX = playerRef.current.x;
-            const cameraY = playerRef.current.y;
-            const screenCenterX = canvas.width / 2;
-            const screenCenterY = canvas.height / 2;
-            mousePosRef.current = {
-                x: x - screenCenterX + cameraX,
-                y: y - screenCenterY + cameraY,
-            };
+            mouseScreenPosRef.current = { x, y };
         }
     }
 };
@@ -3333,24 +3350,10 @@ const handleTouchMove = (event: TouchEvent) => {
             fireState.lastX = x;
             fireState.lastY = y;
             if (touchStateRef.current.aim.id === null) {
-                const cameraX = playerRef.current.x;
-                const cameraY = playerRef.current.y;
-                const screenCenterX = canvas.width / 2;
-                const screenCenterY = canvas.height / 2;
-                 mousePosRef.current = {
-                    x: x - screenCenterX + cameraX,
-                    y: y - screenCenterY + cameraY,
-                };
+                mouseScreenPosRef.current = { x, y };
             }
         } else if (touch.identifier === touchStateRef.current.aim.id) {
-            const cameraX = playerRef.current.x;
-            const cameraY = playerRef.current.y;
-            const screenCenterX = canvas.width / 2;
-            const screenCenterY = canvas.height / 2;
-            mousePosRef.current = {
-                x: x - screenCenterX + cameraX,
-                y: y - screenCenterY + cameraY,
-            };
+            mouseScreenPosRef.current = { x, y };
         }
     }
 };
