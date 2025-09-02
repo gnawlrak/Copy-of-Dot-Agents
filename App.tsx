@@ -8,6 +8,7 @@ import LoadoutMenu from './components/LoadoutMenu';
 import WeaponModificationMenu from './components/WeaponModificationMenu';
 import { ThrowableType, AGENT_SKINS } from './data/definitions';
 import { WEAPONS, WEAPON_TYPES } from './data/weapons';
+import ControlCustomizer from './components/ControlCustomizer';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
 
@@ -17,6 +18,18 @@ export interface PlayerLoadout {
   primaryAttachments: { [slot: string]: string };
   secondaryAttachments: { [slot: string]: string };
   throwables: { [key in ThrowableType]?: number };
+}
+
+// --- NEW: Types for Custom Controls ---
+export interface ControlLayout {
+    x: number; // 0-1, relative to width
+    y: number; // 0-1, relative to height
+    scale: number; // multiplier for base radius
+}
+export interface CustomControls {
+    baseScale: number; // Global scale for all buttons (e.g., 1.0)
+    opacity: number; // 0-1
+    layout: { [key: string]: ControlLayout };
 }
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
@@ -30,6 +43,22 @@ const DEFAULT_LOADOUT: PlayerLoadout = {
   },
 };
 
+const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
+    baseScale: 1.0,
+    opacity: 0.5,
+    layout: {
+        joystick:       { x: 0.078, y: 0.86, scale: 1.6 },
+        fire:           { x: 0.92,  y: 0.86, scale: 1.2 },
+        fixedFire:      { x: 0.078, y: 0.65, scale: 1.2 },
+        reload:         { x: 0.92,  y: 0.69, scale: 0.8 },
+        interact:       { x: 0.85,  y: 0.75, scale: 0.8 },
+        switchWeapon:   { x: 0.85,  y: 0.86, scale: 0.8 },
+        melee:          { x: 0.78,  y: 0.75, scale: 0.8 },
+        throwableSelect:{ x: 0.78,  y: 0.86, scale: 0.8 },
+    },
+};
+
+
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('main-menu');
   const [selectedLevel, setSelectedLevel] = useState<LevelDefinition | null>(null);
@@ -38,6 +67,7 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showSoundWaves, setShowSoundWaves] = useState(true);
   const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | null>(null);
+  const [isCustomizingControls, setIsCustomizingControls] = useState(false);
 
   const [agentSkin, setAgentSkin] = useState<string>(() => {
     try {
@@ -71,6 +101,38 @@ const App: React.FC = () => {
     }
     return DEFAULT_LOADOUT;
   });
+
+  const [customControls, setCustomControls] = useState<CustomControls>(() => {
+    try {
+        const saved = localStorage.getItem('dot_agents_custom_controls');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // Basic validation
+            if (parsed.baseScale && parsed.opacity && parsed.layout) {
+                // Merge with default to ensure all controls are present if new ones were added in an update
+                return {
+                    ...DEFAULT_CONTROLS_LAYOUT,
+                    ...parsed,
+                    layout: {
+                        ...DEFAULT_CONTROLS_LAYOUT.layout,
+                        ...parsed.layout,
+                    }
+                };
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load custom controls:", e);
+    }
+    return DEFAULT_CONTROLS_LAYOUT;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('dot_agents_custom_controls', JSON.stringify(customControls));
+    } catch (e) {
+      console.error("Failed to save custom controls:", e);
+    }
+  }, [customControls]);
 
   useEffect(() => {
     try {
@@ -159,6 +221,7 @@ const App: React.FC = () => {
                     onMissionEnd={handleMissionEnd} 
                     showSoundWaves={showSoundWaves} 
                     agentSkinColor={skinColor}
+                    customControls={customControls}
                 />
               </div>
             </div>
@@ -238,6 +301,15 @@ const App: React.FC = () => {
                 <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${showSoundWaves ? 'translate-x-6' : ''}`} />
               </button>
             </div>
+             <button
+              onClick={() => {
+                  setShowSettings(false);
+                  setIsCustomizingControls(true);
+              }}
+              className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+            >
+              CUSTOMIZE CONTROLS
+            </button>
             <button
               onClick={() => setShowSettings(false)}
               className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
@@ -246,6 +318,17 @@ const App: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+      {isCustomizingControls && (
+        <ControlCustomizer
+            initialLayout={customControls}
+            defaultLayout={DEFAULT_CONTROLS_LAYOUT}
+            onSave={(newLayout) => {
+                setCustomControls(newLayout);
+                setIsCustomizingControls(false);
+            }}
+            onClose={() => setIsCustomizingControls(false)}
+        />
       )}
     </main>
   );

@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
-// FIX: Import VoiceCommand type from App.tsx
-import { PlayerLoadout } from '../App';
+import { PlayerLoadout, CustomControls } from '../App';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
 
@@ -173,13 +172,13 @@ type ShakeWave = {
     phase: number;
 };
 
-// FIX: Add voice-related props to GameCanvasProps to resolve type error in App.tsx.
 interface GameCanvasProps {
     level: LevelDefinition;
     loadout: PlayerLoadout;
     onMissionEnd: () => void;
     showSoundWaves: boolean;
     agentSkinColor: string;
+    customControls: CustomControls;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
@@ -337,8 +336,6 @@ const drawArcWedge = (ctx: CanvasRenderingContext2D, x: number, y: number, a1: n
 }
 
 // Helper: squared distance from point (px, py) to segment (ax, ay) - (bx, by)
-// FIX: Corrected a typo in the distance calculation.
-// `const dy = py - ay;` was incorrect and has been changed to `const dy = py - cy;`.
 const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
     const vx = bx - ax;
     const vy = by - ay;
@@ -355,10 +352,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
-// FIX: Changed component definition from React.FC to a standard function component with an explicit JSX.Element return type.
-// This can help with type inference and avoid some issues with React.FC.
-// FIX: Destructure new voice-related props.
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -392,7 +386,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const lockedDoorHintIdRef = useRef<number | null>(null);
   const lastEKeyPressTimeRef = useRef<number>(0);
   const lastInteractedDoorIdRef = useRef<number | null>(null);
-  const isShootingRef = useRef<boolean>(false);
+  const isShootingRef = useRef<boolean>(false); // For mouse input ONLY
   const isAimingThrowableRef = useRef<boolean>(false);
   const cookingThrowableRef = useRef<{ type: ThrowableType; timer: number; maxTimer: number; } | null>(null);
   let nextThrowableId = 0;
@@ -432,8 +426,9 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   
     const touchStateRef = useRef({
         movement: { id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0, dx: 0, dy: 0 },
-        aim: { id: null as number | null, lastX: 0, lastY: 0, angle: 0 },
-        fire: { id: null as number | null, lastX: 0, lastY: 0, angle: 0 },
+        aim: { id: null as number | null },
+        fire: { id: null as number | null, lastX: 0, lastY: 0 },
+        fixedFire: { id: null as number | null },
         reload: { id: null as number | null },
         interact: { id: null as number | null },
         switchWeapon: { id: null as number | null },
@@ -441,7 +436,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         throwableSelect: { id: null as number | null },
     });
     const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
-
 
   // Circle-Rectangle collision detection helper function
   const checkCollision = (circle: {x: number, y: number, radius: number}, rect: {x: number, y: number, width: number, height: number}) => {
@@ -872,8 +866,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         const shootCooldownMax = 2; // seconds
 
         // Shuffle array function
-        // FIX: Changed generic arrow function to a standard generic function declaration.
-        // The `<T>` in an arrow function can sometimes be misinterpreted by the TSX parser as a cascade of parsing errors.
         function shuffleArray<T>(array: T[]): T[] {
             const shuffled = [...array];
             for (let i = shuffled.length - 1; i > 0; i--) {
@@ -1059,6 +1051,23 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           canvas.height = parent.clientHeight;
           scaleRef.current = canvas.height / BASE_LOGICAL_HEIGHT;
       }
+
+      // Calculate touch button positions right after sizing the canvas
+      const { width, height } = canvas;
+      if (width > 0 && height > 0 && customControls) {
+          const newRects: { [key: string]: { x: number; y: number; r: number } } = {};
+          const baseRadius = (height * 0.06) * customControls.baseScale;
+          for (const key in customControls.layout) {
+              const control = customControls.layout[key];
+              newRects[key] = {
+                  x: control.x * width,
+                  y: control.y * height,
+                  r: baseRadius * control.scale,
+              };
+          }
+          touchButtonRectsRef.current = newRects;
+      }
+
       setupMap();
       setupEnemies();
       initializePlayer();
@@ -1269,18 +1278,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       const keys = keysPressedRef.current;
       const touchState = touchStateRef.current;
 
-      if (touchState.aim.id !== null) {
-          const aimDistance = 300 * scale;
-          const angle = touchState.aim.angle;
-          mousePosRef.current.x = player.x + Math.cos(angle) * aimDistance;
-          mousePosRef.current.y = player.y + Math.sin(angle) * aimDistance;
-      } else if (touchState.fire.id !== null) {
-          const aimDistance = 300 * scale;
-          const angle = touchState.fire.angle;
-          mousePosRef.current.x = player.x + Math.cos(angle) * aimDistance;
-          mousePosRef.current.y = player.y + Math.sin(angle) * aimDistance;
-      }
-
       if(player.shootCooldown > 0) player.shootCooldown -= dt;
       if (player.flashTimer > 0) player.flashTimer -= dt;
       if (player.hitTimer > 0) player.hitTimer -= dt;
@@ -1318,7 +1315,12 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
               currentWeapon.reserveAmmo -= ammoToReload;
           }
       }
-      if ((isShootingRef.current || touchState.fire.id !== null) && currentWeapon.automatic) {
+      
+      const isTouchFiring = (touchState.fire.id !== null || touchState.fixedFire.id !== null) &&
+                            !isAimingThrowableRef.current &&
+                            combatModeRef.current === 'gun';
+
+      if ((isShootingRef.current || isTouchFiring) && currentWeapon.automatic) {
           fireWeapon(dynamicSegments);
       }
       
@@ -2150,8 +2152,7 @@ doorsRef.current.forEach(door => {
         });
         context.shadowBlur = 0;
   
-        const isAimingWithTouch = touchStateRef.current.aim.id !== null;
-        if (!isEnded && !isAimingThrowableRef.current && combatModeRef.current === 'gun' && (isAimingWithTouch || touchStateRef.current.movement.id === null)) {
+        if (!isEnded && !isAimingThrowableRef.current && combatModeRef.current === 'gun' && (hasUsedTouchRef.current || touchStateRef.current.movement.id === null)) {
           const laserEnd = getLaserEndpoint();
           const brightness = getBrightnessByDistance(laserEnd.x, laserEnd.y, visionRadius);
           context.beginPath();
@@ -2701,49 +2702,25 @@ doorsRef.current.forEach(door => {
           context.shadowBlur = 0;
       }
       
-      const w = canvas.width;
-      const h = canvas.height;
-      if (isPortrait) {
-        touchButtonRectsRef.current = {
-            joystick:       { x: 100 * scale, y: h - 120 * scale, r: 70 * scale },
-            fire:           { x: w - 80 * scale,  y: h - 100 * scale, r: 50 * scale },
-            reload:         { x: w - 100 * scale, y: h - 210 * scale, r: 35 * scale },
-            switchWeapon:   { x: w - 180 * scale, y: h - 100 * scale, r: 35 * scale },
-            interact:       { x: w - 180 * scale, y: h - 180 * scale, r: 35 * scale },
-            melee:          { x: w - 250 * scale, y: h - 180 * scale, r: 30 * scale },
-            throwableSelect:{ x: w - 250 * scale, y: h - 100 * scale, r: 35 * scale },
-        };
-      } else { // Landscape
-        touchButtonRectsRef.current = {
-            joystick:       { x: 100 * scale, y: h - 80 * scale,  r: 70 * scale },
-            fire:           { x: w - 80 * scale,  y: h - 80 * scale,  r: 45 * scale },
-            reload:         { x: w - 160 * scale, y: h - 150 * scale, r: 30 * scale },
-            interact:       { x: w - 80 * scale,  y: h - 160 * scale, r: 30 * scale },
-            switchWeapon:   { x: w - 220 * scale, y: h - 80 * scale,  r: 30 * scale },
-            melee:          { x: w - 220 * scale, y: h - 150 * scale, r: 30 * scale },
-            throwableSelect:{ x: w - 150 * scale, y: h - 80 * scale, r: 30 * scale },
-        };
-      }
-
       if (hasUsedTouchRef.current) {
           const { movement } = touchState;
-          const joystickBaseRadius = 70 * scale;
-          const joystickNubRadius = 30 * scale;
+          const joystickBaseRadius = touchButtonRectsRef.current.joystick?.r || 70 * scale;
+          const joystickNubRadius = joystickBaseRadius * 0.4;
 
           if(movement.id !== null){
-              context.fillStyle = 'rgba(255, 255, 255, 0.1)';
+              context.fillStyle = `rgba(255, 255, 255, ${0.1 * customControls.opacity * 2})`;
               context.beginPath();
               context.arc(movement.startX, movement.startY, joystickBaseRadius, 0, Math.PI * 2);
               context.fill();
               
-              context.fillStyle = 'rgba(255, 255, 255, 0.3)';
+              context.fillStyle = `rgba(255, 255, 255, ${0.3 * customControls.opacity * 2})`;
               context.beginPath();
               context.arc(movement.currentX, movement.currentY, joystickNubRadius, 0, Math.PI * 2);
               context.fill();
           } else {
              const joystickRect = touchButtonRectsRef.current.joystick;
              if (joystickRect) {
-                context.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                context.fillStyle = `rgba(255, 255, 255, ${0.1 * customControls.opacity * 2})`;
                 context.beginPath();
                 context.arc(joystickRect.x, joystickRect.y, joystickRect.r, 0, Math.PI * 2);
                 context.fill();
@@ -2756,8 +2733,9 @@ doorsRef.current.forEach(door => {
             const isPressed = (touchState as any)[name].id !== null;
 
             context.save();
-            if(isPressed) context.globalAlpha = 0.8;
-            else context.globalAlpha = 0.5;
+            const baseAlpha = customControls.opacity;
+            if(isPressed) context.globalAlpha = Math.min(1.0, baseAlpha * 1.6);
+            else context.globalAlpha = baseAlpha;
 
             context.beginPath();
             context.arc(rect.x, rect.y, rect.r, 0, Math.PI * 2);
@@ -2772,6 +2750,8 @@ doorsRef.current.forEach(door => {
             context.stroke();
             context.restore();
 
+            context.save();
+            context.globalAlpha = Math.min(1.0, baseAlpha * 1.8);
             const iconSize = rect.r * 0.9;
             if (typeof icon === 'function') {
                 icon();
@@ -2789,8 +2769,8 @@ doorsRef.current.forEach(door => {
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
                 context.fillText(text, textX, textY);
-                context.shadowBlur = 0;
             }
+            context.restore();
           }
 
           const drawIcon = (ctx: CanvasRenderingContext2D, iconName: string, x: number, y: number, size: number, color: string) => {
@@ -2853,6 +2833,7 @@ doorsRef.current.forEach(door => {
           if(isThrowableModeRef.current) mainActionIcon = 'throw';
           else if(combatModeRef.current === 'slash') mainActionIcon = 'melee';
 
+          drawTouchButton('fixedFire', mainActionIcon);
           drawTouchButton('fire', mainActionIcon);
           drawTouchButton('reload', 'reload', undefined, playerRef.current.isReloading);
           const isInteracting = !!(takedownHintEnemyRef.current || interactionHintDoorIdRef.current);
@@ -2864,8 +2845,10 @@ doorsRef.current.forEach(door => {
           const throwableCount = player.throwables[throwableType] ?? 0;
           const drawThrowableIcon = () => {
             if(!throwableType) return;
-            const iconSize = buttons.throwableSelect.r * 0.8;
-            drawIcon(context, throwableType, buttons.throwableSelect.x, buttons.throwableSelect.y, iconSize, 'white');
+            const throwableRect = buttons.throwableSelect;
+            if (!throwableRect) return;
+            const iconSize = throwableRect.r * 0.8;
+            drawIcon(context, throwableType, throwableRect.x, throwableRect.y, iconSize, 'white');
           };
           drawTouchButton('throwableSelect', drawThrowableIcon, `${throwableCount}`, isThrowableModeRef.current);
       }
@@ -3172,31 +3155,23 @@ const handleTouchStart = (event: TouchEvent) => {
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
 
-        // Buttons
         let consumed = false;
-        for(const [name, rect] of Object.entries(touchButtonRectsRef.current)) {
-            if (Math.hypot(x - rect.x, y - rect.y) < rect.r) {
-                if((touchStateRef.current as any)[name].id === null) {
+        for (const [name, rect] of Object.entries(touchButtonRectsRef.current)) {
+            if (name !== 'joystick' && Math.hypot(x - rect.x, y - rect.y) < rect.r) {
+                if ((touchStateRef.current as any)[name].id === null) {
                     
-                    // Special handling for fire button to enable aim-dragging
                     if (name === 'fire') {
                         const fireState = touchStateRef.current.fire;
                         fireState.id = touch.identifier;
                         fireState.lastX = x;
                         fireState.lastY = y;
-                        const aimState = touchStateRef.current.aim;
-                        // Initialize angle from dedicated aim stick if active, otherwise from current aim point
-                        if (aimState.id !== null) {
-                            fireState.angle = aimState.angle;
-                        } else {
-                            fireState.angle = Math.atan2(mousePosRef.current.y - playerRef.current.y, mousePosRef.current.x - playerRef.current.x);
-                        }
+                    } else if (name === 'fixedFire') {
+                        touchStateRef.current.fixedFire.id = touch.identifier;
                     } else {
                         (touchStateRef.current as any)[name].id = touch.identifier;
                     }
-                    
-                    // Handle immediate actions
-                    if (name === 'fire') {
+
+                    if (name === 'fire' || name === 'fixedFire') {
                         if (isThrowableModeRef.current) {
                             const player = playerRef.current;
                             const throwableType = player.throwableTypes[player.currentThrowableIndex];
@@ -3208,7 +3183,6 @@ const handleTouchStart = (event: TouchEvent) => {
                         } else if (combatModeRef.current === 'slash') {
                             startSlash();
                         } else {
-                            isShootingRef.current = true;
                             if (!playerRef.current.weapons[playerRef.current.currentWeaponIndex].automatic) {
                                 const dynamicSegments = [...wallSegmentsRef.current];
                                 doorsRef.current.forEach(door => {
@@ -3220,16 +3194,16 @@ const handleTouchStart = (event: TouchEvent) => {
                             }
                         }
                     } else if (name === 'reload') {
-                         const player = playerRef.current;
-                         const weapon = player.weapons[player.currentWeaponIndex];
-                         if (!player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && weapon.reserveAmmo > 0) {
+                        const player = playerRef.current;
+                        const weapon = player.weapons[player.currentWeaponIndex];
+                        if (!player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && weapon.reserveAmmo > 0) {
                             player.isReloading = true;
                             player.reloadTimer = weapon.reloadTime;
-                         }
+                        }
                     } else if (name === 'interact') {
                         if (takedownHintEnemyRef.current) {
                             const enemy = takedownHintEnemyRef.current;
-                            enemy.health = 0; // Takedown is instant kill
+                            enemy.health = 0;
                             takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
                             takedownHintEnemyRef.current = null;
                         } else {
@@ -3243,9 +3217,8 @@ const handleTouchStart = (event: TouchEvent) => {
                     } else if (name === 'switchWeapon') {
                         const player = playerRef.current;
                         player.currentWeaponIndex = (player.currentWeaponIndex + 1) % player.weapons.length;
-                        player.isReloading = false; 
-                        player.reloadTimer = 0; 
-                        isShootingRef.current = false;
+                        player.isReloading = false;
+                        player.reloadTimer = 0;
                         combatModeRef.current = 'gun';
                         isThrowableModeRef.current = false;
                         isAimingThrowableRef.current = false;
@@ -3276,25 +3249,22 @@ const handleTouchStart = (event: TouchEvent) => {
 
         if (consumed) continue;
 
-        // Aiming (right side of screen)
-        if (touchStateRef.current.aim.id === null && x > w / 2) {
-            const aim = touchStateRef.current.aim;
-            aim.id = touch.identifier;
-            aim.lastX = x;
-            aim.lastY = y;
-            aim.angle = Math.atan2(mousePosRef.current.y - playerRef.current.y, mousePosRef.current.x - playerRef.current.x);
-        }
-
-        // Movement (left side of screen)
-        if (touchStateRef.current.movement.id === null && x <= w / 2) {
+        const joystickRect = touchButtonRectsRef.current.joystick;
+        if (joystickRect && touchStateRef.current.movement.id === null && Math.hypot(x - joystickRect.x, y - joystickRect.y) < joystickRect.r) {
             const movement = touchStateRef.current.movement;
             movement.id = touch.identifier;
-            movement.startX = x;
-            movement.startY = y;
+            movement.startX = joystickRect.x;
+            movement.startY = joystickRect.y;
             movement.currentX = x;
             movement.currentY = y;
             movement.dx = 0;
             movement.dy = 0;
+            continue;
+        }
+        
+        if (touchStateRef.current.aim.id === null) {
+            touchStateRef.current.aim.id = touch.identifier;
+            mousePosRef.current = { x, y };
         }
     }
 };
@@ -3315,7 +3285,7 @@ const handleTouchMove = (event: TouchEvent) => {
             const dx = movement.currentX - movement.startX;
             const dy = movement.currentY - movement.startY;
             const dist = Math.hypot(dx, dy);
-            const maxDist = 60 * scaleRef.current;
+            const maxDist = touchButtonRectsRef.current.joystick?.r || 60 * scaleRef.current;
 
             if (dist > 0) {
                 const limitedDist = Math.min(dist, maxDist);
@@ -3328,23 +3298,15 @@ const handleTouchMove = (event: TouchEvent) => {
                 movement.dx = 0;
                 movement.dy = 0;
             }
-        } else if (touch.identifier === touchStateRef.current.aim.id) {
-            const aim = touchStateRef.current.aim;
-            const dx = x - aim.lastX;
-            // dy is not used for aiming in a top-down shooter, but we update lastY
-            const sensitivity = 0.008; // Radians per pixel
-            aim.angle += dx * sensitivity;
-            
-            aim.lastX = x;
-            aim.lastY = y;
         } else if (touch.identifier === touchStateRef.current.fire.id) {
             const fireState = touchStateRef.current.fire;
-            const dx = x - fireState.lastX;
-            const sensitivity = 0.008; // Radians per pixel
-            fireState.angle += dx * sensitivity;
-            
             fireState.lastX = x;
             fireState.lastY = y;
+            if (touchStateRef.current.aim.id === null) {
+                mousePosRef.current = { x, y };
+            }
+        } else if (touch.identifier === touchStateRef.current.aim.id) {
+            mousePosRef.current = { x, y };
         }
     }
 };
@@ -3358,18 +3320,23 @@ const handleTouchEnd = (event: TouchEvent) => {
             movement.id = null;
             movement.dx = 0;
             movement.dy = 0;
-        } else if (id === touchStateRef.current.aim.id) {
-            touchStateRef.current.aim.id = null;
         } else if (id === touchStateRef.current.fire.id) {
             touchStateRef.current.fire.id = null;
-            isShootingRef.current = false;
             if (cookingThrowableRef.current) {
                 throwThrowable();
                 isAimingThrowableRef.current = false;
                 cookingThrowableRef.current = null;
             }
+        } else if (id === touchStateRef.current.fixedFire.id) {
+            touchStateRef.current.fixedFire.id = null;
+            if (cookingThrowableRef.current) {
+                throwThrowable();
+                isAimingThrowableRef.current = false;
+                cookingThrowableRef.current = null;
+            }
+        } else if (id === touchStateRef.current.aim.id) {
+            touchStateRef.current.aim.id = null;
         } else {
-            // Reset any other buttons this touch might have been on
             for (const key in touchStateRef.current) {
                 const state = (touchStateRef.current as any)[key];
                 if (state && state.id === id) {
@@ -3409,11 +3376,9 @@ const handleTouchEnd = (event: TouchEvent) => {
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait]);
+  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls]);
 
-  // FIX: Added a return statement to provide the canvas element, fulfilling the component's `JSX.Element` return type.
   return <canvas ref={canvasRef} className="w-full h-full" />;
 };
 
-// FIX: Added a default export to make the component importable in other files like App.tsx.
 export default GameCanvas;
