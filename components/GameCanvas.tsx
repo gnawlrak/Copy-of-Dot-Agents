@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 // FIX: Import VoiceCommand type from App.tsx
-import { PlayerLoadout, VoiceCommand } from '../App';
+import { PlayerLoadout } from '../App';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
 
@@ -180,11 +180,6 @@ interface GameCanvasProps {
     onMissionEnd: () => void;
     showSoundWaves: boolean;
     agentSkinColor: string;
-    isListening: boolean;
-    voiceStatus: string;
-    lastVoiceCommand: VoiceCommand | null;
-    onClearLastVoiceCommand: () => void;
-    onToggleVoiceRecognition: () => void;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
@@ -363,7 +358,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
 // FIX: Changed component definition from React.FC to a standard function component with an explicit JSX.Element return type.
 // This can help with type inference and avoid some issues with React.FC.
 // FIX: Destructure new voice-related props.
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isListening, voiceStatus, lastVoiceCommand, onClearLastVoiceCommand, onToggleVoiceRecognition }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -433,6 +428,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         return {ox, oy, rot};
       }
   });
+  const hasUsedTouchRef = useRef<boolean>(false);
   
     const touchStateRef = useRef({
         movement: { id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0, dx: 0, dy: 0 },
@@ -1056,6 +1052,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       missionEndTimeRef.current = null;
       isExtractionActiveRef.current = false;
       missionTimeRef.current = 0;
+      hasUsedTouchRef.current = false;
       const parent = canvas.parentElement;
       if (parent) {
           canvas.width = parent.clientWidth;
@@ -2708,6 +2705,7 @@ doorsRef.current.forEach(door => {
       const h = canvas.height;
       if (isPortrait) {
         touchButtonRectsRef.current = {
+            joystick:       { x: 100 * scale, y: h - 120 * scale, r: 70 * scale },
             fire:           { x: w - 80 * scale,  y: h - 100 * scale, r: 50 * scale },
             reload:         { x: w - 100 * scale, y: h - 210 * scale, r: 35 * scale },
             switchWeapon:   { x: w - 180 * scale, y: h - 100 * scale, r: 35 * scale },
@@ -2717,6 +2715,7 @@ doorsRef.current.forEach(door => {
         };
       } else { // Landscape
         touchButtonRectsRef.current = {
+            joystick:       { x: 100 * scale, y: h - 80 * scale,  r: 70 * scale },
             fire:           { x: w - 80 * scale,  y: h - 80 * scale,  r: 45 * scale },
             reload:         { x: w - 160 * scale, y: h - 150 * scale, r: 30 * scale },
             interact:       { x: w - 80 * scale,  y: h - 160 * scale, r: 30 * scale },
@@ -2726,7 +2725,7 @@ doorsRef.current.forEach(door => {
         };
       }
 
-      if (touchStateRef.current.movement.id !== null || touchStateRef.current.aim.id !== null) {
+      if (hasUsedTouchRef.current) {
           const { movement } = touchState;
           const joystickBaseRadius = 70 * scale;
           const joystickNubRadius = 30 * scale;
@@ -2741,6 +2740,14 @@ doorsRef.current.forEach(door => {
               context.beginPath();
               context.arc(movement.currentX, movement.currentY, joystickNubRadius, 0, Math.PI * 2);
               context.fill();
+          } else {
+             const joystickRect = touchButtonRectsRef.current.joystick;
+             if (joystickRect) {
+                context.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                context.beginPath();
+                context.arc(joystickRect.x, joystickRect.y, joystickRect.r, 0, Math.PI * 2);
+                context.fill();
+             }
           }
 
           const drawTouchButton = (name: string, icon: string | (() => void), text?: string, glow?: boolean) => {
@@ -3150,6 +3157,9 @@ const handleMouseUp = (event: MouseEvent) => {
 };
 
 const handleTouchStart = (event: TouchEvent) => {
+    if (!hasUsedTouchRef.current) {
+        hasUsedTouchRef.current = true;
+    }
     event.preventDefault();
     if (isGameOverRef.current || isMissionCompleteRef.current) {
       onMissionEnd();

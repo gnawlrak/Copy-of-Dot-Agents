@@ -9,27 +9,6 @@ import WeaponModificationMenu from './components/WeaponModificationMenu';
 import { ThrowableType, AGENT_SKINS } from './data/definitions';
 import { WEAPONS, WEAPON_TYPES } from './data/weapons';
 
-// FIX: Add type definitions for SpeechRecognition API to resolve compilation errors.
-interface SpeechRecognition extends EventTarget {
-    lang: string;
-    interimResults: boolean;
-    maxAlternatives: number;
-    continuous: boolean;
-    onstart: (() => void) | null;
-    onresult: ((event: any) => void) | null;
-    onerror: ((event: any) => void) | null;
-    onend: (() => void) | null;
-    start: () => void;
-    stop: () => void;
-}
-
-declare global {
-    interface Window {
-        SpeechRecognition: { new(): SpeechRecognition };
-        webkitSpeechRecognition: { new(): SpeechRecognition };
-    }
-}
-
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
 
 export interface PlayerLoadout {
@@ -38,11 +17,6 @@ export interface PlayerLoadout {
   primaryAttachments: { [slot: string]: string };
   secondaryAttachments: { [slot: string]: string };
   throwables: { [key in ThrowableType]?: number };
-}
-
-export interface VoiceCommand {
-    command: string;
-    timestamp: number;
 }
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
@@ -64,13 +38,6 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showSoundWaves, setShowSoundWaves] = useState(true);
   const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | null>(null);
-
-  // --- Voice Command State ---
-  const [isListening, setIsListening] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState('点击麦克风开始');
-  const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-
 
   const [agentSkin, setAgentSkin] = useState<string>(() => {
     try {
@@ -121,74 +88,6 @@ const App: React.FC = () => {
     }
   }, [playerLoadout]);
   
-  const setupSpeechRecognition = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setVoiceStatus("浏览器不支持语音识别");
-      return null;
-    }
-    
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'zh-CN, en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setVoiceStatus("聆听中...");
-    };
-
-    recognition.onresult = (event) => {
-      const command = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
-      setVoiceStatus(`指令: ${command}`);
-      setLastVoiceCommand({ command, timestamp: Date.now() });
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === 'no-speech') {
-        setVoiceStatus("未检测到语音");
-      } else if (event.error === 'not-allowed') {
-        setVoiceStatus("麦克风权限被拒绝");
-      } else {
-        setVoiceStatus("语音识别错误");
-      }
-      setIsListening(false);
-    };
-    
-    recognition.onend = () => {
-      setIsListening(false);
-       if (voiceStatus === "聆听中...") {
-           setVoiceStatus("点击麦克风开始");
-       }
-    };
-    
-    return recognition;
-  }
-
-  const toggleVoiceRecognition = useCallback(() => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      if (!recognitionRef.current || recognitionRef.current.onend === null) {
-          recognitionRef.current = setupSpeechRecognition();
-      }
-      if (recognitionRef.current) {
-          try {
-            recognitionRef.current.start();
-          } catch(e) {
-             // Handle case where it's already started
-             setIsListening(false);
-          }
-      }
-    }
-  }, [isListening, voiceStatus]);
-  
-  const clearLastVoiceCommand = useCallback(() => {
-    setLastVoiceCommand(null);
-  }, []);
-
-
   const handleStartMission = () => {
     setGameState('level-select');
   };
@@ -260,11 +159,6 @@ const App: React.FC = () => {
                     onMissionEnd={handleMissionEnd} 
                     showSoundWaves={showSoundWaves} 
                     agentSkinColor={skinColor}
-                    isListening={isListening}
-                    voiceStatus={voiceStatus}
-                    lastVoiceCommand={lastVoiceCommand}
-                    onClearLastVoiceCommand={clearLastVoiceCommand}
-                    onToggleVoiceRecognition={toggleVoiceRecognition}
                 />
               </div>
             </div>
@@ -321,9 +215,6 @@ const App: React.FC = () => {
             onGoToLoadout={handleGoToLoadout} 
             onGoToEditor={() => handleGoToEditor(null)} 
             onGoToSettings={() => setShowSettings(true)}
-            isListening={isListening}
-            voiceStatus={voiceStatus}
-            onToggleVoice={toggleVoiceRecognition}
         />;
     }
   };
