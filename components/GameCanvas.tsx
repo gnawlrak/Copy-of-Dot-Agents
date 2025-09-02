@@ -179,10 +179,11 @@ interface GameCanvasProps {
     showSoundWaves: boolean;
     agentSkinColor: string;
     customControls: CustomControls;
+    aimSensitivity: number;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
-const AIM_SENSITIVITY = 0.0025; // Sensitivity for mouse and touch aiming
+const BASE_AIM_SENSITIVITY = 0.0025; // Base sensitivity for mouse and touch aiming
 
 // --- Advanced AI Constants ---
 const AXE_RANGE = 50; // pixels
@@ -353,7 +354,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -3138,7 +3139,7 @@ doorsRef.current.forEach(door => {
         
         // --- Relative Aiming for Mouse ---
         // event.movementX provides the delta, which is perfect for relative controls.
-        playerDirectionRef.current += event.movementX * AIM_SENSITIVITY;
+        playerDirectionRef.current += event.movementX * BASE_AIM_SENSITIVITY * aimSensitivity;
         
         // We still need the absolute screen position for aiming throwables.
         const rect = canvas.getBoundingClientRect();
@@ -3354,14 +3355,14 @@ const handleTouchMove = (event: TouchEvent) => {
         } else if (touch.identifier === touchStateRef.current.fire.id) {
             const fireState = touchStateRef.current.fire;
             const dx = touch.clientX - fireState.lastX;
-            playerDirectionRef.current += dx * AIM_SENSITIVITY;
+            playerDirectionRef.current += dx * BASE_AIM_SENSITIVITY * aimSensitivity;
             fireState.lastX = touch.clientX;
             fireState.lastY = touch.clientY;
             mouseScreenPosRef.current = { x, y };
         } else if (touch.identifier === touchStateRef.current.aim.id) {
             const aimState = touchStateRef.current.aim;
             const dx = touch.clientX - aimState.lastX;
-            playerDirectionRef.current += dx * AIM_SENSITIVITY;
+            playerDirectionRef.current += dx * BASE_AIM_SENSITIVITY * aimSensitivity;
             aimState.lastX = touch.clientX;
             aimState.lastY = touch.clientY;
             mouseScreenPosRef.current = { x, y };
@@ -3439,7 +3440,7 @@ const handleTouchEnd = (event: TouchEvent) => {
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls]);
+  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls, aimSensitivity]);
 
   return <canvas ref={canvasRef} className="w-full h-full" />;
 };

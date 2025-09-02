@@ -69,6 +69,29 @@ const App: React.FC = () => {
   const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | null>(null);
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
 
+  const [aimSensitivity, setAimSensitivity] = useState<number>(() => {
+    try {
+        const saved = localStorage.getItem('dot_agents_aim_sensitivity');
+        if (saved) {
+            const parsed = parseFloat(saved);
+            if (!isNaN(parsed) && parsed >= 0.5 && parsed <= 2.0) {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load aim sensitivity:", e);
+    }
+    return 1.0; // Default value
+  });
+
+  useEffect(() => {
+    try {
+        localStorage.setItem('dot_agents_aim_sensitivity', aimSensitivity.toString());
+    } catch (e) {
+        console.error("Failed to save aim sensitivity:", e);
+    }
+  }, [aimSensitivity]);
+
   const [agentSkin, setAgentSkin] = useState<string>(() => {
     try {
       const savedSkin = localStorage.getItem('dot_agents_agent_skin');
@@ -222,6 +245,7 @@ const App: React.FC = () => {
                     showSoundWaves={showSoundWaves} 
                     agentSkinColor={skinColor}
                     customControls={customControls}
+                    aimSensitivity={aimSensitivity}
                 />
               </div>
             </div>
@@ -289,6 +313,24 @@ const App: React.FC = () => {
         <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
             <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
+            
+            <div className="flex flex-col gap-2 py-4">
+              <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
+                <span>Aim Sensitivity</span>
+                <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
+              </label>
+              <input
+                id="sensitivity-slider"
+                type="range"
+                min="0.5"
+                max="2.0"
+                step="0.05"
+                value={aimSensitivity}
+                onChange={(e) => setAimSensitivity(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+            
             <div className="flex items-center justify-between py-4">
               <span className="text-lg text-gray-300" id="sound-waves-label">Show Sound Waves</span>
               <button
