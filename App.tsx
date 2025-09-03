@@ -1,4 +1,7 @@
 
+
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
@@ -13,6 +16,7 @@ import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
+export type Difficulty = 'simple' | 'normal' | 'hard';
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
   primary: 'Assault Rifle',
@@ -40,6 +44,7 @@ const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
         melee:          { x: 0.78,  y: 0.75, scale: 0.8 },
         throwableSelect:{ x: 0.78,  y: 0.86, scale: 0.8 },
         fireModeSwitch: { x: 0.78,  y: 0.65, scale: 0.8 },
+        heal:           { x: 0.85,  y: 0.65, scale: 0.8 },
     },
 };
 
@@ -53,6 +58,7 @@ const App: React.FC = () => {
   const [showSoundWaves, setShowSoundWaves] = useState(true);
   const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | null>(null);
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>('simple');
 
   const [aimSensitivity, setAimSensitivity] = useState<number>(() => {
     try {
@@ -234,6 +240,7 @@ const App: React.FC = () => {
                     onAimSensitivityChange={setAimSensitivity}
                     onCustomControlsChange={setCustomControls}
                     defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
+                    difficulty={difficulty}
                 />
               </div>
             </div>
@@ -251,6 +258,8 @@ const App: React.FC = () => {
           onEditLevel={(level) => handleGoToEditor(level)}
           onDeleteLevel={handleDeleteLevel}
           onCreateNew={() => handleGoToEditor(null)}
+          difficulty={difficulty}
+          onDifficultyChange={setDifficulty}
         />;
       case 'map-editor':
         return (

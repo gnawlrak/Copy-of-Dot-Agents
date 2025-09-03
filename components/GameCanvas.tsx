@@ -1,10 +1,14 @@
 
+
+
+
 import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
 import ControlCustomizer from './ControlCustomizer';
+import { Difficulty } from '../App';
 
 // Define types for geometry
 type Point = { x: number; y: number };
@@ -91,6 +95,9 @@ type Player = {
     throwableTypes: ThrowableType[];
     currentThrowableIndex: number;
     flashTimer: number; // seconds
+    medkits: number;
+    isHealing: boolean;
+    healTimer: number;
 }
 type Light = {
   x: number;
@@ -186,10 +193,16 @@ interface GameCanvasProps {
     onAimSensitivityChange: (value: number) => void;
     onCustomControlsChange: (layout: CustomControls) => void;
     defaultControlsLayout: CustomControls;
+    difficulty: Difficulty;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
 const BASE_AIM_SENSITIVITY = 0.0025; // Base sensitivity for mouse and touch aiming
+
+// --- Manual Healing Constants ---
+const HEAL_DURATION = 2.0; // seconds
+const HEAL_AMOUNT = 40; // HP
+const INITIAL_MEDKITS = 2;
 
 // --- Advanced AI Constants ---
 const AXE_RANGE = 50; // pixels
@@ -360,7 +373,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -369,7 +382,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const playerRef = useRef<Player>({
       x: 100, y: 100, radius: 10, speed: 240, health: 100, maxHealth: 100, hitTimer: 0,
       weapons: [], currentWeaponIndex: 0, shootCooldown: 0, isReloading: false, reloadTimer: 0,
-      throwables: {}, throwableTypes: [], currentThrowableIndex: 0, flashTimer: 0
+      throwables: {}, throwableTypes: [], currentThrowableIndex: 0, flashTimer: 0, 
+      medkits: 0, isHealing: false, healTimer: 0
   });
   const playerMoveSoundTimerRef = useRef<number>(0);
   const keysPressedRef = useRef<Set<string>>(new Set());
@@ -456,6 +470,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         melee: { id: null as number | null },
         throwableSelect: { id: null as number | null },
         fireModeSwitch: { id: null as number | null },
+        heal: { id: null as number | null },
     });
     const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
 
@@ -577,7 +592,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
   const fireWeapon = (dynamicSegments: Segment[]) => {
     const player = playerRef.current;
-    if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isThrowableModeRef.current || combatModeRef.current === 'slash') return;
+    if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isThrowableModeRef.current || combatModeRef.current === 'slash' || player.isHealing) return;
     
     const currentWeapon = player.weapons[player.currentWeaponIndex];
     if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') {
@@ -698,7 +713,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
   const startSlash = () => {
     const slash = slashStateRef.current;
-    if (slash.active || slash.cdLeft > 0) return;
+    if (slash.active || slash.cdLeft > 0 || playerRef.current.isHealing) return;
 
     const player = playerRef.current;
     const ang = playerDirectionRef.current;
@@ -715,6 +730,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
   const throwThrowable = () => {
     const player = playerRef.current;
+    if (player.isHealing) return;
     const cookState = cookingThrowableRef.current;
     if (!cookState) return;
 
@@ -753,7 +769,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
 const switchFireMode = () => {
     const player = playerRef.current;
-    if (isGameOverRef.current || player.isReloading || burstStateRef.current.active) return;
+    if (isGameOverRef.current || player.isReloading || burstStateRef.current.active || player.isHealing) return;
 
     const weapon = player.weapons[player.currentWeaponIndex];
     if (weapon.allowedFireModes.length <= 1) return;
@@ -763,6 +779,16 @@ const switchFireMode = () => {
     weapon.currentFireMode = weapon.allowedFireModes[nextIndex];
 
     hasFiredSemiThisPressRef.current = false;
+};
+
+const startHealing = () => {
+    const player = playerRef.current;
+    if (player.isHealing || player.medkits <= 0 || player.health >= player.maxHealth || player.isReloading) {
+        return;
+    }
+    player.isHealing = true;
+    player.healTimer = HEAL_DURATION;
+    player.medkits--;
 };
 
   useEffect(() => {
@@ -948,6 +974,11 @@ const switchFireMode = () => {
                 moveSoundTimer: 0,
             };
 
+            if (difficulty === 'normal') {
+                baseEnemy.fov = 160 * (Math.PI / 180);
+                baseEnemy.shootCooldownMax = 1.7; // Shoots slightly faster than simple's 2.0
+            }
+
             // Spawn protection: ensure enemies don't spawn inside walls.
             let finalPos = { x: baseEnemy.x, y: baseEnemy.y };
             for (const wall of wallsRef.current) {
@@ -992,6 +1023,9 @@ const switchFireMode = () => {
       player.hitTimer = 0;
       player.radius = 10 * scale;
       player.speed = 240 * scale; // pixels/sec
+      player.medkits = INITIAL_MEDKITS;
+      player.isHealing = false;
+      player.healTimer = 0;
       
       const shaker = shakerRef.current;
       
@@ -1175,7 +1209,7 @@ const switchFireMode = () => {
 
     const startDoorInteraction = () => {
         const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-        if (!doorToInteract || doorToInteract.locked) return;
+        if (!doorToInteract || doorToInteract.locked || playerRef.current.isHealing) return;
 
         interactingDoorIdRef.current = doorToInteract.id;
         doorToInteract.isPlayerHolding = true;
@@ -1659,8 +1693,9 @@ doorsRef.current.forEach(door => {
             final_dy /= len;
           }
           
-          let newX = player.x + final_dx * player.speed * dt;
-          let newY = player.y + final_dy * player.speed * dt;
+          const currentSpeed = player.speed * (player.isHealing ? 0.5 : 1.0);
+          let newX = player.x + final_dx * currentSpeed * dt;
+          let newY = player.y + final_dy * currentSpeed * dt;
           
           let tempPos = { x: newX, y: newY };
           
@@ -1709,6 +1744,17 @@ doorsRef.current.forEach(door => {
             }
         }
         takedownHintEnemyRef.current = closestEnemy;
+      }
+      
+      // --- Manual Healing Logic ---
+      if (player.isHealing) {
+        player.healTimer -= dt;
+        if (player.healTimer <= 0) {
+            player.isHealing = false;
+            player.health = Math.min(player.maxHealth, player.health + HEAL_AMOUNT);
+            // Optional: add a small visual/sound effect on heal completion
+            shockwavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 60 * scale, lifetime: 0.25, maxLifetime: 0.25 });
+        }
       }
 
       const firstImpactPoint = (x1: number, y1: number, x2: number, y2: number) => {
@@ -1994,274 +2040,322 @@ doorsRef.current.forEach(door => {
 
                 const wasAlert = enemy.isAlert;
 
-                if (!isEnded) {
-                    // Handle timers
-                    if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
-                    if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
-                    if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
-                    if (enemy.moveSoundTimer && enemy.moveSoundTimer > 0) enemy.moveSoundTimer -= dt;
+                if (difficulty === 'hard' && !isEnded) {
+                    // --- HARD MODE AI ---
+                    const attackRange = visionRadius;
+                    const dxPlayer = player.x - enemy.x;
+                    const dyPlayer = player.y - enemy.y;
+                    const distToPlayer = Math.hypot(dxPlayer, dyPlayer);
+                    let canSeePlayer = false;
 
+                    if (distToPlayer < attackRange) {
+                        let isObstructed = false;
+                        for (const segment of dynamicSegments) {
+                            if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
+                                isObstructed = true;
+                                break;
+                            }
+                        }
+                        if (!isObstructed) canSeePlayer = true;
+                    }
 
-                    // Stun overrides everything
-                    if (enemy.stunTimer && enemy.stunTimer > 0) {
-                        enemy.isAlert = false;
-                        enemy.isInvestigating = false;
-                        enemy.targetX = undefined;
-                        enemy.targetY = undefined;
-                        enemy.searchTimer = 0;
-                        enemy.isReturningToPost = false;
+                    if (canSeePlayer) {
+                        enemy.isAlert = true;
+                        enemy.direction = Math.atan2(dyPlayer, dxPlayer);
+                        
+                        if (enemy.shootCooldown <= 0) {
+                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
+
+                            if (enemy.type === 'advanced') {
+                                const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
+                                tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: player.x, y2: player.y, ttl: 0.07, life: 0.07 });
+                                
+                                player.health -= 11;
+                                player.hitTimer = 0.17;
+                                shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
+                                if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
+
+                                enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
+                            } else {
+                                bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
+                                enemy.shootCooldown = enemy.shootCooldownMax * 0.4;
+                            }
+                        }
                     } else {
-                        // --- AI LOGIC ---
-                        const lastKnownTargetX = enemy.targetX;
+                        enemy.isAlert = false;
+                    }
+                } else {
+                    // --- SIMPLE / NORMAL MODE AI ---
+                    if (!isEnded) {
+                        // Handle timers
+                        if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
+                        if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
+                        if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
+                        if (enemy.moveSoundTimer && enemy.moveSoundTimer > 0) enemy.moveSoundTimer -= dt;
 
-                        // 1. SIGHT
-                        let canSeePlayer = false;
-                        const dxPlayer = player.x - enemy.x;
-                        const dyPlayer = player.y - enemy.y;
-                        const distToPlayer = Math.hypot(dxPlayer, dyPlayer);
 
-                        if (distToPlayer > 0 && distToPlayer < enemy.viewDistance) {
-                            const angleToPlayer = Math.atan2(dyPlayer, dxPlayer);
-                            const normalizeAngle = (angle: number) => {
-                                while (angle <= -Math.PI) angle += 2 * Math.PI;
-                                while (angle > Math.PI) angle -= 2 * Math.PI;
-                                return angle;
-                            };
-                            const angleDiff = normalizeAngle(angleToPlayer - normalizeAngle(enemy.direction));
-                            if (Math.abs(angleDiff) < enemy.fov / 2) {
-                                let isObstructed = false;
-                                for (const segment of dynamicSegments) {
-                                    if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
-                                        isObstructed = true;
+                        // Stun overrides everything
+                        if (enemy.stunTimer && enemy.stunTimer > 0) {
+                            enemy.isAlert = false;
+                            enemy.isInvestigating = false;
+                            enemy.targetX = undefined;
+                            enemy.targetY = undefined;
+                            enemy.searchTimer = 0;
+                            enemy.isReturningToPost = false;
+                        } else {
+                            // --- AI LOGIC ---
+                            const lastKnownTargetX = enemy.targetX;
+
+                            // 1. SIGHT
+                            let canSeePlayer = false;
+                            const dxPlayer = player.x - enemy.x;
+                            const dyPlayer = player.y - enemy.y;
+                            const distToPlayer = Math.hypot(dxPlayer, dyPlayer);
+
+                            if (distToPlayer > 0 && distToPlayer < enemy.viewDistance) {
+                                const angleToPlayer = Math.atan2(dyPlayer, dxPlayer);
+                                const normalizeAngle = (angle: number) => {
+                                    while (angle <= -Math.PI) angle += 2 * Math.PI;
+                                    while (angle > Math.PI) angle -= 2 * Math.PI;
+                                    return angle;
+                                };
+                                const angleDiff = normalizeAngle(angleToPlayer - normalizeAngle(enemy.direction));
+                                if (Math.abs(angleDiff) < enemy.fov / 2) {
+                                    let isObstructed = false;
+                                    for (const segment of dynamicSegments) {
+                                        if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
+                                            isObstructed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!isObstructed) canSeePlayer = true;
+                                }
+                            }
+
+                            if (canSeePlayer) {
+                                enemy.isAlert = true;
+                                enemy.isInvestigating = false;
+                                enemy.targetX = player.x;
+                                enemy.targetY = player.y;
+                                enemy.searchTimer = 0;
+                                enemy.isReturningToPost = false;
+                                enemy.lastSeenTime = now;
+                            } else {
+                                if (enemy.isAlert) {
+                                    enemy.searchTimer = 5; // Start searching if player is lost
+                                }
+                                 enemy.isAlert = false;
+                            }
+                            
+                             // Check for nearby player fire to trigger suppression
+                            if (!enemy.isAlert && !enemy.suppressionTimer) {
+                                for (const wave of soundWavesRef.current) {
+                                    if (wave.type === 'player_shoot' && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
+                                        enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
                                         break;
                                     }
                                 }
-                                if (!isObstructed) canSeePlayer = true;
                             }
-                        }
 
-                        if (canSeePlayer) {
-                            enemy.isAlert = true;
-                            enemy.isInvestigating = false;
-                            enemy.targetX = player.x;
-                            enemy.targetY = player.y;
-                            enemy.searchTimer = 0;
-                            enemy.isReturningToPost = false;
-                            enemy.lastSeenTime = now;
-                        } else {
+                            // --- STATE MACHINE ---
                             if (enemy.isAlert) {
-                                enemy.searchTimer = 5; // Start searching if player is lost
-                            }
-                             enemy.isAlert = false;
-                        }
-                        
-                         // Check for nearby player fire to trigger suppression
-                        if (!enemy.isAlert && !enemy.suppressionTimer) {
-                            for (const wave of soundWavesRef.current) {
-                                if (wave.type === 'player_shoot' && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
-                                    enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
-                                    break;
-                                }
-                            }
-                        }
+                                // --- COMBAT STATE ---
+                                enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
 
-                        // --- STATE MACHINE ---
-                        if (enemy.isAlert) {
-                            // --- COMBAT STATE ---
-                            enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-
-                            if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
-                                if (enemy.type === 'advanced') {
-                                    // --- ADVANCED AI COMBAT ---
-                                    if (enemy.axeState !== 'idle') {
-                                        enemy.axeTimer! -= dt;
-                                        if (enemy.axeTimer! <= 0) {
-                                            if (enemy.axeState === 'windup') {
-                                                enemy.axeState = 'swing';
-                                                enemy.axeTimer = AXE_SWING_DURATION;
-                                                const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
-                                                const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
-                                                soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
-                                            } else if (enemy.axeState === 'swing') {
-                                                enemy.axeState = 'recover';
-                                                enemy.axeTimer = AXE_RECOVER_DURATION;
-                                            } else if (enemy.axeState === 'recover') {
-                                                enemy.axeState = 'idle';
+                                if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
+                                    if (enemy.type === 'advanced') {
+                                        // --- ADVANCED AI COMBAT ---
+                                        if (enemy.axeState !== 'idle') {
+                                            enemy.axeTimer! -= dt;
+                                            if (enemy.axeTimer! <= 0) {
+                                                if (enemy.axeState === 'windup') {
+                                                    enemy.axeState = 'swing';
+                                                    enemy.axeTimer = AXE_SWING_DURATION;
+                                                    const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
+                                                    const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
+                                                    soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
+                                                } else if (enemy.axeState === 'swing') {
+                                                    enemy.axeState = 'recover';
+                                                    enemy.axeTimer = AXE_RECOVER_DURATION;
+                                                } else if (enemy.axeState === 'recover') {
+                                                    enemy.axeState = 'idle';
+                                                }
                                             }
                                         }
+                                        
+                                        if (enemy.axeState === 'swing') {
+                                             const axeArc = 90 * (Math.PI / 180);
+                                             const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+                                             let angleDiff = Math.abs(enemy.direction - angleToPlayer);
+                                             if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                                             if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
+                                                player.health = 0;
+                                                isGameOverRef.current = true;
+                                             }
+                                             const outer = (AXE_RANGE * scale);
+                                             slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
+                                        } else if (distToPlayer < AXE_RANGE * scale && enemy.axeState === 'idle') {
+                                            enemy.axeState = 'windup';
+                                            enemy.axeTimer = AXE_WINDUP_DURATION;
+                                        } else if (enemy.axeState === 'idle') {
+                                            if (enemy.isReloadingRifle) {
+                                                enemy.reloadRifleTimer! -= dt;
+                                                if (enemy.reloadRifleTimer! <= 0) {
+                                                    enemy.isReloadingRifle = false;
+                                                    enemy.rifleAmmo = 30;
+                                                }
+                                            } else if (enemy.rifleAmmo! <= 0) {
+                                                enemy.isReloadingRifle = true;
+                                                enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
+                                            } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
+                                                const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
+                                                let nearestWallT = 9999;
+                                                dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
+                                                
+                                                let hitPlayer = false, playerT = nearestWallT;
+                                                const dx = player.x - enemy.x, dy = player.y - enemy.y;
+                                                const t = dx * finalUx + dy * finalUy;
+                                                if (t > 0 && t < nearestWallT) {
+                                                    const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
+                                                    if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
+                                                        hitPlayer = true; playerT = t;
+                                                    }
+                                                }
+                                                const hitDist = playerT;
+                                                const hitX = enemy.x + finalUx * hitDist;
+                                                const hitY = enemy.y + finalUy * hitDist;
+                                                tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
+                                                
+                                                if (hitPlayer) {
+                                                    player.health -= 11;
+                                                    player.hitTimer = 0.17;
+                                                    shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
+                                                    if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
+                                                } else {
+                                                   // wall impact fx from enemy
+                                                }
+
+                                                enemy.rifleAmmo!--;
+                                                enemy.burstShotsFired!++;
+                                                enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
+                                                soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                                lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
+
+                                                if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
+                                                    enemy.burstShotsFired = 0;
+                                                    enemy.burstCooldown = RIFLE_BURST_PAUSE;
+                                                }
+                                            }
+                                        }
+                                        if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
+
+                                    } else {
+                                        // --- STANDARD AI COMBAT ---
+                                        if (enemy.shootCooldown <= 0) {
+                                            bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
+                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
+                                            enemy.shootCooldown = enemy.shootCooldownMax;
+                                        }
+                                    }
+                                }
+
+                            } else if (enemy.searchTimer && enemy.searchTimer > 0) {
+                                // --- SEARCHING STATE ---
+                                enemy.searchTimer -= dt;
+                                const baseAngle = enemy.patrolStartDirection ?? enemy.direction;
+                                enemy.direction = baseAngle + Math.sin(now / 150) * (Math.PI / 3);
+
+                                if (enemy.searchTimer <= 0) {
+                                    if (enemy.patrolStartX !== undefined) {
+                                        enemy.isReturningToPost = true;
+                                        enemy.targetX = enemy.patrolStartX;
+                                        enemy.targetY = enemy.patrolStartY;
+                                    }
+                                }
+                            } else if ((enemy.isInvestigating || enemy.isReturningToPost) && enemy.targetX !== undefined && enemy.targetY !== undefined) {
+                                // --- MOVING STATE (Investigating or Returning) ---
+                                const targetDist = Math.hypot(enemy.x - enemy.targetX, enemy.y - enemy.targetY);
+
+                                if (targetDist > enemy.radius * 1.5 && (!enemy.suppressionTimer || enemy.suppressionTimer <= 0)) {
+                                    let dxTarget = enemy.targetX - enemy.x, dyTarget = enemy.targetY - enemy.y;
+                                    const distToTarget = Math.hypot(dxTarget, dyTarget);
+                                    if (distToTarget > 0) {
+                                        dxTarget /= distToTarget;
+                                        dyTarget /= distToTarget;
                                     }
                                     
-                                    if (enemy.axeState === 'swing') {
-                                         const axeArc = 90 * (Math.PI / 180);
-                                         const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-                                         let angleDiff = Math.abs(enemy.direction - angleToPlayer);
-                                         if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-                                         if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
-                                            player.health = 0;
-                                            isGameOverRef.current = true;
-                                         }
-                                         const outer = (AXE_RANGE * scale);
-                                         slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
-                                    } else if (distToPlayer < AXE_RANGE * scale && enemy.axeState === 'idle') {
-                                        enemy.axeState = 'windup';
-                                        enemy.axeTimer = AXE_WINDUP_DURATION;
-                                    } else if (enemy.axeState === 'idle') {
-                                        if (enemy.isReloadingRifle) {
-                                            enemy.reloadRifleTimer! -= dt;
-                                            if (enemy.reloadRifleTimer! <= 0) {
-                                                enemy.isReloadingRifle = false;
-                                                enemy.rifleAmmo = 30;
-                                            }
-                                        } else if (enemy.rifleAmmo! <= 0) {
-                                            enemy.isReloadingRifle = true;
-                                            enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
-                                        } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
-                                            const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
-                                            let nearestWallT = 9999;
-                                            dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
-                                            
-                                            let hitPlayer = false, playerT = nearestWallT;
-                                            const dx = player.x - enemy.x, dy = player.y - enemy.y;
-                                            const t = dx * finalUx + dy * finalUy;
-                                            if (t > 0 && t < nearestWallT) {
-                                                const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
-                                                if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
-                                                    hitPlayer = true; playerT = t;
-                                                }
-                                            }
-                                            const hitDist = playerT;
-                                            const hitX = enemy.x + finalUx * hitDist;
-                                            const hitY = enemy.y + finalUy * hitDist;
-                                            tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
-                                            
-                                            if (hitPlayer) {
-                                                player.health -= 11;
-                                                player.hitTimer = 0.17;
-                                                shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
-                                                if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
+                                    if ((enemy.moveSoundTimer || 0) <= 0) {
+                                        soundWavesRef.current.push({
+                                            x: enemy.x,
+                                            y: enemy.y,
+                                            radius: 0,
+                                            maxRadius: 120 * scale,
+                                            lifetime: 0.3,
+                                            maxLifetime: 0.3,
+                                            type: 'enemy_move'
+                                        });
+                                        enemy.moveSoundTimer = 0.4; // Cooldown
+                                    }
+                                    
+                                    enemy.direction = Math.atan2(dyTarget, dxTarget);
+                                    const moveSpeed = enemy.speed * (enemy.isInvestigating ? 0.7 : 1.0);
+                                    let newX = enemy.x + dxTarget * moveSpeed * dt;
+                                    let newY = enemy.y + dyTarget * moveSpeed * dt;
+                                    
+                                    let tempPos = { x: newX, y: newY };
+                                    
+                                    for(let i=0; i<2; i++) {
+                                        for (const wall of wallsRef.current) {
+                                            const resolved = resolveCollisionWithWall({ ...tempPos, radius: enemy.radius }, wall);
+                                            if (resolved) tempPos = resolved;
+                                        }
+                                        for (const door of doorsRef.current) {
+                                            const resolved = resolveCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                            if (resolved) {
+                                                 tempPos = resolved;
                                             } else {
-                                               // wall impact fx from enemy
-                                            }
-
-                                            enemy.rifleAmmo!--;
-                                            enemy.burstShotsFired!++;
-                                            enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
-                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
-                                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
-
-                                            if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
-                                                enemy.burstShotsFired = 0;
-                                                enemy.burstCooldown = RIFLE_BURST_PAUSE;
+                                                 // Check if trying to move through a closed door
+                                                const doorIsBlocking = checkCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                                if (doorIsBlocking) {
+                                                    const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
+                                                    if (isClosed && !door.locked && !isPlayerCampingDoor(door, enemy)) {
+                                                        door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                    if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
+
+                                    enemy.x = tempPos.x;
+                                    enemy.y = tempPos.y;
 
                                 } else {
-                                    // --- STANDARD AI COMBAT ---
-                                    if (enemy.shootCooldown <= 0) {
-                                        bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
-                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
-                                        lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
-                                        enemy.shootCooldown = enemy.shootCooldownMax;
-                                    }
-                                }
-                            }
-
-                        } else if (enemy.searchTimer && enemy.searchTimer > 0) {
-                            // --- SEARCHING STATE ---
-                            enemy.searchTimer -= dt;
-                            const baseAngle = enemy.patrolStartDirection ?? enemy.direction;
-                            enemy.direction = baseAngle + Math.sin(now / 150) * (Math.PI / 3);
-
-                            if (enemy.searchTimer <= 0) {
-                                if (enemy.patrolStartX !== undefined) {
-                                    enemy.isReturningToPost = true;
-                                    enemy.targetX = enemy.patrolStartX;
-                                    enemy.targetY = enemy.patrolStartY;
-                                }
-                            }
-                        } else if ((enemy.isInvestigating || enemy.isReturningToPost) && enemy.targetX !== undefined && enemy.targetY !== undefined) {
-                            // --- MOVING STATE (Investigating or Returning) ---
-                            const targetDist = Math.hypot(enemy.x - enemy.targetX, enemy.y - enemy.targetY);
-
-                            if (targetDist > enemy.radius * 1.5 && (!enemy.suppressionTimer || enemy.suppressionTimer <= 0)) {
-                                let dxTarget = enemy.targetX - enemy.x, dyTarget = enemy.targetY - enemy.y;
-                                const distToTarget = Math.hypot(dxTarget, dyTarget);
-                                if (distToTarget > 0) {
-                                    dxTarget /= distToTarget;
-                                    dyTarget /= distToTarget;
-                                }
-                                
-                                if ((enemy.moveSoundTimer || 0) <= 0) {
-                                    soundWavesRef.current.push({
-                                        x: enemy.x,
-                                        y: enemy.y,
-                                        radius: 0,
-                                        maxRadius: 120 * scale,
-                                        lifetime: 0.3,
-                                        maxLifetime: 0.3,
-                                        type: 'enemy_move'
-                                    });
-                                    enemy.moveSoundTimer = 0.4; // Cooldown
-                                }
-                                
-                                enemy.direction = Math.atan2(dyTarget, dxTarget);
-                                const moveSpeed = enemy.speed * (enemy.isInvestigating ? 0.7 : 1.0);
-                                let newX = enemy.x + dxTarget * moveSpeed * dt;
-                                let newY = enemy.y + dyTarget * moveSpeed * dt;
-                                
-                                let tempPos = { x: newX, y: newY };
-                                
-                                for(let i=0; i<2; i++) {
-                                    for (const wall of wallsRef.current) {
-                                        const resolved = resolveCollisionWithWall({ ...tempPos, radius: enemy.radius }, wall);
-                                        if (resolved) tempPos = resolved;
-                                    }
-                                    for (const door of doorsRef.current) {
-                                        const resolved = resolveCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
-                                        if (resolved) {
-                                             tempPos = resolved;
+                                    // Reached target or is suppressed
+                                    if (targetDist <= enemy.radius * 1.5) {
+                                        enemy.targetX = undefined;
+                                        enemy.targetY = undefined;
+                                        if (enemy.isReturningToPost) {
+                                            enemy.isReturningToPost = false;
+                                            enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
                                         } else {
-                                             // Check if trying to move through a closed door
-                                            const doorIsBlocking = checkCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
-                                            if (doorIsBlocking) {
-                                                const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
-                                                if (isClosed && !door.locked && !isPlayerCampingDoor(door, enemy)) {
-                                                    door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
-                                                }
-                                            }
+                                            enemy.searchTimer = 3; 
                                         }
+                                        enemy.isInvestigating = false;
                                     }
                                 }
-
-                                enemy.x = tempPos.x;
-                                enemy.y = tempPos.y;
-
                             } else {
-                                // Reached target or is suppressed
-                                if (targetDist <= enemy.radius * 1.5) {
-                                    enemy.targetX = undefined;
-                                    enemy.targetY = undefined;
-                                    if (enemy.isReturningToPost) {
+                                // --- IDLE STATE ---
+                                for (const wave of soundWavesRef.current) {
+                                    if (!enemy.isInvestigating && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
+                                        enemy.isInvestigating = true;
+                                        enemy.targetX = wave.x;
+                                        enemy.targetY = wave.y;
                                         enemy.isReturningToPost = false;
-                                        enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
-                                    } else {
-                                        enemy.searchTimer = 3; 
+                                        enemy.searchTimer = 0;
+                                        break;
                                     }
-                                    enemy.isInvestigating = false;
-                                }
-                            }
-                        } else {
-                            // --- IDLE STATE ---
-                            for (const wave of soundWavesRef.current) {
-                                if (!enemy.isInvestigating && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
-                                    enemy.isInvestigating = true;
-                                    enemy.targetX = wave.x;
-                                    enemy.targetY = wave.y;
-                                    enemy.isReturningToPost = false;
-                                    enemy.searchTimer = 0;
-                                    break;
                                 }
                             }
                         }
@@ -2272,7 +2366,11 @@ doorsRef.current.forEach(door => {
 
                 if (!wasAlert && enemy.isAlert) {
                     soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4, type: 'enemy_shoot' });
-                    enemy.reactionTimer = 0.75;
+                    if (difficulty === 'simple') {
+                        enemy.reactionTimer = 0.75;
+                    } else if (difficulty === 'normal') {
+                        enemy.reactionTimer = 0.4;
+                    }
                 }
 
                 activeEnemies.push(enemy);
@@ -2743,6 +2841,18 @@ doorsRef.current.forEach(door => {
           context.stroke();
       });
 
+      if (player.isHealing) {
+        context.save();
+        context.translate(player.x, player.y);
+        const healProgress = 1 - (player.healTimer / HEAL_DURATION);
+        context.strokeStyle = 'rgba(74, 222, 128, 0.8)'; // green-400
+        context.lineWidth = 4 * scale;
+        context.beginPath();
+        context.arc(0, 0, player.radius + 6 * scale, -Math.PI / 2, -Math.PI / 2 + healProgress * Math.PI * 2);
+        context.stroke();
+        context.restore();
+      }
+
       if (cookingThrowableRef.current) {
         const { timer, maxTimer } = cookingThrowableRef.current;
         const progress = Math.max(0, timer / maxTimer);
@@ -2881,11 +2991,25 @@ doorsRef.current.forEach(door => {
       let healthColor = '#e5e5e5';
       if (healthPercentage < 0.6) healthColor = '#a3a3a3';
       if (healthPercentage < 0.3) healthColor = '#525252';
+
       context.font = `${14 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'left';
       context.fillText('HEALTH', margin, canvas.height - barHeight - margin - (5 * scale));
       context.strokeStyle = 'rgba(255, 255, 255, 0.5)'; context.lineWidth = 2 * scale; context.strokeRect(margin, canvas.height - barHeight - margin, barWidth, barHeight);
       context.fillStyle = 'rgba(255, 255, 255, 0.1)'; context.fillRect(margin, canvas.height - barHeight - margin, barWidth, barHeight);
       context.fillStyle = healthColor; context.fillRect(margin, canvas.height - barHeight - margin, barWidth * healthPercentage, barHeight);
+
+      // Medkit display
+      const medkitX = margin + barWidth + 15 * scale;
+      const medkitY = canvas.height - barHeight / 2 - margin;
+      context.font = `bold ${24 * scale}px mono`;
+      context.fillStyle = 'white';
+      context.textAlign = 'left';
+      context.textBaseline = 'middle';
+      context.fillText('+', medkitX, medkitY + 2 * scale); // Simple cross icon
+      context.font = `bold ${20 * scale}px mono`;
+      context.fillText(player.medkits.toString(), medkitX + 20 * scale, medkitY);
+      context.textBaseline = 'alphabetic';
+
 
       const weaponTextY = canvas.height - barHeight - margin - (30 * scale);
       context.font = `bold ${18 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'left';
@@ -2969,6 +3093,11 @@ doorsRef.current.forEach(door => {
             context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
             context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
             context.fillText("[R]", cx, cy - player.radius - (20 * scale));
+            context.shadowBlur = 0;
+          } else if (!isEnded && !player.isHealing && player.medkits > 0 && player.health < player.maxHealth) {
+            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
+            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+            context.fillText("[H] Heal", cx, cy - player.radius - (20 * scale));
             context.shadowBlur = 0;
           }
         }
@@ -3107,6 +3236,10 @@ doorsRef.current.forEach(door => {
                         ctx.moveTo(-8, 0); ctx.lineTo(0, 0);
                         ctx.moveTo(-8, 6); ctx.lineTo(-2, 6);
                         break;
+                  case 'heal':
+                        ctx.moveTo(0, -8); ctx.lineTo(0, 8);
+                        ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
+                        break;
               }
               ctx.stroke();
               ctx.restore();
@@ -3125,6 +3258,7 @@ doorsRef.current.forEach(door => {
           drawTouchButton('switchWeapon', 'switchWeapon');
           drawTouchButton('melee', 'melee', undefined, combatModeRef.current === 'slash');
           drawTouchButton('fireModeSwitch', 'fireModeSwitch');
+          drawTouchButton('heal', 'heal', undefined, playerRef.current.isHealing);
 
           const throwableType = player.throwableTypes[player.currentThrowableIndex];
           const throwableCount = level.name === 'TRAINING GROUND' ? '∞' : (player.throwables[throwableType] ?? 0);
@@ -3256,6 +3390,11 @@ doorsRef.current.forEach(door => {
       }
       if (isGameOverRef.current || isMissionCompleteRef.current) return;
       
+      if (key === 'h') {
+        startHealing();
+        return;
+      }
+
       if (key === 'g') {
         switchFireMode();
         return;
@@ -3281,7 +3420,7 @@ doorsRef.current.forEach(door => {
       if (['1', '2'].includes(key)) {
         const weaponIndex = parseInt(key, 10) - 1;
         const player = playerRef.current;
-        if (weaponIndex < player.weapons.length && player.currentWeaponIndex !== weaponIndex) {
+        if (weaponIndex < player.weapons.length && player.currentWeaponIndex !== weaponIndex && !player.isHealing) {
             player.currentWeaponIndex = weaponIndex; 
             player.isReloading = false; 
             player.reloadTimer = 0; 
@@ -3297,7 +3436,7 @@ doorsRef.current.forEach(door => {
       if (key === 'r') {
         const player = playerRef.current;
         const weapon = player.weapons[player.currentWeaponIndex];
-        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize;
+        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && !player.isHealing;
         const hasAmmo = weapon.reserveAmmo > 0;
         if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
             player.isReloading = true; player.reloadTimer = weapon.reloadTime;
@@ -3374,6 +3513,7 @@ const handleMouseDown = (event: MouseEvent) => {
     if (event.button === 2) { // Right mouse button
         event.preventDefault(); // Prevent context menu
         const player = playerRef.current;
+        if (player.isHealing) return;
         const throwableType = player.throwableTypes[player.currentThrowableIndex];
         if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
             isAimingThrowableRef.current = true;
@@ -3445,6 +3585,7 @@ const handleTouchStart = (event: TouchEvent) => {
                     if (name === 'fire' || name === 'fixedFire') {
                         if (isThrowableModeRef.current) {
                             const player = playerRef.current;
+                            if (player.isHealing) continue;
                             const throwableType = player.throwableTypes[player.currentThrowableIndex];
                             if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
                                 isAimingThrowableRef.current = true;
@@ -3457,7 +3598,7 @@ const handleTouchStart = (event: TouchEvent) => {
                     } else if (name === 'reload') {
                         const player = playerRef.current;
                         const weapon = player.weapons[player.currentWeaponIndex];
-                        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize;
+                        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && !player.isHealing;
                         const hasAmmo = weapon.reserveAmmo > 0;
                         if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
                             player.isReloading = true;
@@ -3474,6 +3615,7 @@ const handleTouchStart = (event: TouchEvent) => {
                         }
                     } else if (name === 'switchWeapon') {
                         const player = playerRef.current;
+                        if (player.isHealing) continue;
                         player.currentWeaponIndex = (player.currentWeaponIndex + 1) % player.weapons.length;
                         player.isReloading = false;
                         player.reloadTimer = 0;
@@ -3482,6 +3624,7 @@ const handleTouchStart = (event: TouchEvent) => {
                         isAimingThrowableRef.current = false;
                         cookingThrowableRef.current = null;
                     } else if (name === 'melee') {
+                        if (playerRef.current.isHealing) continue;
                         combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun';
                         isThrowableModeRef.current = false;
                         if (isAimingThrowableRef.current) {
@@ -3490,6 +3633,7 @@ const handleTouchStart = (event: TouchEvent) => {
                         }
                     } else if (name === 'throwableSelect') {
                         const player = playerRef.current;
+                        if (player.isHealing) continue;
                         if (player.throwableTypes.length > 0) {
                             if (isThrowableModeRef.current) {
                                 player.currentThrowableIndex = (player.currentThrowableIndex + 1) % player.throwableTypes.length;
@@ -3500,6 +3644,8 @@ const handleTouchStart = (event: TouchEvent) => {
                         }
                     } else if (name === 'fireModeSwitch') {
                         switchFireMode();
+                    } else if (name === 'heal') {
+                        startHealing();
                     }
                     consumed = true;
                     break;
@@ -3619,6 +3765,8 @@ const handleTouchEnd = (event: TouchEvent) => {
             touchState.throwableSelect.id = null;
         } else if (id === touchState.fireModeSwitch.id) {
             touchState.fireModeSwitch.id = null;
+        } else if (id === touchState.heal.id) {
+            touchState.heal.id = null;
         }
     }
 };
@@ -3652,7 +3800,7 @@ const handleTouchEnd = (event: TouchEvent) => {
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls, aimSensitivity]);
+  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls, aimSensitivity, difficulty]);
 
   return (
     <div className="w-full h-full relative font-mono">

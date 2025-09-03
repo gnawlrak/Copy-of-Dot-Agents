@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LevelDefinition, getCustomLevels } from '../levels/level-definitions';
+import { Difficulty } from '../App';
 
 interface LevelSelectProps {
   officialLevels: LevelDefinition[];
@@ -8,9 +9,11 @@ interface LevelSelectProps {
   onEditLevel: (level: LevelDefinition) => void;
   onDeleteLevel: (uuid: string) => void;
   onCreateNew: () => void;
+  difficulty: Difficulty;
+  onDifficultyChange: (difficulty: Difficulty) => void;
 }
 
-const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel, onBack, onEditLevel, onDeleteLevel, onCreateNew }) => {
+const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel, onBack, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
   const [customLevels, setCustomLevels] = useState<LevelDefinition[]>([]);
   
   useEffect(() => {
@@ -34,11 +37,34 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel
       )}
     </div>
   );
+  
+  const difficultyButtonClass = (d: Difficulty) => 
+    `px-8 py-3 font-bold text-lg tracking-widest rounded-md border-2 transition-colors duration-200 ${
+        difficulty === d 
+        ? 'bg-teal-500 text-black border-teal-300' 
+        : 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700 hover:border-gray-500'
+    }`;
 
   return (
     <div className="w-full max-w-4xl text-center">
-      <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-8">SELECT MISSION</h1>
-      <div className="space-y-4 mb-8 max-h-[60vh] overflow-y-auto pr-4">
+      <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-4">SELECT MISSION</h1>
+
+      <div className="mb-6">
+        <h2 className="text-xl text-gray-400 mb-3">DIFFICULTY</h2>
+        <div className="flex justify-center gap-4">
+            <button onClick={() => onDifficultyChange('simple')} className={difficultyButtonClass('simple')}>
+                SIMPLE
+            </button>
+            <button onClick={() => onDifficultyChange('normal')} className={difficultyButtonClass('normal')}>
+                NORMAL
+            </button>
+            <button onClick={() => onDifficultyChange('hard')} className={difficultyButtonClass('hard')}>
+                HARD
+            </button>
+        </div>
+      </div>
+      
+      <div className="space-y-4 mb-8 max-h-[50vh] overflow-y-auto pr-4">
         <h3 className="text-xl text-gray-400 text-left border-b border-gray-600 pb-2">OFFICIAL MISSIONS</h3>
         {officialLevels.map((level) => renderLevelButton(level, false))}
 

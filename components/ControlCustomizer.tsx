@@ -1,3 +1,5 @@
+
+
 import React, { useState, useRef, TouchEvent } from 'react';
 import type { CustomControls } from '../types';
 
@@ -18,6 +20,7 @@ const CONTROL_NAMES: { [key: string]: string } = {
     melee: 'Melee / Weapon Mode',
     throwableSelect: 'Select Throwable',
     fireModeSwitch: 'Switch Fire Mode',
+    heal: 'Use Medkit',
 };
 
 const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, defaultLayout, onSave, onClose }) => {
