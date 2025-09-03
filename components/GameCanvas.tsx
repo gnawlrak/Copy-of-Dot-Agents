@@ -1,6 +1,7 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
-import { PlayerLoadout, CustomControls } from '../App';
+import { PlayerLoadout, CustomControls } from '../types';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
 import ControlCustomizer from './ControlCustomizer';
@@ -434,6 +435,9 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       }
   });
   const hasUsedTouchRef = useRef<boolean>(false);
+  const burstStateRef = useRef({ active: false, shotsLeft: 0 });
+  const hasFiredSemiThisPressRef = useRef(false);
+  const hasStartedBurstThisPressRef = useRef(false);
 
   const [isPaused, setIsPaused] = useState(false);
   const [showInGameSettings, setShowInGameSettings] = useState(false);
@@ -451,6 +455,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         switchWeapon: { id: null as number | null },
         melee: { id: null as number | null },
         throwableSelect: { id: null as number | null },
+        fireModeSwitch: { id: null as number | null },
     });
     const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
 
@@ -746,6 +751,20 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     });
 };
 
+const switchFireMode = () => {
+    const player = playerRef.current;
+    if (isGameOverRef.current || player.isReloading || burstStateRef.current.active) return;
+
+    const weapon = player.weapons[player.currentWeaponIndex];
+    if (weapon.allowedFireModes.length <= 1) return;
+
+    const currentIndex = weapon.allowedFireModes.indexOf(weapon.currentFireMode);
+    const nextIndex = (currentIndex + 1) % weapon.allowedFireModes.length;
+    weapon.currentFireMode = weapon.allowedFireModes[nextIndex];
+
+    hasFiredSemiThisPressRef.current = false;
+};
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1018,7 +1037,9 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                   if (shakeFunc) {
                       shakeFunc(shakerRef.current, scale, ux, uy);
                   }
-              }
+              },
+              allowedFireModes: [...def.allowedFireModes],
+              currentFireMode: def.defaultFireMode,
           };
 
           // Apply attachment modifiers
@@ -1028,6 +1049,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 const attachment = def.attachmentSlots[slotName].find(a => a.name === attachmentName);
                 if (attachment) {
                     const mod = attachment.modifiers;
+                    if (mod.damage) weapon.damage *= mod.damage;
+                    if (mod.soundRadius) weapon.soundRadius *= mod.soundRadius;
                     if (mod.fireRate) weapon.fireRate *= mod.fireRate;
                     if (mod.reloadTime) weapon.reloadTime *= mod.reloadTime;
                     if (mod.bulletRadius) weapon.bulletRadius += mod.bulletRadius * scale;
@@ -1037,6 +1060,13 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                         weapon.ammoInMag = weapon.magSize; // Refill mag when applying mod
                     }
                     if (mod.spread) weapon.spread *= mod.spread;
+                    if (mod.addFireModes) {
+                        mod.addFireModes.forEach(mode => {
+                            if (!weapon.allowedFireModes.includes(mode)) {
+                                weapon.allowedFireModes.push(mode);
+                            }
+                        });
+                    }
                     break; 
                 }
             }
@@ -1280,7 +1310,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 const damage = (1 - (dist / rad)) * (isPlayer ? 100 : 999);
                 if(isPlayer) {
                     const player = unit as Player;
-                    if(isEnded || level.name === 'TRAINING GROUND') return; // Player is invincible in training
+                    if(isEnded) return;
                     player.health -= damage;
                     player.hitTimer = 0.17; // seconds
                     
@@ -1310,7 +1340,6 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 }
             } else { // flashbang
                 if (isPlayer) {
-                    if (level.name === 'TRAINING GROUND') return; // Player is immune to flashbangs in training
                     const player = unit as Player;
                     const viewPoly = getVisionPolygon(player, dynamicSegments, {width: canvas.width, height: canvas.height});
                     if (pointInPoly(n.x, n.y, viewPoly)) {
@@ -1381,9 +1410,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
             if (cookState.type === 'flashbang') {
                 // Player held the flashbang for too long. Full white screen effect.
-                 if (level.name !== 'TRAINING GROUND') {
-                    player.flashTimer = 2.5; // Max flash duration
-                 }
+                player.flashTimer = 2.5; // Max flash duration
             }
 
             const selfDetonation: Throwable = {
@@ -1413,12 +1440,45 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           }
       }
       
-      const isTouchFiring = (touchState.fire.id !== null || touchState.fixedFire.id !== null) &&
-                            !isAimingThrowableRef.current &&
-                            combatModeRef.current === 'gun';
-
-      if ((isShootingRef.current || isTouchFiring) && currentWeapon.automatic) {
+      const isTryingToFire = (touchState.fire.id !== null || touchState.fixedFire.id !== null || isShootingRef.current) && !isAimingThrowableRef.current && combatModeRef.current === 'gun';
+      
+      if (!isTryingToFire) { // Reset press-based flags when input is released
+          hasFiredSemiThisPressRef.current = false;
+          hasStartedBurstThisPressRef.current = false;
+      }
+      
+      const burstState = burstStateRef.current;
+      
+      // Handle ongoing burst
+      if (burstState.active && burstState.shotsLeft > 0 && player.shootCooldown <= 0) {
           fireWeapon(dynamicSegments);
+          burstState.shotsLeft--;
+          if (burstState.shotsLeft <= 0) {
+              burstState.active = false;
+          }
+      }
+      // Handle player input if not in a burst
+      else if (isTryingToFire && !burstState.active) {
+          switch(currentWeapon.currentFireMode) {
+              case 'auto':
+                  fireWeapon(dynamicSegments); // Respects shootCooldown internally
+                  break;
+              case 'burst':
+                  if (!hasStartedBurstThisPressRef.current) {
+                      hasStartedBurstThisPressRef.current = true;
+                      burstState.active = true;
+                      burstState.shotsLeft = 3;
+                      fireWeapon(dynamicSegments); // Fire first shot
+                      burstState.shotsLeft--;
+                  }
+                  break;
+              case 'semi':
+                  if (!hasFiredSemiThisPressRef.current) {
+                      hasFiredSemiThisPressRef.current = true;
+                      fireWeapon(dynamicSegments);
+                  }
+                  break;
+          }
       }
       
 doorsRef.current.forEach(door => {
@@ -1727,24 +1787,22 @@ doorsRef.current.forEach(door => {
                     soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
                 } else { // hitUnitType === 'player'
                     const playerUnit = hitUnit as Player;
-                    if (level.name !== 'TRAINING GROUND') { // Player is invincible in training
-                        playerUnit.health -= bullet.damage;
-                        playerUnit.hitTimer = 0.17;
+                    playerUnit.health -= bullet.damage;
+                    playerUnit.hitTimer = 0.17;
 
-                        // Add a distinct, directional screen shake for getting hit
-                        shakerRef.current.addImpulse({
-                            amp: 15 * scale,      // Stronger amplitude
-                            rotAmp: 0.03,         // More rotational shake
-                            freq: 40,             // Lower frequency for a "thud" feel
-                            decay: 25,            // Quick decay
-                            dirx: bullet.dx,      // Direction of the incoming shot
-                            diry: bullet.dy
-                        });
+                    // Add a distinct, directional screen shake for getting hit
+                    shakerRef.current.addImpulse({
+                        amp: 15 * scale,      // Stronger amplitude
+                        rotAmp: 0.03,         // More rotational shake
+                        freq: 40,             // Lower frequency for a "thud" feel
+                        decay: 25,            // Quick decay
+                        dirx: bullet.dx,      // Direction of the incoming shot
+                        diry: bullet.dy
+                    });
 
-                        if (playerUnit.health <= 0) {
-                            playerUnit.health = 0;
-                            isGameOverRef.current = true;
-                        }
+                    if (playerUnit.health <= 0) {
+                        playerUnit.health = 0;
+                        isGameOverRef.current = true;
                     }
                 }
             } else if (wallHit && closestT === wallHit.t) { // Wall hit is the closest
@@ -1833,9 +1891,6 @@ doorsRef.current.forEach(door => {
         
         // Helper to check if an angle is within a sweep that might wrap around PI
         const isAngleBetween = (start: number, end: number, mid: number) => {
-            start = normalizeAngle(start);
-            end = normalizeAngle(end);
-            mid = normalizeAngle(mid);
             if (start <= end) { // Normal case, e.g., from -1 to 1 rad
                 return mid >= start && mid <= end;
             } else { // Wraps around PI, e.g., from 3 to -3 rad
@@ -1843,15 +1898,15 @@ doorsRef.current.forEach(door => {
             }
         };
 
-        const sweepStart = slash.prevA;
-        const sweepEnd = slash.curA;
+        const sweepStart = normalizeAngle(slash.startA - slash.width * 0.5);
+        const sweepEnd = normalizeAngle(slash.curA + slash.width * 0.5);
 
         for (const enemy of enemiesRef.current) {
             if (enemy.health <= 0 || slashHitThisSwingRef.current.has(enemy)) continue;
             const dx = enemy.x - player.x, dy = enemy.y - player.y; const dist=Math.hypot(dx,dy);
             if (dist < slash.inner || dist > slash.range) continue;
             
-            const ang = Math.atan2(dy,dx);
+            const ang = Math.atan2(dy,dx); // This is already in (-PI, PI]
             
             if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
             
@@ -2042,10 +2097,8 @@ doorsRef.current.forEach(door => {
                                          let angleDiff = Math.abs(enemy.direction - angleToPlayer);
                                          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
                                          if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
-                                            if (level.name !== 'TRAINING GROUND') { // Player is invincible in training
-                                                player.health = 0;
-                                                isGameOverRef.current = true;
-                                            }
+                                            player.health = 0;
+                                            isGameOverRef.current = true;
                                          }
                                          const outer = (AXE_RANGE * scale);
                                          slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
@@ -2081,7 +2134,7 @@ doorsRef.current.forEach(door => {
                                             const hitY = enemy.y + finalUy * hitDist;
                                             tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
                                             
-                                            if (hitPlayer && level.name !== 'TRAINING GROUND') {
+                                            if (hitPlayer) {
                                                 player.health -= 11;
                                                 player.hitTimer = 0.17;
                                                 shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
@@ -2844,7 +2897,13 @@ doorsRef.current.forEach(door => {
         context.fillText(slash.cdLeft > 0 ? `COOLDOWN: ${(slash.cdLeft).toFixed(1)}s` : 'READY', margin, weaponTextY);
       } else {
         const weaponKey = player.currentWeaponIndex === 0 ? '[1]' : '[2]';
-        context.fillText(`${currentWeapon.name.toUpperCase()} ${weaponKey} / [Q] MELEE`, margin, weaponTextY - (20 * scale));
+        const fireModeText = `[${currentWeapon.currentFireMode.toUpperCase()}]`;
+        context.fillText(`${currentWeapon.name.toUpperCase()} ${weaponKey} ${fireModeText}`, margin, weaponTextY - (20 * scale));
+        context.font = `${14 * scale}px mono`;
+        context.fillStyle = '#a3a3a3';
+        context.fillText(`[G] Switch Mode / [Q] Melee`, margin, weaponTextY - (5 * scale));
+
+        context.font = `bold ${18 * scale}px mono`;
         let ammoText = '';
         if (player.isReloading) {
             context.fillStyle = '#d4d4d4'; ammoText = 'RELOADING...';
@@ -2856,7 +2915,7 @@ doorsRef.current.forEach(door => {
                 ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ${currentWeapon.reserveAmmo}`;
             }
         }
-        context.fillText(ammoText, margin, weaponTextY);
+        context.fillText(ammoText, margin, weaponTextY + 15 * scale);
       }
 
      const currentThrowableType = player.throwableTypes[player.currentThrowableIndex];
@@ -3043,6 +3102,11 @@ doorsRef.current.forEach(door => {
                       ctx.arc(-2, 0, 8, Math.PI * 0.6, -Math.PI * 0.6);
                       ctx.moveTo(6, -8); ctx.lineTo(10, -5); ctx.lineTo(6, -2);
                       break;
+                  case 'fireModeSwitch':
+                        ctx.moveTo(-8, -6); ctx.lineTo(8, -6);
+                        ctx.moveTo(-8, 0); ctx.lineTo(0, 0);
+                        ctx.moveTo(-8, 6); ctx.lineTo(-2, 6);
+                        break;
               }
               ctx.stroke();
               ctx.restore();
@@ -3060,6 +3124,7 @@ doorsRef.current.forEach(door => {
           drawTouchButton('interact', 'interact', undefined, isInteracting);
           drawTouchButton('switchWeapon', 'switchWeapon');
           drawTouchButton('melee', 'melee', undefined, combatModeRef.current === 'slash');
+          drawTouchButton('fireModeSwitch', 'fireModeSwitch');
 
           const throwableType = player.throwableTypes[player.currentThrowableIndex];
           const throwableCount = level.name === 'TRAINING GROUND' ? '∞' : (player.throwables[throwableType] ?? 0);
@@ -3191,6 +3256,11 @@ doorsRef.current.forEach(door => {
       }
       if (isGameOverRef.current || isMissionCompleteRef.current) return;
       
+      if (key === 'g') {
+        switchFireMode();
+        return;
+      }
+
       if (key === 'q') {
           combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun';
           if (isAimingThrowableRef.current) {
@@ -3301,13 +3371,6 @@ doorsRef.current.forEach(door => {
 const handleMouseDown = (event: MouseEvent) => {
     if (isGameOverRef.current || isMissionCompleteRef.current || isPausedRef.current) return;
     
-    const dynamicSegments = [...wallSegmentsRef.current];
-    doorsRef.current.forEach(door => {
-        const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
-        const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
-        dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
-    });
-
     if (event.button === 2) { // Right mouse button
         event.preventDefault(); // Prevent context menu
         const player = playerRef.current;
@@ -3321,22 +3384,21 @@ const handleMouseDown = (event: MouseEvent) => {
     }
     
     if (event.button === 0) { // Left mouse button
-        if (isAimingThrowableRef.current) return; // Don't shoot while aiming a throwable
+        if (isAimingThrowableRef.current) return;
 
         if (combatModeRef.current === 'slash') {
             startSlash();
             return;
         }
         isShootingRef.current = true;
-        if (!playerRef.current.weapons[playerRef.current.currentWeaponIndex].automatic) {
-            fireWeapon(dynamicSegments);
-        }
     }
 };
 const handleMouseUp = (event: MouseEvent) => {
     if (isPausedRef.current) return;
     if (event.button === 0) { // Left mouse button up
         isShootingRef.current = false;
+        hasFiredSemiThisPressRef.current = false;
+        hasStartedBurstThisPressRef.current = false;
     }
     if (event.button === 2) { // Right mouse button up
         if (cookingThrowableRef.current) {
@@ -3391,16 +3453,6 @@ const handleTouchStart = (event: TouchEvent) => {
                             }
                         } else if (combatModeRef.current === 'slash') {
                             startSlash();
-                        } else {
-                            if (!playerRef.current.weapons[playerRef.current.currentWeaponIndex].automatic) {
-                                const dynamicSegments = [...wallSegmentsRef.current];
-                                doorsRef.current.forEach(door => {
-                                    const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
-                                    const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
-                                    dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
-                                });
-                                fireWeapon(dynamicSegments);
-                            }
                         }
                     } else if (name === 'reload') {
                         const player = playerRef.current;
@@ -3446,6 +3498,8 @@ const handleTouchStart = (event: TouchEvent) => {
                                 combatModeRef.current = 'gun';
                             }
                         }
+                    } else if (name === 'fireModeSwitch') {
+                        switchFireMode();
                     }
                     consumed = true;
                     break;
@@ -3563,6 +3617,8 @@ const handleTouchEnd = (event: TouchEvent) => {
             touchState.melee.id = null;
         } else if (id === touchState.throwableSelect.id) {
             touchState.throwableSelect.id = null;
+        } else if (id === touchState.fireModeSwitch.id) {
+            touchState.fireModeSwitch.id = null;
         }
     }
 };

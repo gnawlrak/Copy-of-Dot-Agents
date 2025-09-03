@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { PlayerLoadout } from '../App';
+import { PlayerLoadout } from '../types';
 import { WEAPONS, THROWABLES, WEAPON_TYPES } from '../data/weapons';
 import { ThrowableType, AGENT_SKINS } from '../data/definitions';
 
@@ -103,6 +103,10 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                     <div className="flex-grow overflow-y-auto pr-2 space-y-4">
                         {weaponList.map(weaponName => {
                             const weapon = WEAPONS[weaponName];
+                            // FIX: Add a type guard to ensure weapon exists and is typed correctly.
+                            if (!weapon) {
+                                return null;
+                            }
                             const isSelected = currentLoadout[selectionPanel] === weapon.name;
                             return (
                                 <button

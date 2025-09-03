@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo } from 'react';
-import { WEAPONS, Attachment } from '../data/weapons';
+import { WEAPONS, Attachment, FireMode } from '../data/weapons';
 
 interface WeaponModificationMenuProps {
     weaponName: string;
@@ -73,10 +74,13 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
 
     const getStats = (attachments: { [slot:string]: string }) => {
         const stats = {
+            damage: weaponDef.damage,
             fireRate: weaponDef.fireRate,
             reloadTime: weaponDef.reloadTime,
             bulletRadius: weaponDef.bulletRadius,
             pellets: weaponDef.pellets,
+            spread: weaponDef.spread,
+            allowedFireModes: [...weaponDef.allowedFireModes],
         };
 
         Object.values(attachments).forEach(attachmentName => {
@@ -85,10 +89,19 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                 const attachment = weaponDef.attachmentSlots[slotName].find(a => a.name === attachmentName);
                 if (attachment) {
                     const mod = attachment.modifiers;
+                    if (mod.damage) stats.damage *= mod.damage;
                     if (mod.fireRate) stats.fireRate *= mod.fireRate;
                     if (mod.reloadTime) stats.reloadTime *= mod.reloadTime;
                     if (mod.bulletRadius) stats.bulletRadius += mod.bulletRadius;
                     if (mod.pellets) stats.pellets += mod.pellets;
+                    if (mod.spread) stats.spread *= mod.spread;
+                    if (mod.addFireModes) {
+                        mod.addFireModes.forEach(mode => {
+                            if (!stats.allowedFireModes.includes(mode)) {
+                                stats.allowedFireModes.push(mode);
+                            }
+                        });
+                    }
                     break; 
                 }
             }
@@ -99,13 +112,16 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
     const modifiedStats = useMemo(() => getStats(currentAttachments), [weaponDef, currentAttachments]);
     
     const previewStats = useMemo(() => {
-        if (!hoveredAttachment || !selectedSlot) return null;
+        if (!hoveredAttachment || !selectedSlot) return modifiedStats; // Show current stats if not hovering
         
         const previewAttachments = {...currentAttachments};
         previewAttachments[selectedSlot] = hoveredAttachment.name;
         
         return getStats(previewAttachments);
-    }, [hoveredAttachment, selectedSlot, currentAttachments, weaponDef]);
+    }, [hoveredAttachment, selectedSlot, currentAttachments, weaponDef, modifiedStats]);
+    
+    // Fallback to modifiedStats if previewStats is null (e.g. hovering 'None')
+    const displayStats = previewStats || modifiedStats;
 
     const attachmentSlots = weaponDef.attachmentSlots ? Object.keys(weaponDef.attachmentSlots) : [];
 
@@ -170,10 +186,31 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                 <div className="lg:col-span-2 bg-gray-900 border-2 border-gray-800 p-4 rounded-md flex flex-col">
                     <h2 className="text-2xl font-bold text-teal-400 tracking-wider mb-4 text-center uppercase">Weapon Stats</h2>
                     <div className="flex-grow flex flex-col justify-center gap-y-5">
+                        <StatBar label="Damage" baseValue={weaponDef.damage} modifiedValue={modifiedStats.damage} previewValue={previewStats?.damage} format={v => v.toFixed(0)} />
                         <StatBar label="Fire Rate" baseValue={weaponDef.fireRate} modifiedValue={modifiedStats.fireRate} previewValue={previewStats?.fireRate} lowerIsBetter format={v => `${(1/v).toFixed(1)}/s`} />
                         <StatBar label="Reload Speed" baseValue={weaponDef.reloadTime} modifiedValue={modifiedStats.reloadTime} previewValue={previewStats?.reloadTime} lowerIsBetter format={v => `${v.toFixed(1)}s`} />
+                        <StatBar label="Accuracy" baseValue={weaponDef.spread} modifiedValue={modifiedStats.spread} previewValue={previewStats?.spread} lowerIsBetter format={v => (100 - v * 100).toFixed(0)} />
                         <StatBar label={weaponDef.type === 'hitscan' ? "Impact" : "Bullet Size"} baseValue={weaponDef.bulletRadius} modifiedValue={modifiedStats.bulletRadius} previewValue={previewStats?.bulletRadius} format={v => v.toFixed(1)} />
                         {weaponDef.pellets > 1 && <StatBar label="Pellet Count" baseValue={weaponDef.pellets} modifiedValue={modifiedStats.pellets} previewValue={previewStats?.pellets} format={v => v.toFixed(0)} />}
+
+                        <div>
+                            <div className="flex justify-between items-baseline text-gray-400 mb-1">
+                                <span className="font-bold tracking-widest uppercase text-sm">Fire Modes</span>
+                            </div>
+                            <div className="flex gap-2 font-mono text-lg">
+                                {['semi', 'burst', 'auto'].map((mode) => {
+                                    const isAvailable = displayStats.allowedFireModes.includes(mode as FireMode);
+                                    const wasAvailable = modifiedStats.allowedFireModes.includes(mode as FireMode);
+                                    let color = 'text-gray-600';
+                                    if (isAvailable) {
+                                        color = wasAvailable ? 'text-white' : 'text-green-400';
+                                    } else if (wasAvailable) {
+                                        color = 'text-red-400';
+                                    }
+                                    return <span key={mode} className={`px-3 py-1 bg-gray-800 rounded-md ${color} transition-colors`}>{mode.toUpperCase()}</span>
+                                })}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

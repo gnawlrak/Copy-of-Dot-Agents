@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
@@ -9,33 +10,16 @@ import WeaponModificationMenu from './components/WeaponModificationMenu';
 import { ThrowableType, AGENT_SKINS } from './data/definitions';
 import { WEAPONS, WEAPON_TYPES } from './data/weapons';
 import ControlCustomizer from './components/ControlCustomizer';
+import { PlayerLoadout, CustomControls } from './types';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
 
-export interface PlayerLoadout {
-  primary: string;
-  secondary: string;
-  primaryAttachments: { [slot: string]: string };
-  secondaryAttachments: { [slot: string]: string };
-  throwables: { [key in ThrowableType]?: number };
-}
-
-// --- NEW: Types for Custom Controls ---
-export interface ControlLayout {
-    x: number; // 0-1, relative to width
-    y: number; // 0-1, relative to height
-    scale: number; // multiplier for base radius
-}
-export interface CustomControls {
-    baseScale: number; // Global scale for all buttons (e.g., 1.0)
-    opacity: number; // 0-1
-    layout: { [key: string]: ControlLayout };
-}
-
 const DEFAULT_LOADOUT: PlayerLoadout = {
-  primary: WEAPON_TYPES.primary[0],
+  primary: 'Assault Rifle',
   secondary: WEAPON_TYPES.secondary[0],
-  primaryAttachments: {},
+  primaryAttachments: {
+    'Trigger': '三连发扳机组' // Default with burst fire
+  },
   secondaryAttachments: {},
   throwables: {
     'grenade': 3,
@@ -55,6 +39,7 @@ const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
         switchWeapon:   { x: 0.85,  y: 0.86, scale: 0.8 },
         melee:          { x: 0.78,  y: 0.75, scale: 0.8 },
         throwableSelect:{ x: 0.78,  y: 0.86, scale: 0.8 },
+        fireModeSwitch: { x: 0.78,  y: 0.65, scale: 0.8 },
     },
 };
 

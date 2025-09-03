@@ -1,5 +1,4 @@
-
-
+import { FireMode } from "./weapons";
 
 export type ThrowableType = 'grenade' | 'flashbang';
 
@@ -27,13 +26,16 @@ export interface Weapon {
   pellets: number; // number of projectiles per shot
   spread: number; // in radians
   pelletSpread?: number; // extra random cone for shotgun pellets
-  automatic: boolean;
   magSize: number;
   ammoInMag: number;
   reserveAmmo: number;
   reloadTime: number; // seconds
   soundRadius: number;
   shake: (aimUx: number, aimUy: number) => void;
+  muzzleFlashMultiplier?: number;
+  // Custom properties added at runtime in GameCanvas
+  allowedFireModes: FireMode[];
+  currentFireMode: FireMode;
 }
 
 export interface AgentSkin {

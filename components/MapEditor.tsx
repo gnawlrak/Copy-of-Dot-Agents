@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { LevelDefinition, LevelWall, LevelDoor, LevelEnemy, saveCustomLevel } from '../levels/level-definitions';
-import { useDebounce } from '../hooks/useDebounce';
 
 // Define types for editor state
 type EditorTool = 'wall' | 'door' | 'enemy' | 'player' | 'erase' | 'extract';
