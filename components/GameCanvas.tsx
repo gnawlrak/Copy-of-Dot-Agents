@@ -1280,7 +1280,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 const damage = (1 - (dist / rad)) * (isPlayer ? 100 : 999);
                 if(isPlayer) {
                     const player = unit as Player;
-                    if(isEnded) return;
+                    if(isEnded || level.name === 'TRAINING GROUND') return; // Player is invincible in training
                     player.health -= damage;
                     player.hitTimer = 0.17; // seconds
                     
@@ -1310,6 +1310,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 }
             } else { // flashbang
                 if (isPlayer) {
+                    if (level.name === 'TRAINING GROUND') return; // Player is immune to flashbangs in training
                     const player = unit as Player;
                     const viewPoly = getVisionPolygon(player, dynamicSegments, {width: canvas.width, height: canvas.height});
                     if (pointInPoly(n.x, n.y, viewPoly)) {
@@ -1380,7 +1381,9 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
 
             if (cookState.type === 'flashbang') {
                 // Player held the flashbang for too long. Full white screen effect.
-                player.flashTimer = 2.5; // Max flash duration
+                 if (level.name !== 'TRAINING GROUND') {
+                    player.flashTimer = 2.5; // Max flash duration
+                 }
             }
 
             const selfDetonation: Throwable = {
@@ -1724,22 +1727,24 @@ doorsRef.current.forEach(door => {
                     soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
                 } else { // hitUnitType === 'player'
                     const playerUnit = hitUnit as Player;
-                    playerUnit.health -= bullet.damage;
-                    playerUnit.hitTimer = 0.17;
+                    if (level.name !== 'TRAINING GROUND') { // Player is invincible in training
+                        playerUnit.health -= bullet.damage;
+                        playerUnit.hitTimer = 0.17;
 
-                    // Add a distinct, directional screen shake for getting hit
-                    shakerRef.current.addImpulse({
-                        amp: 15 * scale,      // Stronger amplitude
-                        rotAmp: 0.03,         // More rotational shake
-                        freq: 40,             // Lower frequency for a "thud" feel
-                        decay: 25,            // Quick decay
-                        dirx: bullet.dx,      // Direction of the incoming shot
-                        diry: bullet.dy
-                    });
+                        // Add a distinct, directional screen shake for getting hit
+                        shakerRef.current.addImpulse({
+                            amp: 15 * scale,      // Stronger amplitude
+                            rotAmp: 0.03,         // More rotational shake
+                            freq: 40,             // Lower frequency for a "thud" feel
+                            decay: 25,            // Quick decay
+                            dirx: bullet.dx,      // Direction of the incoming shot
+                            diry: bullet.dy
+                        });
 
-                    if (playerUnit.health <= 0) {
-                        playerUnit.health = 0;
-                        isGameOverRef.current = true;
+                        if (playerUnit.health <= 0) {
+                            playerUnit.health = 0;
+                            isGameOverRef.current = true;
+                        }
                     }
                 }
             } else if (wallHit && closestT === wallHit.t) { // Wall hit is the closest
@@ -1828,6 +1833,9 @@ doorsRef.current.forEach(door => {
         
         // Helper to check if an angle is within a sweep that might wrap around PI
         const isAngleBetween = (start: number, end: number, mid: number) => {
+            start = normalizeAngle(start);
+            end = normalizeAngle(end);
+            mid = normalizeAngle(mid);
             if (start <= end) { // Normal case, e.g., from -1 to 1 rad
                 return mid >= start && mid <= end;
             } else { // Wraps around PI, e.g., from 3 to -3 rad
@@ -1835,15 +1843,15 @@ doorsRef.current.forEach(door => {
             }
         };
 
-        const sweepStart = normalizeAngle(slash.startA - slash.width * 0.5);
-        const sweepEnd = normalizeAngle(slash.curA + slash.width * 0.5);
+        const sweepStart = slash.prevA;
+        const sweepEnd = slash.curA;
 
         for (const enemy of enemiesRef.current) {
             if (enemy.health <= 0 || slashHitThisSwingRef.current.has(enemy)) continue;
             const dx = enemy.x - player.x, dy = enemy.y - player.y; const dist=Math.hypot(dx,dy);
             if (dist < slash.inner || dist > slash.range) continue;
             
-            const ang = Math.atan2(dy,dx); // This is already in (-PI, PI]
+            const ang = Math.atan2(dy,dx);
             
             if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
             
@@ -2034,8 +2042,10 @@ doorsRef.current.forEach(door => {
                                          let angleDiff = Math.abs(enemy.direction - angleToPlayer);
                                          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
                                          if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
-                                            player.health = 0;
-                                            isGameOverRef.current = true;
+                                            if (level.name !== 'TRAINING GROUND') { // Player is invincible in training
+                                                player.health = 0;
+                                                isGameOverRef.current = true;
+                                            }
                                          }
                                          const outer = (AXE_RANGE * scale);
                                          slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
@@ -2071,7 +2081,7 @@ doorsRef.current.forEach(door => {
                                             const hitY = enemy.y + finalUy * hitDist;
                                             tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
                                             
-                                            if (hitPlayer) {
+                                            if (hitPlayer && level.name !== 'TRAINING GROUND') {
                                                 player.health -= 11;
                                                 player.hitTimer = 0.17;
                                                 shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
