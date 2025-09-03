@@ -12,7 +12,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
     <div className="text-center flex flex-col items-center justify-center w-full h-full">
       <div className="mb-12">
         <h1 className="text-6xl lg:text-8xl font-bold tracking-widest text-teal-300 animate-pulse">DOT AGENTS</h1>
-        <p className="text-gray-400 mt-2 text-lg">《圆点杀机》 - Act 1: Silent Infiltration</p>
+        <p className="text-gray-400 mt-2 text-lg">Close-Quarters Battle Simulation</p>
       </div>
       <div className="flex flex-col gap-6">
         <button

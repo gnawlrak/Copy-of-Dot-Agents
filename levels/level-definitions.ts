@@ -23,6 +23,7 @@ export interface LevelEnemy {
   direction: number; // Angle in radians
   radius?: number; // Added for editor compatibility, optional in game
   type?: 'standard' | 'advanced';
+  isDummy?: boolean;
 }
 
 export interface LevelDefinition {
@@ -89,145 +90,52 @@ export const deleteCustomLevel = (uuid: string): void => {
 
 // --- Official Missions ---
 
-const THE_OFFICE: LevelDefinition = {
-  name: 'THE OFFICE',
-  description: 'Infiltrate a corporate office and neutralize all hostile agents. Tight corridors and multiple rooms demand careful planning.',
-  playerStart: { x: 0.5, y: 0.85 },
-  enemyCount: 5,
-  walls: [
-    // Outer boundary walls are implicitly handled, but we define inner walls.
-    // Vertical wall with door gap
-    { x: 0.25, y: 0, width: 0.015, height: 0.3 },
-    { x: 0.25, y: 0.3 + 0.15, width: 0.015, height: 1 - (0.3 + 0.15) }, // door length is 0.15 * height
-    // Other inner walls
-    { x: 0.75, y: 0.4, width: 0.015, height: 0.6 },
-    { x: 0.4, y: 0.4, width: 0.2, height: 0.02 }
-  ],
-  doors: [
-    {
-      id: 1,
-      hinge: { x: 0.25 + 0.015 / 2, y: 0.3 },
-      length: 0.15,
-      closedAngle: Math.PI / 2,
-      maxOpenAngle: Math.PI / 2 * 0.9,
-      swingDirection: 1,
-    }
-  ],
-  enemies: [
-    { x: 0.15, y: 0.2, direction: 0, type: 'standard' },
-    { x: 0.8, y: 0.25, direction: Math.PI, type: 'standard' },
-    { x: 0.5, y: 0.5, direction: -Math.PI / 2, type: 'standard' },
-    { x: 0.8, y: 0.8, direction: 3 * Math.PI / 2, type: 'standard' },
-    { x: 0.1, y: 0.8, direction: 0, type: 'standard' },
-    { x: 0.4, y: 0.1, direction: Math.PI/2, type: 'standard' },
-    { x: 0.6, y: 0.6, direction: Math.PI, type: 'advanced' },
-    { x: 0.9, y: 0.1, direction: 3*Math.PI/2, type: 'standard' },
-  ],
-};
-
-const THE_WAREHOUSE: LevelDefinition = {
-  name: 'THE WAREHOUSE',
-  description: 'A large, open warehouse with shipping containers for cover. Longer sightlines make this a different kind of challenge.',
+const TRAINING_GROUND: LevelDefinition = {
+  name: 'TRAINING GROUND',
+  description: 'Hone your skills. Practice movement, shooting, door manipulation, and throwable usage. Targets are non-hostile.',
   playerStart: { x: 0.1, y: 0.5 },
-  enemyCount: 5,
   walls: [
-    // Central container block
-    { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
-    // A few scattered crates
-    { x: 0.2, y: 0.2, width: 0.1, height: 0.1 },
-    { x: 0.7, y: 0.15, width: 0.15, height: 0.1 },
-    { x: 0.75, y: 0.7, width: 0.1, height: 0.2 },
-    { x: 0.25, y: 0.8, width: 0.2, height: 0.08 },
-  ],
-  doors: [],
-  enemies: [
-    { x: 0.5, y: 0.2, direction: Math.PI / 2, type: 'standard' },
-    { x: 0.8, y: 0.5, direction: Math.PI, type: 'standard' },
-    { x: 0.5, y: 0.8, direction: -Math.PI / 2, type: 'standard' },
-    { x: 0.3, y: 0.5, direction: 0, type: 'standard' },
-    { x: 0.15, y: 0.15, direction: Math.PI/4, type: 'advanced' },
-    { x: 0.8, y: 0.8, direction: -3*Math.PI/4, type: 'standard' },
-    { x: 0.8, y: 0.1, direction: -Math.PI/2, type: 'standard' },
-    { x: 0.5, y: 0.5, direction: 0, type: 'advanced' },
-  ],
-};
+    // Door Practice House (Top) - Outer walls
+    { x: 0.3, y: 0.1, width: 0.4, height: 0.015 }, // Top wall
+    { x: 0.3, y: 0.4, width: 0.4, height: 0.015 }, // Bottom wall
+    { x: 0.3, y: 0.1, width: 0.01, height: 0.3 }, // Left wall
+    { x: 0.7, y: 0.1, width: 0.01, height: 0.3 }, // Right wall
+    
+    // -- RE-CORRECTED: Properly defined internal walls with clear doorways --
+    // Vertical divider with a doorway (gap from y=0.2 to y=0.3)
+    { x: 0.5, y: 0.1, width: 0.01, height: 0.1 },      // Top part
+    { x: 0.5, y: 0.3, width: 0.01, height: 0.1 },      // Bottom part
 
-const THE_COMPLEX: LevelDefinition = {
-  name: 'THE COMPLEX',
-  description: 'A sprawling multi-wing facility. Neutralize all targets in this high-threat environment.',
-  playerStart: { x: 0.5, y: 0.95 },
-  enemyCount: 10,
-  walls: [
-    // --- Main Structure Walls ---
-    // Left vertical wall
-    { x: 0.3, y: 0.1, width: 0.015, height: 0.6 },
-    { x: 0.3, y: 0.8, width: 0.015, height: 0.1 },
-    // Right vertical wall
-    { x: 0.7, y: 0.1, width: 0.015, height: 0.6 },
-    { x: 0.7, y: 0.8, width: 0.015, height: 0.1 },
-    // Top horizontal wall
-    { x: 0.1, y: 0.1, width: 0.8, height: 0.02 },
-    // Bottom horizontal wall
-    { x: 0.3, y: 0.8, width: 0.4, height: 0.02 },
+    // Horizontal divider with a doorway (gap from x=0.45 to x=0.55)
+    { x: 0.3, y: 0.25, width: 0.15, height: 0.015 },   // Left part
+    { x: 0.55, y: 0.25, width: 0.15, height: 0.015 },  // Right part
 
-    // --- Left Wing (Offices) ---
-    // Horizontal dividers
-    { x: 0.1, y: 0.3, width: 0.2, height: 0.02 },
-    { x: 0.1, y: 0.6, width: 0.2, height: 0.02 },
-    // Vertical divider
-    { x: 0.18, y: 0.3, width: 0.015, height: 0.09 },
-    { x: 0.18, y: 0.41, width: 0.015, height: 0.08 },
-    { x: 0.18, y: 0.51, width: 0.015, height: 0.09 },
-    { x: 0.3, y: 0.1, width: 0.015, height: 0.09 },
-    { x: 0.3, y: 0.21, width: 0.015, height: 0.09 },
-
-    // --- Right Wing (Server Room) ---
-    // Server racks (cover)
-    { x: 0.75, y: 0.2, width: 0.02, height: 0.15 },
-    { x: 0.85, y: 0.2, width: 0.02, height: 0.15 },
-    { x: 0.75, y: 0.45, width: 0.02, height: 0.15 },
-    { x: 0.85, y: 0.45, width: 0.02, height: 0.15 },
-    { x: 0.78, y: 0.7, width: 0.1, height: 0.02 },
-
-    // --- Central Area (Low Cover) ---
-    { x: 0.45, y: 0.4, width: 0.1, height: 0.02 },
-    { x: 0.45, y: 0.5, width: 0.1, height: 0.02 },
+    // Grenade Pit (Bottom)
+    { x: 0.3, y: 0.7, width: 0.4, height: 0.015 }, // Top wall of pit
+    { x: 0.3, y: 0.7, width: 0.01, height: 0.2 }, // Left wall of pit
+    { x: 0.7, y: 0.7, width: 0.01, height: 0.2 }, // Right wall of pit
   ],
   doors: [
-    // Entrance to left wing
-    { id: 1, hinge: { x: 0.3, y: 0.7 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
-    // Entrance to right wing
-    { id: 2, hinge: { x: 0.7, y: 0.7 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
-    // Doors for offices in left wing
-    // Top-left office
-    { id: 3, hinge: { x: 0.18, y: 0.4 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
-    // Bottom-left office
-    { id: 4, hinge: { x: 0.18, y: 0.5 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
-    // Top-right office (of the left wing)
-    { id: 5, hinge: { x: 0.3, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    // Doors for the practice house
+    { id: 1, hinge: { x: 0.4, y: 0.4 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 }, // Bottom door left room
+    { id: 2, hinge: { x: 0.6, y: 0.4 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },// Bottom door right room
+    
+    // -- RE-CORRECTED: Internal doors now positioned in the new gaps --
+    // Door in vertical divider (gap from y=0.2 to y=0.3)
+    { id: 3, hinge: { x: 0.5, y: 0.2 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 }, // Opens to the right, into top-right room
+    // Door in horizontal divider (gap from x=0.45 to x=0.55)
+    { id: 4, hinge: { x: 0.45, y: 0.25 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 }, // Opens downwards, into bottom-left room
   ],
   enemies: [
-    // Entrance guards
-    { x: 0.4, y: 0.85, direction: -Math.PI / 2, type: 'standard' },
-    { x: 0.6, y: 0.85, direction: -Math.PI / 2, type: 'standard' },
-    // Left wing
-    { x: 0.15, y: 0.15, direction: Math.PI / 4, type: 'standard' },
-    { x: 0.25, y: 0.45, direction: Math.PI, type: 'standard' },
-    { x: 0.15, y: 0.7, direction: 0, type: 'standard' },
-    // Right wing
-    { x: 0.8, y: 0.3, direction: Math.PI, type: 'advanced' },
-    { x: 0.8, y: 0.6, direction: Math.PI, type: 'standard' },
-    { x: 0.9, y: 0.5, direction: 3 * Math.PI / 2, type: 'standard' },
-    // Top area patrol
-    { x: 0.5, y: 0.15, direction: 0, type: 'advanced' },
-    // Additional spawns
-    { x: 0.5, y: 0.7, direction: -Math.PI / 2, type: 'standard' },
-    { x: 0.2, y: 0.5, direction: 0, type: 'standard' },
-    { x: 0.8, y: 0.8, direction: Math.PI, type: 'standard' },
-    { x: 0.9, y: 0.15, direction: Math.PI, type: 'advanced' },
-    { x: 0.1, y: 0.2, direction: 0, type: 'standard' },
-    { x: 0.1, y: 0.8, direction: 0, type: 'standard' },
+    // Static targets in a "shooting range" on the far right
+    { x: 0.9, y: 0.2, direction: Math.PI, isDummy: true },
+    { x: 0.9, y: 0.4, direction: Math.PI, isDummy: true },
+    { x: 0.9, y: 0.6, direction: Math.PI, isDummy: true },
+    { x: 0.9, y: 0.8, direction: Math.PI, isDummy: true },
+    // A target in one of the rooms
+    { x: 0.4, y: 0.2, direction: -Math.PI/2, isDummy: true },
   ],
+  enemyCount: 5,
 };
 
 const THE_FACTORY: LevelDefinition = {
@@ -324,8 +232,6 @@ const THE_FACTORY: LevelDefinition = {
 };
 
 export const MISSIONS: LevelDefinition[] = [
-  THE_OFFICE,
-  THE_WAREHOUSE,
-  THE_COMPLEX,
+  TRAINING_GROUND,
   THE_FACTORY,
 ];

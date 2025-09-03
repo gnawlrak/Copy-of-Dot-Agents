@@ -3,6 +3,7 @@ import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../App';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
 import { WEAPONS } from '../data/weapons';
+import ControlCustomizer from './ControlCustomizer';
 
 // Define types for geometry
 type Point = { x: number; y: number };
@@ -52,6 +53,7 @@ type Enemy = {
   stunTimer?: number;
   suppressionTimer?: number;
   type: 'standard' | 'advanced';
+  isDummy?: boolean;
   lastSeenTime?: number;
   // Advanced AI fields
   rifleAmmo?: number;
@@ -180,6 +182,9 @@ interface GameCanvasProps {
     agentSkinColor: string;
     customControls: CustomControls;
     aimSensitivity: number;
+    onAimSensitivityChange: (value: number) => void;
+    onCustomControlsChange: (layout: CustomControls) => void;
+    defaultControlsLayout: CustomControls;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
@@ -354,7 +359,7 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -375,6 +380,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
   const bulletsRef = useRef<Array<Bullet>>([]);
   const enemiesRef = useRef<Array<Enemy>>([]);
   const initialEnemyCountRef = useRef<number>(0);
+  const initialDummyEnemiesRef = useRef<Array<Enemy>>([]);
+  const respawningDummiesRef = useRef<Array<{ enemy: Enemy; respawnTimer: number }>>([]);
   const missionTimeRef = useRef<number>(0);
   const lightsRef = useRef<Array<Light>>([]);
   const sparksRef = useRef<Array<Spark>>([]);
@@ -427,6 +434,12 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       }
   });
   const hasUsedTouchRef = useRef<boolean>(false);
+
+  const [isPaused, setIsPaused] = useState(false);
+  const [showInGameSettings, setShowInGameSettings] = useState(false);
+  const [isCustomizingInGame, setIsCustomizingInGame] = useState(false);
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused }, [isPaused]);
   
     const touchStateRef = useRef({
         movement: { id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0, dx: 0, dy: 0 },
@@ -562,11 +575,11 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isThrowableModeRef.current || combatModeRef.current === 'slash') return;
     
     const currentWeapon = player.weapons[player.currentWeaponIndex];
-    if (currentWeapon.ammoInMag === 0) {
+    if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') {
         return;
     }
 
-    if (currentWeapon.magSize !== -1) {
+    if (currentWeapon.magSize !== -1 && level.name !== 'TRAINING GROUND') {
         currentWeapon.ammoInMag--;
     }
 
@@ -701,10 +714,12 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     if (!cookState) return;
 
     const throwableType = cookState.type;
-    if ((player.throwables[throwableType] ?? 0) <= 0) {
+    if ((player.throwables[throwableType] ?? 0) <= 0 && level.name !== 'TRAINING GROUND') {
         return; 
     }
-    player.throwables[throwableType]! -= 1;
+    if (level.name !== 'TRAINING GROUND') {
+        player.throwables[throwableType]! -= 1;
+    }
 
     const mouse = mousePosRef.current;
     const dx = mouse.x - player.x;
@@ -886,6 +901,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             const enemyType = e.type || 'standard';
             const maxHealth = enemyType === 'advanced' ? 150 : 100;
 
+            let finalEnemy: Enemy;
+
             const baseEnemy: Enemy = {
                 x: startX,
                 y: startY,
@@ -902,6 +919,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 stunTimer: 0,
                 suppressionTimer: 0,
                 type: enemyType,
+                isDummy: e.isDummy || false,
                 patrolStartX: startX,
                 patrolStartY: startY,
                 patrolStartDirection: e.direction,
@@ -923,7 +941,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             baseEnemy.y = finalPos.y;
 
             if (enemyType === 'advanced') {
-                return {
+                finalEnemy = {
                     ...baseEnemy,
                     rifleAmmo: 30,
                     isReloadingRifle: false,
@@ -933,8 +951,15 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                     axeState: 'idle' as const,
                     axeTimer: 0,
                 };
+            } else {
+                 finalEnemy = baseEnemy;
             }
-            return baseEnemy;
+            
+            if (finalEnemy.isDummy) {
+                initialDummyEnemiesRef.current.push(JSON.parse(JSON.stringify(finalEnemy)));
+            }
+
+            return finalEnemy;
         });
     };
 
@@ -1045,6 +1070,8 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       isExtractionActiveRef.current = false;
       missionTimeRef.current = 0;
       hasUsedTouchRef.current = false;
+      initialDummyEnemiesRef.current = [];
+      respawningDummiesRef.current = [];
       const parent = canvas.parentElement;
       if (parent) {
           canvas.width = parent.clientWidth;
@@ -1147,6 +1174,10 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     };
 
     const gameLoop = () => {
+      if (isPausedRef.current) {
+          animationFrameId = requestAnimationFrame(gameLoop);
+          return;
+      }
       const now = performance.now();
       const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
@@ -1167,22 +1198,31 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       const cx = canvas.width / 2;
       const cy = canvas.height / 2;
 
-      // --- View Rotation & Coordinate Logic ---
-      const playerDirection = playerDirectionRef.current;
 
-      // Calculate world coordinates of the mouse based on its screen position
-      // This is still needed for things that use an absolute target, like throwing grenades
-      const mx_s = mouseScreenPosRef.current.x - cx; // mouse screen vector
+      // Calculate world coordinates of the mouse. This is always needed for aiming throwables.
+      const mx_s = mouseScreenPosRef.current.x - cx;
       const my_s = mouseScreenPosRef.current.y - cy;
-      const rot_inv = playerDirection + Math.PI / 2; // inverse camera rotation
+      
+      const camAngle = hasUsedTouchRef.current ? playerDirectionRef.current + Math.PI / 2 : 0;
+      const rot_inv = camAngle;
       const cos_rot_inv = Math.cos(rot_inv);
       const sin_rot_inv = Math.sin(rot_inv);
-      const mx_w = mx_s * cos_rot_inv - my_s * sin_rot_inv; // mouse world vector from player
+      const mx_w = mx_s * cos_rot_inv - my_s * sin_rot_inv;
       const my_w = mx_s * sin_rot_inv + my_s * cos_rot_inv;
       mousePosRef.current = {
           x: mx_w + player.x,
           y: my_w + player.y,
       };
+
+      // --- Aiming and Direction Logic ---
+      if (!isEnded && !hasUsedTouchRef.current) {
+          // For KBM, player aims at the mouse cursor. Direction is calculated every frame.
+          const dx_aim = mousePosRef.current.x - player.x;
+          const dy_aim = mousePosRef.current.y - player.y;
+          playerDirectionRef.current = Math.atan2(dy_aim, dx_aim);
+      }
+      const playerDirection = playerDirectionRef.current;
+
 
       const dynamicSegments = [...wallSegmentsRef.current];
       doorsRef.current.forEach(door => {
@@ -1348,7 +1388,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
                 x: player.x, y: player.y, vx: 0, vy: 0, timer: 0, radius: 0,
             };
             detonate(selfDetonation);
-            if ((player.throwables[cookState.type] ?? 0) > 0) { player.throwables[cookState.type]! -= 1; }
+            if ((player.throwables[cookState.type] ?? 0) > 0 && level.name !== 'TRAINING GROUND') { player.throwables[cookState.type]! -= 1; }
             isAimingThrowableRef.current = false;
             cookingThrowableRef.current = null;
         }
@@ -1359,10 +1399,14 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
           player.reloadTimer -= dt;
           if (player.reloadTimer <= 0) {
               player.isReloading = false;
-              const ammoNeeded = currentWeapon.magSize - currentWeapon.ammoInMag;
-              const ammoToReload = Math.min(ammoNeeded, currentWeapon.reserveAmmo);
-              currentWeapon.ammoInMag += ammoToReload;
-              currentWeapon.reserveAmmo -= ammoToReload;
+              if (level.name === 'TRAINING GROUND' && currentWeapon.magSize !== -1) {
+                  currentWeapon.ammoInMag = currentWeapon.magSize;
+              } else {
+                  const ammoNeeded = currentWeapon.magSize - currentWeapon.ammoInMag;
+                  const ammoToReload = Math.min(ammoNeeded, currentWeapon.reserveAmmo);
+                  currentWeapon.ammoInMag += ammoToReload;
+                  currentWeapon.reserveAmmo -= ammoToReload;
+              }
           }
       }
       
@@ -1513,7 +1557,7 @@ doorsRef.current.forEach(door => {
 
       if (!isEnded) {
         let dx = 0; let dy = 0;
-        // Get screen-relative input vector
+        // Get screen-relative input vector from keys or touch
         if (touchState.movement.id !== null) {
             dx = touchState.movement.dx;
             dy = touchState.movement.dy;
@@ -1525,23 +1569,26 @@ doorsRef.current.forEach(door => {
         }
 
         if (dx !== 0 || dy !== 0) {
-          // Rotate movement vector to be relative to the player's aiming direction (the camera's "up").
-          const cos_rot_move = Math.cos(playerDirection);
-          const sin_rot_move = Math.sin(playerDirection);
-
-          // The player's aiming direction is now "forward".
-          // Input (dx, dy) is from screen coordinates (WASD), where -y is forward ('W').
-          // We map screen-right (dx) to the world vector perpendicular to the aim,
-          // and screen-forward (-dy) to the world vector parallel to the aim.
-          const world_dx = (dx * -sin_rot_move) - (dy * cos_rot_move);
-          const world_dy = (dx * cos_rot_move) - (dy * sin_rot_move);
-
           playerMoveSoundTimerRef.current -= dt;
           if (playerMoveSoundTimerRef.current <= 0) {
               playerMoveSoundTimerRef.current = 0.3; // sound every 0.3s
               soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'player_move' });
           }
 
+          let world_dx: number, world_dy: number;
+
+          if (hasUsedTouchRef.current) {
+            // Touch controls: movement is relative to player's aiming direction
+            const cos_rot_move = Math.cos(playerDirection);
+            const sin_rot_move = Math.sin(playerDirection);
+            world_dx = (dx * -sin_rot_move) - (dy * cos_rot_move);
+            world_dy = (dx * cos_rot_move) - (dy * sin_rot_move);
+          } else {
+            // KBM controls: movement is absolute to the map (W=up, A=left)
+            world_dx = dx;
+            world_dy = dy;
+          }
+          
           const len = Math.hypot(world_dx, world_dy);
           let final_dx = world_dx, final_dy = world_dy;
           if (len > 0) {
@@ -1767,20 +1814,39 @@ doorsRef.current.forEach(door => {
         const e = easeOutCubic(p);
         slash.prevA = slash.curA;
         slash.curA = slash.startA + (slash.endA - slash.startA) * e;
-        const a1 = Math.min(slash.prevA, slash.curA);
-        const a2 = Math.max(slash.prevA, slash.curA);
 
         const castDist = raycast(player.x, player.y, slash.curA, slash.range);
         const outer = Math.min(slash.range, castDist);
-        slashArcsRef.current.push({ x:player.x, y:player.y, a1: a1 - slash.width*0.5, a2: a2 + slash.width*0.5, inner: slash.inner, outer, ttl: 0.13, life: 0.13 });
+        slashArcsRef.current.push({ x:player.x, y:player.y, a1: slash.prevA - slash.width*0.5, a2: slash.curA + slash.width*0.5, inner: slash.inner, outer, ttl: 0.13, life: 0.13 });
+
+        // Helper to normalize angle to (-PI, PI]
+        const normalizeAngle = (angle: number) => {
+            while (angle <= -Math.PI) angle += 2 * Math.PI;
+            while (angle > Math.PI) angle -= 2 * Math.PI;
+            return angle;
+        };
+        
+        // Helper to check if an angle is within a sweep that might wrap around PI
+        const isAngleBetween = (start: number, end: number, mid: number) => {
+            if (start <= end) { // Normal case, e.g., from -1 to 1 rad
+                return mid >= start && mid <= end;
+            } else { // Wraps around PI, e.g., from 3 to -3 rad
+                return mid >= start || mid <= end;
+            }
+        };
+
+        const sweepStart = normalizeAngle(slash.startA - slash.width * 0.5);
+        const sweepEnd = normalizeAngle(slash.curA + slash.width * 0.5);
 
         for (const enemy of enemiesRef.current) {
             if (enemy.health <= 0 || slashHitThisSwingRef.current.has(enemy)) continue;
             const dx = enemy.x - player.x, dy = enemy.y - player.y; const dist=Math.hypot(dx,dy);
             if (dist < slash.inner || dist > slash.range) continue;
-            const ang = Math.atan2(dy,dx);
-            const withinSweep = ang >= a1 - slash.width*0.5 && ang <= a2 + slash.width*0.5;
-            if (!withinSweep) continue;
+            
+            const ang = Math.atan2(dy,dx); // This is already in (-PI, PI]
+            
+            if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
+            
             const dClear = raycast(player.x, player.y, ang, dist);
             if (dClear < dist - 1e-3) continue;
 
@@ -1846,8 +1912,23 @@ doorsRef.current.forEach(door => {
       const activeEnemies: Enemy[] = [];
         for (const enemy of enemiesRef.current) {
             if (enemy.health <= 0) {
-                // Keep dead enemies out of the active list
+                if (enemy.isDummy && level.name === 'TRAINING GROUND') {
+                    const originalState = initialDummyEnemiesRef.current.find(d => 
+                        d.patrolStartX === enemy.patrolStartX && d.patrolStartY === enemy.patrolStartY
+                    );
+                    if (originalState && !respawningDummiesRef.current.some(item => item.enemy.patrolStartX === originalState.patrolStartX && item.enemy.patrolStartY === originalState.patrolStartY)) {
+                         respawningDummiesRef.current.push({ 
+                            enemy: JSON.parse(JSON.stringify(originalState)),
+                            respawnTimer: 5.0
+                        });
+                    }
+                }
             } else {
+                if (enemy.isDummy) {
+                    activeEnemies.push(enemy);
+                    continue; // Skip all AI logic for dummy enemies
+                }
+
                 const wasAlert = enemy.isAlert;
 
                 if (!isEnded) {
@@ -2135,8 +2216,19 @@ doorsRef.current.forEach(door => {
             }
         }
         enemiesRef.current = activeEnemies;
+        
+      if (level.name === 'TRAINING GROUND') {
+          for (let i = respawningDummiesRef.current.length - 1; i >= 0; i--) {
+              const item = respawningDummiesRef.current[i];
+              item.respawnTimer -= dt;
+              if (item.respawnTimer <= 0) {
+                  enemiesRef.current.push(item.enemy);
+                  respawningDummiesRef.current.splice(i, 1);
+              }
+          }
+      }
 
-      if (!isEnded) {
+      if (!isEnded && level.name !== 'TRAINING GROUND') {
         const allEnemiesEliminated = enemiesRef.current.length === 0;
 
         if (allEnemiesEliminated) {
@@ -2169,6 +2261,41 @@ doorsRef.current.forEach(door => {
         });
         context.shadowBlur = 0;
   
+        // Draw Door Frames (the opening in the wall)
+        context.fillStyle = '#374151'; // Match the wall color for a "cutout" look
+        doorsRef.current.forEach(door => {
+            const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
+            if (brightness <= 0) return;
+
+            context.save();
+            context.translate(door.hinge.x, door.hinge.y);
+            context.rotate(door.closedAngle);
+            context.globalAlpha = brightness;
+            
+            const framePadding = 2 * scale; // How much bigger the opening is than the door
+            
+            // Draw a slightly larger rectangle behind the door to simulate the frame/opening
+            context.fillRect(
+              -framePadding, 
+              -(door.thickness / 2) - framePadding, 
+              door.length + (framePadding * 2), 
+              door.thickness + (framePadding * 2)
+            );
+
+            // Also draw a stroke to define the edge of the opening
+            context.strokeStyle = '#4b5563';
+            context.lineWidth = 1 * scale;
+            context.strokeRect(
+              -framePadding, 
+              -(door.thickness / 2) - framePadding, 
+              door.length + (framePadding * 2), 
+              door.thickness + (framePadding * 2)
+            );
+
+            context.restore();
+        });
+        context.globalAlpha = 1.0; // Reset alpha
+
         doorsRef.current.forEach(door => {
           const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
           const isLocked = door.locked;
@@ -2299,10 +2426,14 @@ doorsRef.current.forEach(door => {
       // Screen-space shake effect
       context.translate(ox, oy);
 
-      // Apply camera transformation to center on the player and rotate the view
+      // --- View Rotation & Coordinate Logic ---
       context.translate(cx, cy);
-      // Combine camera rotation and shake rotation
-      context.rotate(-(playerDirection + Math.PI / 2) + rot);
+      // For touch, camera rotates with player. For KBM, it's fixed north-up.
+      if (hasUsedTouchRef.current) {
+          context.rotate(-(playerDirection + Math.PI / 2) + rot);
+      } else {
+          context.rotate(rot); // Only apply camera shake rotation
+      }
       context.translate(-player.x, -player.y);
       
       const lightPolys = lightsRef.current.map(light => ({
@@ -2568,7 +2699,7 @@ doorsRef.current.forEach(door => {
 
       if (isAimingThrowableRef.current && !isEnded) {
         const currentThrowableType = player.throwableTypes[player.currentThrowableIndex];
-        if ((player.throwables[currentThrowableType] ?? 0) > 0) {
+        if ((player.throwables[currentThrowableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') {
             const mouse = mousePosRef.current;
             const dx = mouse.x - player.x, dy = mouse.y - player.y;
             const dist = Math.hypot(dx, dy);
@@ -2708,8 +2839,12 @@ doorsRef.current.forEach(door => {
         if (player.isReloading) {
             context.fillStyle = '#d4d4d4'; ammoText = 'RELOADING...';
         } else {
-            context.fillStyle = (currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0) ? '#999999' : 'white';
-            ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ${currentWeapon.reserveAmmo}`;
+            context.fillStyle = (currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') ? '#999999' : 'white';
+            if (level.name === 'TRAINING GROUND') {
+                ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ∞`;
+            } else {
+                ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ${currentWeapon.reserveAmmo}`;
+            }
         }
         context.fillText(ammoText, margin, weaponTextY);
       }
@@ -2721,7 +2856,11 @@ doorsRef.current.forEach(door => {
   context.textAlign = 'right';
   if (currentThrowableType) {
     context.fillText(`[F] ${currentThrowableType.toUpperCase()}`, canvas.width - margin, weaponTextY - (20 * scale));
-    context.fillText(`${throwableCount}`, canvas.width - margin, weaponTextY);
+    if (level.name === 'TRAINING GROUND') {
+        context.fillText(`∞`, canvas.width - margin, weaponTextY);
+    } else {
+        context.fillText(`${throwableCount}`, canvas.width - margin, weaponTextY);
+    }
     context.font = `${14 * scale}px mono`;
     context.fillStyle = '#a3a3a3';
     if (isAimingThrowableRef.current) {
@@ -2913,7 +3052,7 @@ doorsRef.current.forEach(door => {
           drawTouchButton('melee', 'melee', undefined, combatModeRef.current === 'slash');
 
           const throwableType = player.throwableTypes[player.currentThrowableIndex];
-          const throwableCount = player.throwables[throwableType] ?? 0;
+          const throwableCount = level.name === 'TRAINING GROUND' ? '∞' : (player.throwables[throwableType] ?? 0);
           const drawThrowableIcon = () => {
             if(!throwableType) return;
             const throwableRect = buttons.throwableSelect;
@@ -3035,7 +3174,7 @@ doorsRef.current.forEach(door => {
     gameLoop();
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return;
+      if (event.repeat || isPausedRef.current) return;
       const key = event.key.toLowerCase();
       if (key === 'r' && (isGameOverRef.current || isMissionCompleteRef.current)) {
         onMissionEnd(); return;
@@ -3078,7 +3217,9 @@ doorsRef.current.forEach(door => {
       if (key === 'r') {
         const player = playerRef.current;
         const weapon = player.weapons[player.currentWeaponIndex];
-        if (!player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && weapon.reserveAmmo > 0) {
+        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize;
+        const hasAmmo = weapon.reserveAmmo > 0;
+        if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
             player.isReloading = true; player.reloadTimer = weapon.reloadTime;
         }
         return;
@@ -3122,6 +3263,7 @@ doorsRef.current.forEach(door => {
       keysPressedRef.current.add(key);
     };
     const handleKeyUp = (event: KeyboardEvent) => {
+        if (isPausedRef.current) return;
         const key = event.key.toLowerCase();
         if (key === 'e') {
             stopDoorInteraction();
@@ -3135,13 +3277,11 @@ doorsRef.current.forEach(door => {
     };
 
     const handleMouseMove = (event: MouseEvent) => {
-        if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
-        
-        // --- Relative Aiming for Mouse ---
-        // event.movementX provides the delta, which is perfect for relative controls.
-        playerDirectionRef.current += event.movementX * BASE_AIM_SENSITIVITY * aimSensitivity;
-        
-        // We still need the absolute screen position for aiming throwables.
+        if (isGameOverRef.current || isMissionCompleteRef.current || !canvas || isPausedRef.current) return;
+
+        // For KBM, aiming is absolute based on cursor position, calculated in the game loop.
+        // For touch, aiming is handled by touch events.
+        // This function now only needs to update the mouse's screen coordinates.
         const rect = canvas.getBoundingClientRect();
         mouseScreenPosRef.current = {
             x: event.clientX - rect.left,
@@ -3149,7 +3289,7 @@ doorsRef.current.forEach(door => {
         };
     };
 const handleMouseDown = (event: MouseEvent) => {
-    if (isGameOverRef.current || isMissionCompleteRef.current) return;
+    if (isGameOverRef.current || isMissionCompleteRef.current || isPausedRef.current) return;
     
     const dynamicSegments = [...wallSegmentsRef.current];
     doorsRef.current.forEach(door => {
@@ -3162,7 +3302,7 @@ const handleMouseDown = (event: MouseEvent) => {
         event.preventDefault(); // Prevent context menu
         const player = playerRef.current;
         const throwableType = player.throwableTypes[player.currentThrowableIndex];
-        if ((player.throwables[throwableType] ?? 0) > 0 && !cookingThrowableRef.current) {
+        if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
             isAimingThrowableRef.current = true;
             const maxTimer = throwableType === 'grenade' ? 4.0 : 2.5; // seconds
             cookingThrowableRef.current = { type: throwableType, timer: maxTimer, maxTimer: maxTimer };
@@ -3184,6 +3324,7 @@ const handleMouseDown = (event: MouseEvent) => {
     }
 };
 const handleMouseUp = (event: MouseEvent) => {
+    if (isPausedRef.current) return;
     if (event.button === 0) { // Left mouse button up
         isShootingRef.current = false;
     }
@@ -3197,6 +3338,7 @@ const handleMouseUp = (event: MouseEvent) => {
 };
 
 const handleTouchStart = (event: TouchEvent) => {
+    if (isPausedRef.current) return;
     if (!hasUsedTouchRef.current) {
         hasUsedTouchRef.current = true;
     }
@@ -3232,7 +3374,7 @@ const handleTouchStart = (event: TouchEvent) => {
                         if (isThrowableModeRef.current) {
                             const player = playerRef.current;
                             const throwableType = player.throwableTypes[player.currentThrowableIndex];
-                            if ((player.throwables[throwableType] ?? 0) > 0 && !cookingThrowableRef.current) {
+                            if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
                                 isAimingThrowableRef.current = true;
                                 const maxTimer = throwableType === 'grenade' ? 4.0 : 2.5;
                                 cookingThrowableRef.current = { type: throwableType, timer: maxTimer, maxTimer: maxTimer };
@@ -3253,7 +3395,9 @@ const handleTouchStart = (event: TouchEvent) => {
                     } else if (name === 'reload') {
                         const player = playerRef.current;
                         const weapon = player.weapons[player.currentWeaponIndex];
-                        if (!player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && weapon.reserveAmmo > 0) {
+                        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize;
+                        const hasAmmo = weapon.reserveAmmo > 0;
+                        if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
                             player.isReloading = true;
                             player.reloadTimer = weapon.reloadTime;
                         }
@@ -3324,6 +3468,7 @@ const handleTouchStart = (event: TouchEvent) => {
 };
 
 const handleTouchMove = (event: TouchEvent) => {
+    if (isPausedRef.current) return;
     event.preventDefault();
     if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -3371,6 +3516,7 @@ const handleTouchMove = (event: TouchEvent) => {
 };
 
 const handleTouchEnd = (event: TouchEvent) => {
+    if (isPausedRef.current) return;
     event.preventDefault();
     for (const touch of Array.from(event.changedTouches)) {
         const id = touch.identifier;
@@ -3442,7 +3588,88 @@ const handleTouchEnd = (event: TouchEvent) => {
     };
   }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls, aimSensitivity]);
 
-  return <canvas ref={canvasRef} className="w-full h-full" />;
+  return (
+    <div className="w-full h-full relative font-mono">
+        <canvas ref={canvasRef} className="w-full h-full" />
+        
+        {level.name === 'TRAINING GROUND' && !isPaused && !isGameOverRef.current && !isMissionCompleteRef.current && (
+            <>
+                <button 
+                    onClick={onMissionEnd}
+                    className="absolute top-4 left-4 px-4 py-2 bg-red-800 bg-opacity-50 rounded-md text-white text-lg font-bold flex items-center justify-center border-2 border-red-600 hover:bg-opacity-75 hover:border-red-500 transition-all"
+                    aria-label="Quit Mission"
+                >
+                    QUIT
+                </button>
+                <button 
+                    onClick={() => {
+                        setIsPaused(true);
+                        setShowInGameSettings(true);
+                    }}
+                    className="absolute top-4 right-4 w-12 h-12 bg-black bg-opacity-30 rounded-full text-white text-2xl flex items-center justify-center border-2 border-gray-600 hover:bg-opacity-50 hover:border-teal-500 transition-all"
+                    aria-label="Open Settings"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </button>
+            </>
+        )}
+        
+        {showInGameSettings && (
+             <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true">
+                <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
+                    <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
+                    <div className="flex flex-col gap-2 py-4">
+                        <label htmlFor="ingame-sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
+                            <span>Aim Sensitivity</span>
+                            <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
+                        </label>
+                        <input
+                            id="ingame-sensitivity-slider"
+                            type="range" min="0.5" max="2.0" step="0.05"
+                            value={aimSensitivity}
+                            onChange={(e) => onAimSensitivityChange(parseFloat(e.target.value))}
+                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                    </div>
+                    <button
+                        onClick={() => {
+                            setShowInGameSettings(false);
+                            setIsCustomizingInGame(true);
+                        }}
+                        className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+                    >
+                        CUSTOMIZE CONTROLS
+                    </button>
+                    <button
+                        onClick={() => {
+                            setShowInGameSettings(false);
+                            setIsPaused(false);
+                        }}
+                        className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+                    >
+                        RESUME
+                    </button>
+                </div>
+            </div>
+        )}
+        
+        {isCustomizingInGame && (
+            <ControlCustomizer
+                initialLayout={customControls}
+                defaultLayout={defaultControlsLayout}
+                onSave={(newLayout) => {
+                    onCustomControlsChange(newLayout);
+                    setIsCustomizingInGame(false);
+                    setShowInGameSettings(true);
+                }}
+                onClose={() => {
+                    setIsCustomizingInGame(false);
+                    setShowInGameSettings(true);
+                }}
+            />
+        )}
+    </div>
+  );
 };
 
 export default GameCanvas;

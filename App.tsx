@@ -246,6 +246,9 @@ const App: React.FC = () => {
                     agentSkinColor={skinColor}
                     customControls={customControls}
                     aimSensitivity={aimSensitivity}
+                    onAimSensitivityChange={setAimSensitivity}
+                    onCustomControlsChange={setCustomControls}
+                    defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
                 />
               </div>
             </div>
