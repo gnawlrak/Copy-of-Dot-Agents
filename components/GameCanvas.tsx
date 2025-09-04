@@ -1,14 +1,13 @@
 
-
-
-
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
-import { WEAPONS } from '../data/weapons';
+import { WEAPONS, THROWABLES } from '../data/weapons';
 import ControlCustomizer from './ControlCustomizer';
 import { Difficulty } from '../App';
+import { Operator } from '../data/operators';
+import { MockNetworkClient, RemotePlayer, PlayerState, FireEventPayload } from '../network';
 
 // Define types for geometry
 type Point = { x: number; y: number };
@@ -39,6 +38,7 @@ type Bullet = {
   speed: number;
   damage: number;
   owner: 'player' | 'enemy';
+  isIncendiary?: boolean;
 };
 type Enemy = {
   x: number;
@@ -77,6 +77,8 @@ type Enemy = {
   isReturningToPost?: boolean;
   reactionTimer?: number;
   moveSoundTimer?: number;
+  burnTimer?: number;
+  burnDamage?: number;
 };
 type Player = {
     x: number;
@@ -97,7 +99,7 @@ type Player = {
     flashTimer: number; // seconds
     medkits: number;
     isHealing: boolean;
-    healTimer: number;
+    healTimer: number; // seconds
 }
 type Light = {
   x: number;
@@ -185,6 +187,7 @@ type ShakeWave = {
 interface GameCanvasProps {
     level: LevelDefinition;
     loadout: PlayerLoadout;
+    operator: Operator;
     onMissionEnd: () => void;
     showSoundWaves: boolean;
     agentSkinColor: string;
@@ -194,6 +197,8 @@ interface GameCanvasProps {
     onCustomControlsChange: (layout: CustomControls) => void;
     defaultControlsLayout: CustomControls;
     difficulty: Difficulty;
+    isMultiplayer?: boolean;
+    networkClient?: MockNetworkClient | null;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
@@ -373,10 +378,39 @@ const distPtSegSquared = (px: number, py: number, ax: number, ay: number, bx: nu
     return { d2: dx * dx + dy * dy, cx, cy, t };
 };
 
-const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty }: GameCanvasProps): JSX.Element => {
+// FIX: Moved weaponShakeFunctions outside the component to be accessible by network event handlers.
+const weaponShakeFunctions: { [key: string]: (shaker: any, scale: number, ux: number, uy: number) => void } = {
+  'Pistol': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 8 * scale, rotAmp: 0.020, freq: 70, decay: 22, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 3 * scale, rotAmp: 0.010, freq: 120, decay: 28, dirx: -ux*0.2, diry: -uy*0.2 });
+  },
+  'Heavy Pistol': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 12 * scale, rotAmp: 0.025, freq: 60, decay: 23, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 5 * scale, rotAmp: 0.012, freq: 110, decay: 29, dirx: -ux*0.2, diry: -uy*0.2 });
+  },
+  'Shotgun': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 11 * scale, rotAmp: 0.028, freq: 65, decay: 24, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 4.5 * scale, rotAmp: 0.016, freq: 120, decay: 30, dirx: -ux*0.2, diry: -uy*0.2 });
+  },
+  'SMG': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 4.2 * scale, rotAmp: 0.012, freq: 95, decay: 26, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 1.6 * scale, rotAmp: 0.006, freq: 140, decay: 34, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
+  },
+  'Assault Rifle': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 6 * scale, rotAmp: 0.016, freq: 85, decay: 27, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 2.5 * scale, rotAmp: 0.008, freq: 130, decay: 33, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
+  },
+  'Machine Gun': (shaker, scale, ux, uy) => {
+      shaker.addImpulse({ amp: 5 * scale, rotAmp: 0.014, freq: 90, decay: 28, dirx: -ux, diry: -uy });
+      shaker.addImpulse({ amp: 2 * scale, rotAmp: 0.007, freq: 150, decay: 32, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
+  },
+};
+
+const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
+  const cameraScaleRef = useRef(1.0);
   const lastTimeRef = useRef(performance.now());
   const playerDirectionRef = useRef<number>(0);
   const playerRef = useRef<Player>({
@@ -385,6 +419,7 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
       throwables: {}, throwableTypes: [], currentThrowableIndex: 0, flashTimer: 0, 
       medkits: 0, isHealing: false, healTimer: 0
   });
+  const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const playerMoveSoundTimerRef = useRef<number>(0);
   const keysPressedRef = useRef<Set<string>>(new Set());
   const wallsRef = useRef<Array<Wall>>([]);
@@ -471,8 +506,41 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         throwableSelect: { id: null as number | null },
         fireModeSwitch: { id: null as number | null },
         heal: { id: null as number | null },
+        skill: { id: null as number | null },
+        ultimate: { id: null as number | null },
     });
     const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
+
+  // FIX: Moved door interaction functions into component scope to be accessible by multiple effects.
+  const startDoorInteraction = useCallback(() => {
+      const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+      if (!doorToInteract || doorToInteract.locked || playerRef.current.isHealing) return;
+
+      interactingDoorIdRef.current = doorToInteract.id;
+      doorToInteract.isPlayerHolding = true;
+      doorToInteract.targetAngle = null;
+
+      const relX = playerRef.current.x - doorToInteract.hinge.x;
+      const relY = playerRef.current.y - doorToInteract.hinge.y;
+      const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
+      const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
+      const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
+      
+      const pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
+      
+      doorToInteract.angularVelocity = 1.8 * pushDirection;
+  }, []);
+
+  const stopDoorInteraction = useCallback(() => {
+      if (interactingDoorIdRef.current !== null) {
+          const door = doorsRef.current.find(d => d.id === interactingDoorIdRef.current);
+          if (door) {
+              door.isPlayerHolding = false;
+              door.angularVelocity = 0;
+          }
+          interactingDoorIdRef.current = null;
+      }
+  }, []);
 
   // Circle-Rectangle collision detection helper function
   const checkCollision = (circle: {x: number, y: number, radius: number}, rect: {x: number, y: number, width: number, height: number}) => {
@@ -595,21 +663,35 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
     if (isGameOverRef.current || player.shootCooldown > 0 || player.isReloading || isThrowableModeRef.current || combatModeRef.current === 'slash' || player.isHealing) return;
     
     const currentWeapon = player.weapons[player.currentWeaponIndex];
-    if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') {
+    if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND' && !isMultiplayer) {
         return;
     }
 
-    if (currentWeapon.magSize !== -1 && level.name !== 'TRAINING GROUND') {
+    if (currentWeapon.magSize !== -1 && level.name !== 'TRAINING GROUND' && !isMultiplayer) {
         currentWeapon.ammoInMag--;
     }
 
     const baseAngle = playerDirectionRef.current;
     
+    if (isMultiplayer && networkClient) {
+        networkClient.send('fire-weapon', {
+            ownerId: networkClient.ownId,
+            weaponName: currentWeapon.name,
+            baseAngle: baseAngle,
+        });
+    }
+
+    createFireEffects(player.x, player.y, player.radius, baseAngle, currentWeapon, 'player', dynamicSegments);
+    
+    player.shootCooldown = currentWeapon.fireRate;
+  };
+
+  const createFireEffects = (ownerX: number, ownerY: number, ownerRadius: number, baseAngle: number, weapon: Weapon, ownerType: 'player' | 'enemy', dynamicSegments: Segment[]) => {
     const ux = Math.cos(baseAngle), uy = Math.sin(baseAngle);
-    currentWeapon.shake(ux, uy);
-    const muzzleFlashOffset = player.radius + (2 * scaleRef.current);
-    const muzzleX = player.x + ux * muzzleFlashOffset;
-    const muzzleY = player.y + uy * muzzleFlashOffset;
+    weapon.shake(ux, uy);
+    const muzzleFlashOffset = ownerRadius + (2 * scaleRef.current);
+    const muzzleX = ownerX + ux * muzzleFlashOffset;
+    const muzzleY = ownerY + uy * muzzleFlashOffset;
 
     const impact = (x: number, y: number) => {
         const shaker = shakerRef.current;
@@ -617,43 +699,45 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
         if(k>0){ shaker.addImpulse({ amp: 7*k, rotAmp: 0.012*k, freq: 55+40*Math.random(), decay: 18+6*Math.random(), dirx: dx/dist, diry: dy/dist }); }
     };
     
-    if (currentWeapon.type === 'hitscan') {
-        for (let i = 0; i < currentWeapon.pellets; i++) {
-            const spreadAmount = (currentWeapon.pellets > 1) ? (Math.random() - 0.5) * currentWeapon.spread : 0;
+    if (weapon.type === 'hitscan') {
+        for (let i = 0; i < weapon.pellets; i++) {
+            const spreadAmount = (weapon.pellets > 1) ? (Math.random() - 0.5) * weapon.spread : 0;
             const finalAngle = baseAngle + spreadAmount;
             const finalUx = Math.cos(finalAngle), finalUy = Math.sin(finalAngle);
 
             let nearestWallT = 9999;
             for(const s of dynamicSegments) {
-                const hit = intersectRaySegment(player.x, player.y, finalUx, finalUy, s);
+                const hit = intersectRaySegment(ownerX, ownerY, finalUx, finalUy, s);
                 if (hit && hit.t < nearestWallT) nearestWallT = hit.t;
             }
 
             let hitEnemy = null, nearestEnemyT = nearestWallT;
-            for (const enemy of enemiesRef.current) {
-                if (enemy.health <= 0) continue;
-                const dx = enemy.x - player.x, dy = enemy.y - player.y;
-                const t = dx * finalUx + dy * finalUy;
-                if (t > 0 && t < nearestEnemyT) {
-                    const ex = player.x + t * finalUx;
-                    const ey = player.y + t * finalUy;
-                    const distToRay = Math.hypot(ex - enemy.x, ey - enemy.y);
-                    if (distToRay < enemy.radius) {
-                        hitEnemy = enemy;
-                        nearestEnemyT = t;
+            if (ownerType === 'player') {
+                for (const enemy of enemiesRef.current) {
+                    if (enemy.health <= 0) continue;
+                    const dx = enemy.x - ownerX, dy = enemy.y - ownerY;
+                    const t = dx * finalUx + dy * finalUy;
+                    if (t > 0 && t < nearestEnemyT) {
+                        const ex = ownerX + t * finalUx;
+                        const ey = ownerY + t * finalUy;
+                        const distToRay = Math.hypot(ex - enemy.x, ey - enemy.y);
+                        if (distToRay < enemy.radius) {
+                            hitEnemy = enemy;
+                            nearestEnemyT = t;
+                        }
                     }
                 }
             }
 
             const hitDist = nearestEnemyT;
-            const hitX = player.x + finalUx * hitDist;
-            const hitY = player.y + finalUy * hitDist;
+            const hitX = ownerX + finalUx * hitDist;
+            const hitY = ownerY + finalUy * hitDist;
 
             tracersRef.current.push({ x1: muzzleX, y1: muzzleY, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
             
             if (hitEnemy) {
                 const healthBefore = hitEnemy.health;
-                hitEnemy.health -= currentWeapon.damage;
+                hitEnemy.health -= weapon.damage;
                 if (hitEnemy.health <= 0 && healthBefore > 0) {
                   hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
                 }
@@ -671,54 +755,57 @@ const GameCanvas = ({ level, loadout, onMissionEnd, showSoundWaves, agentSkinCol
             }
         }
     } else { // Projectile
-        if (currentWeapon.pellets > 1) { // Shotgun logic
-            const pelletSpread = currentWeapon.pelletSpread || currentWeapon.spread;
-            for (let i = 0; i < currentWeapon.pellets; i++) {
-                const jitter = (Math.random() - 0.5) * pelletSpread + (Math.random() - 0.5) * currentWeapon.spread;
+        if (weapon.pellets > 1) { // Shotgun logic
+            const pelletSpread = weapon.pelletSpread || weapon.spread;
+            for (let i = 0; i < weapon.pellets; i++) {
+                const jitter = (Math.random() - 0.5) * pelletSpread + (Math.random() - 0.5) * weapon.spread;
                 const finalAngle = baseAngle + jitter;
-                const speed = currentWeapon.bulletSpeed * (0.92 + Math.random() * 0.16);
+                const speed = weapon.bulletSpeed * (0.92 + Math.random() * 0.16);
                 bulletsRef.current.push({
                     x: muzzleX,
                     y: muzzleY,
                     dx: Math.cos(finalAngle),
                     dy: Math.sin(finalAngle),
-                    radius: currentWeapon.bulletRadius,
+                    radius: weapon.bulletRadius,
                     speed: speed,
-                    damage: currentWeapon.damage,
-                    owner: 'player'
+                    damage: weapon.damage,
+                    owner: ownerType,
+                    isIncendiary: weapon.specialEffect === 'burn',
                 });
             }
         } else { // Single projectile logic (e.g., Pistol)
-            const spreadAmount = (Math.random() - 0.5) * currentWeapon.spread;
+            const spreadAmount = (Math.random() - 0.5) * weapon.spread;
             const finalAngle = baseAngle + spreadAmount;
             bulletsRef.current.push({
                 x: muzzleX,
                 y: muzzleY,
                 dx: Math.cos(finalAngle),
                 dy: Math.sin(finalAngle),
-                radius: currentWeapon.bulletRadius,
-                speed: currentWeapon.bulletSpeed,
-                damage: currentWeapon.damage,
-                owner: 'player'
+                radius: weapon.bulletRadius,
+                speed: weapon.bulletSpeed,
+                damage: weapon.damage,
+                owner: ownerType,
+                isIncendiary: weapon.specialEffect === 'burn',
             });
         }
     }
     
-    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: currentWeapon.soundRadius * scaleRef.current, lifetime: 0.5, maxLifetime: 0.5, type: 'player_shoot' });
+    const scale = scaleRef.current;
+    const cameraScale = cameraScaleRef.current;
+    soundWavesRef.current.push({ x: ownerX, y: ownerY, radius: 0, maxRadius: weapon.soundRadius * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'player_shoot' });
 
-    lightsRef.current.push({ x: muzzleX, y: muzzleY, ttl: 0.08, life: 0.08, power: 1.0 + currentWeapon.pellets * 0.1, type: 'muzzle', openWindow: true });
-    
-    player.shootCooldown = currentWeapon.fireRate;
-  };
+    lightsRef.current.push({ x: muzzleX, y: muzzleY, ttl: 0.08, life: 0.08, power: 1.0 + weapon.pellets * 0.1, type: 'muzzle', openWindow: true });
+  }
 
   const startSlash = () => {
     const slash = slashStateRef.current;
     if (slash.active || slash.cdLeft > 0 || playerRef.current.isHealing) return;
-
+    const scale = scaleRef.current;
+    const cameraScale = cameraScaleRef.current;
     const player = playerRef.current;
     const ang = playerDirectionRef.current;
     const sweep = 120 * Math.PI / 180;
-    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 80 * scaleRef.current, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
+    soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 80 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
 
     slash.startA = ang - sweep * 0.5;
     slash.endA   = ang + sweep * 0.5;
@@ -795,6 +882,8 @@ const startHealing = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    cameraScaleRef.current = level.cameraScale || 1.0;
+
     const context = canvas.getContext('2d');
     if (!context) return;
     
@@ -828,7 +917,7 @@ const startHealing = () => {
         const distToDoor = pointToSegmentDistance({ x: player.x, y: player.y }, door.hinge, { x: endX, y: endY });
         
         // Player radius + half door thickness + a generous buffer
-        const campingThreshold = player.radius + (door.thickness / 2) + (30 * scaleRef.current); 
+        const campingThreshold = player.radius + (door.thickness / 2) + (30 * scaleRef.current / cameraScaleRef.current); 
 
         return distToDoor < campingThreshold;
     };
@@ -860,7 +949,8 @@ const startHealing = () => {
     const setupMap = () => {
         if (!canvas) return;
         const scale = scaleRef.current;
-        const wallThickness = 15 * scale;
+        const cameraScale = level.cameraScale || 1.0;
+        const wallThickness = 15 * scale / cameraScale;
         
         wallsRef.current = [];
         doorsRef.current = [];
@@ -920,9 +1010,15 @@ const startHealing = () => {
 
     const setupEnemies = () => {
         if (!canvas) return;
+        if (isMultiplayer) {
+            enemiesRef.current = [];
+            initialEnemyCountRef.current = 0;
+            return;
+        }
         const scale = scaleRef.current;
+        const cameraScale = level.cameraScale || 1.0;
         const viewDistance = canvas.width * 0.5; 
-        const enemySpeed = 120 * scale; // pixels/sec
+        const enemySpeed = 120 * scale / cameraScale; // pixels/sec
         const shootCooldownMax = 2; // seconds
 
         // Shuffle array function
@@ -952,7 +1048,7 @@ const startHealing = () => {
                 x: startX,
                 y: startY,
                 direction: e.direction,
-                radius: 12 * scale,
+                radius: 12 * scale / cameraScale,
                 health: maxHealth,
                 maxHealth: maxHealth,
                 fov: 130 * (Math.PI / 180), // 130 degrees in radians
@@ -1016,54 +1112,28 @@ const startHealing = () => {
     const initializePlayer = () => {
       if (!canvas) return;
       const scale = scaleRef.current;
+      const cameraScale = level.cameraScale || 1.0;
       const player = playerRef.current;
       player.x = level.playerStart.x * canvas.width;
       player.y = level.playerStart.y * canvas.height;
       player.health = player.maxHealth;
       player.hitTimer = 0;
-      player.radius = 10 * scale;
-      player.speed = 240 * scale; // pixels/sec
+      player.radius = 10 * scale / cameraScale;
+      player.speed = 240 * scale / cameraScale; // pixels/sec
       player.medkits = INITIAL_MEDKITS;
       player.isHealing = false;
       player.healTimer = 0;
       
       const shaker = shakerRef.current;
       
-      const weaponShakeFunctions: { [key: string]: (shaker: any, scale: number, ux: number, uy: number) => void } = {
-        'Pistol': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 8 * scale, rotAmp: 0.020, freq: 70, decay: 22, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 3 * scale, rotAmp: 0.010, freq: 120, decay: 28, dirx: -ux*0.2, diry: -uy*0.2 });
-        },
-        'Heavy Pistol': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 12 * scale, rotAmp: 0.025, freq: 60, decay: 23, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 5 * scale, rotAmp: 0.012, freq: 110, decay: 29, dirx: -ux*0.2, diry: -uy*0.2 });
-        },
-        'Shotgun': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 11 * scale, rotAmp: 0.028, freq: 65, decay: 24, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 4.5 * scale, rotAmp: 0.016, freq: 120, decay: 30, dirx: -ux*0.2, diry: -uy*0.2 });
-        },
-        'SMG': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 4.2 * scale, rotAmp: 0.012, freq: 95, decay: 26, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 1.6 * scale, rotAmp: 0.006, freq: 140, decay: 34, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
-        },
-        'Assault Rifle': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 6 * scale, rotAmp: 0.016, freq: 85, decay: 27, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 2.5 * scale, rotAmp: 0.008, freq: 130, decay: 33, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
-        },
-        'Machine Gun': (shaker, scale, ux, uy) => {
-            shaker.addImpulse({ amp: 5 * scale, rotAmp: 0.014, freq: 90, decay: 28, dirx: -ux, diry: -uy });
-            shaker.addImpulse({ amp: 2 * scale, rotAmp: 0.007, freq: 150, decay: 32, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
-        },
-      };
-
       const createWeaponInstance = (weaponName: string, attachments: { [slot: string]: string }): Weapon => {
           const def = WEAPONS[weaponName];
           if (!def) throw new Error(`Weapon definition not found for ${weaponName}`);
           
           const weapon: Weapon = {
               ...def,
-              bulletSpeed: def.bulletSpeed * scale,
-              bulletRadius: def.bulletRadius * scale,
+              bulletSpeed: def.bulletSpeed * scale / cameraScale,
+              bulletRadius: def.bulletRadius * scale / cameraScale,
               ammoInMag: def.magSize, // Start with a full mag
               reserveAmmo: def.reserveAmmo,
               shake: (ux: number, uy: number) => {
@@ -1087,7 +1157,7 @@ const startHealing = () => {
                     if (mod.soundRadius) weapon.soundRadius *= mod.soundRadius;
                     if (mod.fireRate) weapon.fireRate *= mod.fireRate;
                     if (mod.reloadTime) weapon.reloadTime *= mod.reloadTime;
-                    if (mod.bulletRadius) weapon.bulletRadius += mod.bulletRadius * scale;
+                    if (mod.bulletRadius) weapon.bulletRadius += mod.bulletRadius * scale / cameraScale;
                     if (mod.pellets) weapon.pellets += mod.pellets;
                     if (mod.magSize) {
                         weapon.magSize = Math.round(weapon.magSize * mod.magSize);
@@ -1100,6 +1170,9 @@ const startHealing = () => {
                                 weapon.allowedFireModes.push(mode);
                             }
                         });
+                    }
+                    if (mod.specialEffect) {
+                        weapon.specialEffect = mod.specialEffect;
                     }
                     break; 
                 }
@@ -1136,6 +1209,7 @@ const startHealing = () => {
       hasUsedTouchRef.current = false;
       initialDummyEnemiesRef.current = [];
       respawningDummiesRef.current = [];
+      remotePlayersRef.current.clear();
       const parent = canvas.parentElement;
       if (parent) {
           canvas.width = parent.clientWidth;
@@ -1150,7 +1224,7 @@ const startHealing = () => {
           const newRects: { [key: string]: { x: number; y: number; r: number } } = {};
           const baseRadius = (height * 0.06) * customControls.baseScale;
           for (const key in customControls.layout) {
-              const control = customControls.layout[key];
+              const control = customControls.layout[key as keyof typeof customControls.layout];
               newRects[key] = {
                   x: control.x * width,
                   y: control.y * height,
@@ -1179,10 +1253,11 @@ const startHealing = () => {
       soundWavesRef.current = [];
       shakerRef.current.waves = [];
       const scale = scaleRef.current;
+      const cameraScale = level.cameraScale || 1.0;
       slashStateRef.current.active = false;
       slashStateRef.current.cdLeft = 0;
-      slashStateRef.current.range = 90 * scale;
-      slashStateRef.current.inner = 15 * scale;
+      slashStateRef.current.range = 90 * scale / cameraScale;
+      slashStateRef.current.inner = 15 * scale / cameraScale;
       slashArcsRef.current = [];
       takedownHintEnemyRef.current = null;
       takedownEffectsRef.current = [];
@@ -1207,36 +1282,6 @@ const startHealing = () => {
       ctx.closePath();
     };
 
-    const startDoorInteraction = () => {
-        const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-        if (!doorToInteract || doorToInteract.locked || playerRef.current.isHealing) return;
-
-        interactingDoorIdRef.current = doorToInteract.id;
-        doorToInteract.isPlayerHolding = true;
-        doorToInteract.targetAngle = null;
-
-        const relX = playerRef.current.x - doorToInteract.hinge.x;
-        const relY = playerRef.current.y - doorToInteract.hinge.y;
-        const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
-        const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
-        const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
-        
-        const pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
-        
-        doorToInteract.angularVelocity = 1.8 * pushDirection;
-    };
-
-    const stopDoorInteraction = () => {
-        if (interactingDoorIdRef.current !== null) {
-            const door = doorsRef.current.find(d => d.id === interactingDoorIdRef.current);
-            if (door) {
-                door.isPlayerHolding = false;
-                door.angularVelocity = 0;
-            }
-            interactingDoorIdRef.current = null;
-        }
-    };
-
     const gameLoop = () => {
       if (isPausedRef.current) {
           animationFrameId = requestAnimationFrame(gameLoop);
@@ -1247,6 +1292,7 @@ const startHealing = () => {
       lastTimeRef.current = now;
 
       const scale = scaleRef.current;
+      const cameraScale = cameraScaleRef.current;
       const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
       if (isEnded && missionEndTimeRef.current === null) {
         missionEndTimeRef.current = now;
@@ -1264,8 +1310,8 @@ const startHealing = () => {
 
 
       // Calculate world coordinates of the mouse. This is always needed for aiming throwables.
-      const mx_s = mouseScreenPosRef.current.x - cx;
-      const my_s = mouseScreenPosRef.current.y - cy;
+      const mx_s = (mouseScreenPosRef.current.x - cx) / cameraScale;
+      const my_s = (mouseScreenPosRef.current.y - cy) / cameraScale;
       
       const camAngle = hasUsedTouchRef.current ? playerDirectionRef.current + Math.PI / 2 : 0;
       const rot_inv = camAngle;
@@ -1296,7 +1342,7 @@ const startHealing = () => {
       });
 
       const detonate = (n: Throwable) => {
-        const rad = (n.type === 'grenade' ? 230 : 280) * scale;
+        const rad = (n.type === 'grenade' ? 230 : 280) * scale / cameraScale;
         
         shakerRef.current.addImpulse({ amp: (n.type === 'grenade' ? 18 : 12) * scale, rotAmp: 0.04, freq: 50, decay: 15, dirx: 0, diry: 0 });
         
@@ -1308,7 +1354,7 @@ const startHealing = () => {
         explosionsRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: rad, lifetime: 0.5, maxLifetime: 0.5, type: n.type });
         
         const soundRadius = n.type === 'grenade' ? 800 : 600;
-        soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
+        soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: soundRadius * scale / cameraScale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
         
         if (n.type === 'grenade') {
             const doorsToDestroy = new Set<number>();
@@ -1441,8 +1487,9 @@ const startHealing = () => {
 
         if (cookingThrowableRef.current.timer <= 0) {
             const cookState = cookingThrowableRef.current;
+            const throwableInfo = THROWABLES[cookState.type];
 
-            if (cookState.type === 'flashbang') {
+            if (throwableInfo.type === 'flashbang') {
                 // Player held the flashbang for too long. Full white screen effect.
                 player.flashTimer = 2.5; // Max flash duration
             }
@@ -1542,7 +1589,7 @@ doorsRef.current.forEach(door => {
         const soundRadius = angularSpeed > 3.0 ? 250 : 100; // Fast vs slow swing
         const midX = door.hinge.x + door.length / 2 * Math.cos(newAngle);
         const midY = door.hinge.y + door.length / 2 * Math.sin(newAngle);
-        soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: soundRadius * scale, lifetime: 0.3, maxLifetime: 0.3, type: 'door' });
+        soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: soundRadius * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'door' });
         door.lastSoundTime = now;
     }
 
@@ -1630,7 +1677,7 @@ doorsRef.current.forEach(door => {
       interactionHintDoorIdRef.current = null;
       lockedDoorHintIdRef.current = null;
       if (interactingDoorIdRef.current === null) {
-          const interactionRadius = 50 * scale;
+          const interactionRadius = 50 * scale / cameraScale;
           let closestDist = interactionRadius;
           let closestDoor: Door | null = null;
 
@@ -1669,7 +1716,7 @@ doorsRef.current.forEach(door => {
           playerMoveSoundTimerRef.current -= dt;
           if (playerMoveSoundTimerRef.current <= 0) {
               playerMoveSoundTimerRef.current = 0.3; // sound every 0.3s
-              soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'player_move' });
+              soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'player_move' });
           }
 
           let world_dx: number, world_dy: number;
@@ -1717,8 +1764,8 @@ doorsRef.current.forEach(door => {
       }
 
        takedownHintEnemyRef.current = null;
-      if (!isEnded) {
-        const takedownDist = player.radius + 15 * scale;
+      if (!isEnded && !isMultiplayer) {
+        const takedownDist = player.radius + 15 * scale / cameraScale;
         let closestEnemy: Enemy | null = null;
         let closestDistSq = takedownDist * takedownDist;
     
@@ -1727,7 +1774,7 @@ doorsRef.current.forEach(door => {
     
             const dx = enemy.x - player.x;
             const dy = enemy.y - player.y;
-            const distSq = dx * dx + dy * dy;
+            const distSq = dx * dx * dy * dy;
     
             if (distSq < closestDistSq) {
                 const enemyForwardX = Math.cos(enemy.direction);
@@ -1753,7 +1800,7 @@ doorsRef.current.forEach(door => {
             player.isHealing = false;
             player.health = Math.min(player.maxHealth, player.health + HEAL_AMOUNT);
             // Optional: add a small visual/sound effect on heal completion
-            shockwavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 60 * scale, lifetime: 0.25, maxLifetime: 0.25 });
+            shockwavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 60 * scale / cameraScale, lifetime: 0.25, maxLifetime: 0.25 });
         }
       }
 
@@ -1826,11 +1873,18 @@ doorsRef.current.forEach(door => {
                     const enemy = hitUnit as Enemy;
                     const healthBefore = enemy.health;
                     enemy.health -= bullet.damage;
+
+                    if (bullet.isIncendiary) {
+                        enemy.burnTimer = 3.0; // 3 seconds
+                        enemy.burnDamage = 40; // 40 dmg/sec
+                        enemy.isAlert = true; // Make them react
+                    }
+
                     if (enemy.health <= 0 && healthBefore > 0) {
                       hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                     }
                     impact(impactX, impactY);
-                    soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
+                    soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
                 } else { // hitUnitType === 'player'
                     const playerUnit = hitUnit as Player;
                     playerUnit.health -= bullet.damage;
@@ -1854,7 +1908,7 @@ doorsRef.current.forEach(door => {
             } else if (wallHit && closestT === wallHit.t) { // Wall hit is the closest
                 removed = true;
                 impact(wallHit.x, wallHit.y);
-                soundWavesRef.current.push({ x: wallHit.x, y: wallHit.y, radius: 0, maxRadius: 200 * scale, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
+                soundWavesRef.current.push({ x: wallHit.x, y: wallHit.y, radius: 0, maxRadius: 200 * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
                 const ix = wallHit.x; const iy = wallHit.y;
                 const apx = bullet.x - ix; const apy = bullet.y - iy;
                 const al = Math.hypot(apx, apy) || 1;
@@ -1900,7 +1954,7 @@ doorsRef.current.forEach(door => {
           
           if ((collisionX || collisionY) && !throwable.hasBounced) {
             throwable.hasBounced = true;
-            soundWavesRef.current.push({ x: throwable.x, y: throwable.y, radius: 0, maxRadius: 120 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'bounce' });
+            soundWavesRef.current.push({ x: throwable.x, y: throwable.y, radius: 0, maxRadius: 120 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'bounce' });
           }
 
           if (collisionX) { throwable.vx *= bounceDamping; } else { throwable.x = newX; }
@@ -1970,7 +2024,7 @@ doorsRef.current.forEach(door => {
 
         if (castDist < slash.range - 0.5){
             const ix = player.x + Math.cos(slash.curA)*castDist; const iy = player.y + Math.sin(slash.curA)*castDist;
-            soundWavesRef.current.push({ x: ix, y: iy, radius: 0, maxRadius: 150 * scale, lifetime: 0.25, maxLifetime: 0.25, type: 'impact' });
+            soundWavesRef.current.push({ x: ix, y: iy, radius: 0, maxRadius: 150 * scale / cameraScale, lifetime: 0.25, maxLifetime: 0.25, type: 'impact' });
             const angle = slash.curA + Math.PI; const sparkCount = 5;
             for (let i = 0; i < sparkCount; i++) {
                 const spread = 0.9; const finalAngle = angle + (Math.random() - 0.5) * spread;
@@ -2018,6 +2072,15 @@ doorsRef.current.forEach(door => {
           spark.vx *= (1 - dt * 1);
       });
 
+       // Interpolate remote players
+      if (isMultiplayer) {
+          remotePlayersRef.current.forEach(p => {
+              const t = Math.min(1.5, (now - p.lastUpdateTime) / 100); // Allow some extrapolation
+              p.x += (p.targetX - p.x) * t;
+              p.y += (p.targetY - p.y) * t;
+          });
+      }
+
       const activeEnemies: Enemy[] = [];
         for (const enemy of enemiesRef.current) {
             if (enemy.health <= 0) {
@@ -2036,6 +2099,17 @@ doorsRef.current.forEach(door => {
                 if (enemy.isDummy) {
                     activeEnemies.push(enemy);
                     continue; // Skip all AI logic for dummy enemies
+                }
+
+                if (enemy.burnTimer && enemy.burnTimer > 0) {
+                    const healthBefore = enemy.health;
+                    const damageToApply = enemy.burnDamage! * dt;
+                    enemy.health -= damageToApply;
+                    enemy.burnTimer -= dt;
+
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                      hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                    }
                 }
 
                 const wasAlert = enemy.isAlert;
@@ -2064,21 +2138,21 @@ doorsRef.current.forEach(door => {
                         enemy.direction = Math.atan2(dyPlayer, dxPlayer);
                         
                         if (enemy.shootCooldown <= 0) {
-                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
                             lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
 
                             if (enemy.type === 'advanced') {
                                 const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
                                 tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: player.x, y2: player.y, ttl: 0.07, life: 0.07 });
                                 
-                                player.health -= 11;
+                                player.health -= 15;
                                 player.hitTimer = 0.17;
                                 shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
                                 if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
 
                                 enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
                             } else {
-                                bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
+                                bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 30, owner: 'enemy' });
                                 enemy.shootCooldown = enemy.shootCooldownMax * 0.4;
                             }
                         }
@@ -2165,6 +2239,7 @@ doorsRef.current.forEach(door => {
 
                                 if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
                                     if (enemy.type === 'advanced') {
+                                        const scaledAxeRange = AXE_RANGE * scale / cameraScale;
                                         // --- ADVANCED AI COMBAT ---
                                         if (enemy.axeState !== 'idle') {
                                             enemy.axeTimer! -= dt;
@@ -2172,9 +2247,9 @@ doorsRef.current.forEach(door => {
                                                 if (enemy.axeState === 'windup') {
                                                     enemy.axeState = 'swing';
                                                     enemy.axeTimer = AXE_SWING_DURATION;
-                                                    const midX = enemy.x + (AXE_RANGE * 0.5 * scale) * Math.cos(enemy.direction);
-                                                    const midY = enemy.y + (AXE_RANGE * 0.5 * scale) * Math.sin(enemy.direction);
-                                                    soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
+                                                    const midX = enemy.x + (scaledAxeRange * 0.5) * Math.cos(enemy.direction);
+                                                    const midY = enemy.y + (scaledAxeRange * 0.5) * Math.sin(enemy.direction);
+                                                    soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
                                                 } else if (enemy.axeState === 'swing') {
                                                     enemy.axeState = 'recover';
                                                     enemy.axeTimer = AXE_RECOVER_DURATION;
@@ -2189,13 +2264,13 @@ doorsRef.current.forEach(door => {
                                              const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
                                              let angleDiff = Math.abs(enemy.direction - angleToPlayer);
                                              if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-                                             if (distToPlayer < (AXE_RANGE * scale) + player.radius && angleDiff < axeArc / 2) {
+                                             if (distToPlayer < scaledAxeRange + player.radius && angleDiff < axeArc / 2) {
                                                 player.health = 0;
                                                 isGameOverRef.current = true;
                                              }
-                                             const outer = (AXE_RANGE * scale);
+                                             const outer = scaledAxeRange;
                                              slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
-                                        } else if (distToPlayer < AXE_RANGE * scale && enemy.axeState === 'idle') {
+                                        } else if (distToPlayer < scaledAxeRange && enemy.axeState === 'idle') {
                                             enemy.axeState = 'windup';
                                             enemy.axeTimer = AXE_WINDUP_DURATION;
                                         } else if (enemy.axeState === 'idle') {
@@ -2228,7 +2303,7 @@ doorsRef.current.forEach(door => {
                                                 tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
                                                 
                                                 if (hitPlayer) {
-                                                    player.health -= 11;
+                                                    player.health -= 15;
                                                     player.hitTimer = 0.17;
                                                     shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
                                                     if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
@@ -2239,7 +2314,7 @@ doorsRef.current.forEach(door => {
                                                 enemy.rifleAmmo!--;
                                                 enemy.burstShotsFired!++;
                                                 enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
-                                                soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                                soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
                                                 lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
 
                                                 if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
@@ -2253,8 +2328,8 @@ doorsRef.current.forEach(door => {
                                     } else {
                                         // --- STANDARD AI COMBAT ---
                                         if (enemy.shootCooldown <= 0) {
-                                            bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 15, owner: 'enemy' });
-                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                            bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 30, owner: 'enemy' });
+                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
                                             lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
                                             enemy.shootCooldown = enemy.shootCooldownMax;
                                         }
@@ -2291,7 +2366,7 @@ doorsRef.current.forEach(door => {
                                             x: enemy.x,
                                             y: enemy.y,
                                             radius: 0,
-                                            maxRadius: 120 * scale,
+                                            maxRadius: 120 * scale / cameraScale,
                                             lifetime: 0.3,
                                             maxLifetime: 0.3,
                                             type: 'enemy_move'
@@ -2365,7 +2440,7 @@ doorsRef.current.forEach(door => {
                 if (enemy.shootCooldown > 0) enemy.shootCooldown -= dt;
 
                 if (!wasAlert && enemy.isAlert) {
-                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4, type: 'enemy_shoot' });
+                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 300 * scale / cameraScale, lifetime: 0.4, maxLifetime: 0.4, type: 'enemy_shoot' });
                     if (difficulty === 'simple') {
                         enemy.reactionTimer = 0.75;
                     } else if (difficulty === 'normal') {
@@ -2389,7 +2464,7 @@ doorsRef.current.forEach(door => {
           }
       }
 
-      if (!isEnded && level.name !== 'TRAINING GROUND') {
+      if (!isEnded && level.name !== 'TRAINING GROUND' && !isMultiplayer) {
         const allEnemiesEliminated = enemiesRef.current.length === 0;
 
         if (allEnemiesEliminated) {
@@ -2484,6 +2559,22 @@ doorsRef.current.forEach(door => {
           context.beginPath();
           context.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
           context.fill();
+
+          if (enemy.burnTimer && enemy.burnTimer > 0) {
+              context.globalCompositeOperation = 'lighter';
+              const flicker = Math.sin(performance.now() / 60) * 0.5 + 0.5;
+              const radius = enemy.radius * (1.2 + flicker * 0.3);
+              const grad = context.createRadialGradient(enemy.x, enemy.y, 0, enemy.x, enemy.y, radius);
+              grad.addColorStop(0, `rgba(255, 200, 0, ${0.8 * flicker * brightness})`);
+              grad.addColorStop(0.7, `rgba(255, 100, 0, ${0.5 * flicker * brightness})`);
+              grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
+              context.fillStyle = grad;
+              context.beginPath();
+              context.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+              context.fill();
+              context.globalCompositeOperation = 'source-over';
+          }
+
             if (enemy.type === 'advanced' && enemy.axeState === 'windup') {
               const chargeProgress = 1 - (enemy.axeTimer! / AXE_WINDUP_DURATION);
               context.strokeStyle = `rgba(255, 100, 100, ${brightness * 0.8})`;
@@ -2572,6 +2663,25 @@ doorsRef.current.forEach(door => {
           context.shadowBlur = 15 * scale;
           context.fill();
           context.shadowBlur = 0;
+
+          // Render remote players
+          if (isMultiplayer) {
+              remotePlayersRef.current.forEach(p => {
+                  const brightness = getBrightnessByDistance(p.x, p.y, visionRadius);
+                  if (brightness <= 0) return;
+
+                  context.save();
+                  context.globalAlpha = brightness;
+                  context.beginPath();
+                  context.arc(p.x, p.y, player.radius, 0, Math.PI * 2);
+                  context.fillStyle = p.skinColor;
+                  context.shadowColor = p.skinColor;
+                  context.shadowBlur = 15 * scale;
+                  context.fill();
+                  context.shadowBlur = 0;
+                  context.restore();
+              });
+          }
         }
       }
 
@@ -2589,6 +2699,8 @@ doorsRef.current.forEach(door => {
 
       // --- View Rotation & Coordinate Logic ---
       context.translate(cx, cy);
+      context.scale(cameraScale, cameraScale);
+      
       // For touch, camera rotates with player. For KBM, it's fixed north-up.
       if (hasUsedTouchRef.current) {
           context.rotate(-(playerDirection + Math.PI / 2) + rot);
@@ -3032,8 +3144,8 @@ doorsRef.current.forEach(door => {
         if (player.isReloading) {
             context.fillStyle = '#d4d4d4'; ammoText = 'RELOADING...';
         } else {
-            context.fillStyle = (currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') ? '#999999' : 'white';
-            if (level.name === 'TRAINING GROUND') {
+            context.fillStyle = (currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND' && !isMultiplayer) ? '#999999' : 'white';
+            if (level.name === 'TRAINING GROUND' || isMultiplayer) {
                 ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ∞`;
             } else {
                 ammoText = (currentWeapon.magSize === -1) ? '∞' : `${currentWeapon.ammoInMag} / ${currentWeapon.reserveAmmo}`;
@@ -3074,815 +3186,393 @@ doorsRef.current.forEach(door => {
                     x: (enemy.x - player.x) * Math.cos(-(playerDirection + Math.PI/2)) - (enemy.y - player.y) * Math.sin(-(playerDirection + Math.PI/2)) + cx,
                     y: (enemy.x - player.x) * Math.sin(-(playerDirection + Math.PI/2)) + (enemy.y - player.y) * Math.cos(-(playerDirection + Math.PI/2)) + cy,
                 }
-                context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-                context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-                context.fillText("[E] Takedown", enemyScreenPos.x, enemyScreenPos.y - enemy.radius - (15 * scale));
-                context.shadowBlur = 0;
-            }
-          } else if (interactionHintDoorIdRef.current !== null && !isEnded) { // Priority 2: Door interaction
-            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-            context.fillText("[E] Door", cx, cy - player.radius - (20 * scale));
-            context.shadowBlur = 0;
-          } else if (lockedDoorHintIdRef.current !== null && !isEnded) { // Priority 2.5: Locked Door
-            context.font = `bold ${20 * scale}px mono`; context.fillStyle = '#ef4444'; context.textAlign = 'center';
-            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-            context.fillText("LOCKED", cx, cy - player.radius - (20 * scale));
-            context.shadowBlur = 0;
-          } else if (!isEnded && !player.isReloading && currentWeapon.magSize !== -1 && currentWeapon.ammoInMag === 0 && currentWeapon.reserveAmmo > 0) { // Priority 3: Reload
-            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-            context.fillText("[R]", cx, cy - player.radius - (20 * scale));
-            context.shadowBlur = 0;
-          } else if (!isEnded && !player.isHealing && player.medkits > 0 && player.health < player.maxHealth) {
-            context.font = `bold ${20 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'center';
-            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-            context.fillText("[H] Heal", cx, cy - player.radius - (20 * scale));
-            context.shadowBlur = 0;
-          }
-        }
-      
-      if (isExtractionActiveRef.current) {
-          context.textAlign = 'center';
-          context.font = `bold ${28 * scale}px mono`;
-          context.fillStyle = 'white'; context.shadowColor = '#34d399'; context.shadowBlur = 15 * scale;
-          context.fillText('ALL HOSTILES NEUTRALIZED. PROCEED TO EXTRACTION.', canvas.width / 2, 50 * scale);
-          context.shadowBlur = 0;
-      }
-      
-      if (hasUsedTouchRef.current) {
-          const { movement } = touchState;
-          const joystickBaseRadius = touchButtonRectsRef.current.joystick?.r || 70 * scale;
-          const joystickNubRadius = joystickBaseRadius * 0.4;
-
-          if(movement.id !== null){
-              context.fillStyle = `rgba(255, 255, 255, ${0.1 * customControls.opacity * 2})`;
-              context.beginPath();
-              context.arc(movement.startX, movement.startY, joystickBaseRadius, 0, Math.PI * 2);
-              context.fill();
-              
-              context.fillStyle = `rgba(255, 255, 255, ${0.3 * customControls.opacity * 2})`;
-              context.beginPath();
-              context.arc(movement.currentX, movement.currentY, joystickNubRadius, 0, Math.PI * 2);
-              context.fill();
-          } else {
-             const joystickRect = touchButtonRectsRef.current.joystick;
-             if (joystickRect) {
-                context.fillStyle = `rgba(255, 255, 255, ${0.1 * customControls.opacity * 2})`;
-                context.beginPath();
-                context.arc(joystickRect.x, joystickRect.y, joystickRect.r, 0, Math.PI * 2);
-                context.fill();
-             }
-          }
-
-          const drawTouchButton = (name: string, icon: string | (() => void), text?: string, glow?: boolean) => {
-            const rect = touchButtonRectsRef.current[name];
-            if (!rect) return;
-            const isPressed = (touchState as any)[name].id !== null;
-
-            context.save();
-            const baseAlpha = customControls.opacity;
-            if(isPressed) context.globalAlpha = Math.min(1.0, baseAlpha * 1.6);
-            else context.globalAlpha = baseAlpha;
-
-            context.beginPath();
-            context.arc(rect.x, rect.y, rect.r, 0, Math.PI * 2);
-            context.fillStyle = isPressed ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.1)';
-            context.fill();
-            context.strokeStyle = glow ? '#2dd4bf' : 'rgba(255, 255, 255, 0.4)';
-            context.lineWidth = glow ? 4 * scale : 2 * scale;
-            if (glow) {
-                context.shadowColor = '#2dd4bf';
-                context.shadowBlur = 15 * scale;
-            }
-            context.stroke();
-            context.restore();
-
-            context.save();
-            context.globalAlpha = Math.min(1.0, baseAlpha * 1.8);
-            const iconSize = rect.r * 0.9;
-            if (typeof icon === 'function') {
-                icon();
-            } else {
-                drawIcon(context, icon, rect.x, rect.y, iconSize, 'white');
-            }
-
-            if(text) {
+                context.font = `bold ${14 * scale}px mono`;
                 context.fillStyle = 'white';
-                context.font = `bold ${rect.r * 0.4}px mono`;
                 context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                const textX = rect.x + rect.r * 0.5;
-                const textY = rect.y - rect.r * 0.5;
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
-                context.fillText(text, textX, textY);
+                context.fillText('[E] TAKEDOWN', enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
+                context.shadowBlur = 0;
             }
-            context.restore();
-          }
-
-          const drawIcon = (ctx: CanvasRenderingContext2D, iconName: string, x: number, y: number, size: number, color: string) => {
-              ctx.save();
-              ctx.strokeStyle = color;
-              ctx.lineWidth = Math.max(1.5, size * 0.08);
-              ctx.lineCap = 'round';
-              ctx.lineJoin = 'round';
-              ctx.translate(x, y);
-              ctx.scale(size / 24, size / 24); // Standard 24x24 grid
-              ctx.beginPath();
-              
-              switch(iconName) {
-                  case 'fire':
-                      ctx.arc(0, 0, 8, 0, Math.PI * 2);
-                      ctx.moveTo(0, -10); ctx.lineTo(0, -6);
-                      ctx.moveTo(0, 10); ctx.lineTo(0, 6);
-                      ctx.moveTo(-10, 0); ctx.lineTo(-6, 0);
-                      ctx.moveTo(10, 0); ctx.lineTo(6, 0);
-                      break;
-                  case 'reload':
-                      ctx.arc(0, 0, 8, -Math.PI/2, Math.PI);
-                      ctx.moveTo(0, -8); ctx.lineTo(3, -11); ctx.lineTo(0, -14);
-                      ctx.rect(-3, -2, 6, 4);
-                      break;
-                  case 'interact':
-                      ctx.moveTo(-6, 10); ctx.lineTo(-6, -5); ctx.arc(-4.5, -5, 1.5, Math.PI, 0);
-                      ctx.lineTo(-3, 3); ctx.arc(-1.5, 3, 1.5, Math.PI, 0);
-                      ctx.lineTo(0, -5); ctx.arc(1.5, -5, 1.5, Math.PI, 0);
-                      ctx.lineTo(3, 3); ctx.arc(4.5, 3, 1.5, Math.PI, 0);
-                      ctx.lineTo(6, -8); ctx.arc(2, -9, 4, 0, -Math.PI * 0.8, true);
-                      break;
-                  case 'switchWeapon':
-                      ctx.moveTo(-9, -4); ctx.lineTo(9, -4); ctx.lineTo(5, -8);
-                      ctx.moveTo(-9, 4); ctx.lineTo(9, 4); ctx.lineTo(5, 8);
-                      break;
-                  case 'melee':
-                      ctx.moveTo(-8, 8); ctx.lineTo(0, 0); ctx.lineTo(8, -8);
-                      ctx.lineTo(5, -11); ctx.lineTo(-11, 5); ctx.closePath();
-                      break;
-                  case 'grenade':
-                      ctx.arc(0, 2, 8, 0, Math.PI * 2);
-                      ctx.rect(-2.5, -10, 5, 4);
-                      break;
-                  case 'flashbang':
-                      ctx.rect(-5, -8, 10, 16);
-                      ctx.moveTo(-5, -8); ctx.lineTo(5, -8);
-                      break;
-                  case 'throw':
-                      ctx.arc(-2, 0, 8, Math.PI * 0.6, -Math.PI * 0.6);
-                      ctx.moveTo(6, -8); ctx.lineTo(10, -5); ctx.lineTo(6, -2);
-                      break;
-                  case 'fireModeSwitch':
-                        ctx.moveTo(-8, -6); ctx.lineTo(8, -6);
-                        ctx.moveTo(-8, 0); ctx.lineTo(0, 0);
-                        ctx.moveTo(-8, 6); ctx.lineTo(-2, 6);
-                        break;
-                  case 'heal':
-                        ctx.moveTo(0, -8); ctx.lineTo(0, 8);
-                        ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
-                        break;
+          } else if (interactionHintDoorIdRef.current) {
+            const door = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+            if (door) {
+              const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
+              if (pointInPoly(midX, midY, viewPoly)) {
+                context.font = `bold ${14 * scale}px mono`;
+                context.fillStyle = 'white';
+                context.textAlign = 'center';
+                context.shadowColor = 'black';
+                context.shadowBlur = 5 * scale;
+                context.fillText('[E] INTERACT', midX, midY - 20 * scale);
+                context.shadowBlur = 0;
               }
-              ctx.stroke();
-              ctx.restore();
-          };
-
-          const buttons = touchButtonRectsRef.current;
-          let mainActionIcon = 'fire';
-          if(isThrowableModeRef.current) mainActionIcon = 'throw';
-          else if(combatModeRef.current === 'slash') mainActionIcon = 'melee';
-
-          drawTouchButton('fixedFire', mainActionIcon);
-          drawTouchButton('fire', mainActionIcon);
-          drawTouchButton('reload', 'reload', undefined, playerRef.current.isReloading);
-          const isInteracting = !!(takedownHintEnemyRef.current || interactionHintDoorIdRef.current);
-          drawTouchButton('interact', 'interact', undefined, isInteracting);
-          drawTouchButton('switchWeapon', 'switchWeapon');
-          drawTouchButton('melee', 'melee', undefined, combatModeRef.current === 'slash');
-          drawTouchButton('fireModeSwitch', 'fireModeSwitch');
-          drawTouchButton('heal', 'heal', undefined, playerRef.current.isHealing);
-
-          const throwableType = player.throwableTypes[player.currentThrowableIndex];
-          const throwableCount = level.name === 'TRAINING GROUND' ? '∞' : (player.throwables[throwableType] ?? 0);
-          const drawThrowableIcon = () => {
-            if(!throwableType) return;
-            const throwableRect = buttons.throwableSelect;
-            if (!throwableRect) return;
-            const iconSize = throwableRect.r * 0.8;
-            drawIcon(context, throwableType, throwableRect.x, throwableRect.y, iconSize, 'white');
-          };
-          drawTouchButton('throwableSelect', drawThrowableIcon, `${throwableCount}`, isThrowableModeRef.current);
+            }
+          } else if (lockedDoorHintIdRef.current) {
+            const door = doorsRef.current.find(d => d.id === lockedDoorHintIdRef.current);
+             if (door) {
+              const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
+              if (pointInPoly(midX, midY, viewPoly)) {
+                context.font = `bold ${14 * scale}px mono`;
+                context.fillStyle = 'red';
+                context.textAlign = 'center';
+                context.shadowColor = 'black';
+                context.shadowBlur = 5 * scale;
+                context.fillText('LOCKED', midX, midY - 20 * scale);
+                context.shadowBlur = 0;
+              }
+            }
+          }
       }
 
+      // Game Over / Mission Complete Text
       if (isEnded) {
-        const timeSinceEnd = (now - (missionEndTimeRef.current || now)) / 1000;
-        const fadeInDuration = 0.5;
-        const bgAlpha = Math.min(1, timeSinceEnd / fadeInDuration) * 0.85;
-        const contentAlpha = Math.min(1, Math.max(0, (timeSinceEnd - 0.2) / fadeInDuration));
+          const endDelay = 1500; // ms
+          if (now - (missionEndTimeRef.current ?? 0) > endDelay) {
+              context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+              context.fillRect(0, 0, canvas.width, canvas.height);
+              context.font = `bold ${48 * scale}px mono`;
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 10 * scale;
+              if (isMissionCompleteRef.current) {
+                  context.fillStyle = '#10b981';
+                  context.fillText('MISSION COMPLETE', cx, cy - 30 * scale);
+              } else {
+                  context.fillStyle = '#ef4444';
+                  context.fillText('MISSION FAILED', cx, cy - 30 * scale);
+              }
+              context.shadowBlur = 0;
+              context.font = `${18 * scale}px mono`;
+              context.fillStyle = 'white';
+              context.fillText(`Mission Time: ${missionTimeRef.current.toFixed(2)}s`, cx, cy + 20 * scale);
 
-        context.fillStyle = `rgba(15, 23, 42, ${bgAlpha})`; // slate-900
-        context.fillRect(0, 0, canvas.width, canvas.height);
+              context.font = `${24 * scale}px mono`;
+              context.fillText('Tap or press any key to continue', cx, cy + 80 * scale);
+          }
+      }
 
-        const boxWidth = Math.min(600 * scale, canvas.width * 0.8);
-        const boxHeight = 320 * scale;
-        const boxX = canvas.width / 2 - boxWidth / 2;
-        const boxY = canvas.height / 2 - boxHeight / 2 - 20 * scale;
-
-        if (contentAlpha > 0) {
-            context.save();
-            context.globalAlpha = contentAlpha;
-            context.strokeStyle = '#14b8a6'; // teal-500
-            context.lineWidth = 3 * scale;
-            context.strokeRect(boxX, boxY, boxWidth, boxHeight);
-
-            context.fillStyle = 'rgba(15, 23, 42, 0.5)'; // slate-900 with alpha
-            context.fillRect(boxX, boxY, boxWidth, boxHeight);
-
-            context.textAlign = 'center';
-            
-            const isComplete = isMissionCompleteRef.current;
-            
-            context.font = `bold ${48 * scale}px mono`;
-            context.shadowBlur = 20 * scale;
-            if(isComplete) {
-                context.fillStyle = '#2dd4bf'; // teal-400
-                context.shadowColor = '#2dd4bf';
-                context.fillText('MISSION COMPLETE', canvas.width / 2, boxY + 60 * scale);
-            } else {
-                context.fillStyle = '#f87171'; // red-400
-                context.shadowColor = '#f87171';
-                context.fillText('MISSION FAILED', canvas.width / 2, boxY + 60 * scale);
-            }
-            context.shadowBlur = 0;
-
-            context.fillStyle = '#334155'; // slate-700
-            context.fillRect(boxX + 40 * scale, boxY + 90 * scale, boxWidth - 80 * scale, 2 * scale);
-            
-            context.font = `${18 * scale}px mono`;
-            context.fillStyle = '#cbd5e1';
-            context.textAlign = 'left';
-
-            const missionTime = missionTimeRef.current;
-            const minutes = Math.floor(missionTime / 60);
-            const seconds = Math.floor(missionTime % 60);
-            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-            const enemiesKilled = initialEnemyCountRef.current - enemiesRef.current.length;
-            const killBonus = enemiesKilled * 100;
-            const survivalBonus = isComplete ? Math.floor(missionTime * 10) : 0;
-            const totalScore = killBonus + survivalBonus;
-
-            const statYStart = boxY + 120 * scale;
-            const statLineHeight = 28 * scale;
-            const statLabelX = boxX + 50 * scale;
-            const statValueX = boxX + boxWidth - 50 * scale;
-
-            context.fillText('MISSION TIME', statLabelX, statYStart);
-            context.fillText('HOSTILES KILLED', statLabelX, statYStart + statLineHeight);
-
-            context.textAlign = 'right';
-            context.fillText(timeString, statValueX, statYStart);
-            context.fillText(`${enemiesKilled} / ${initialEnemyCountRef.current}`, statValueX, statYStart + statLineHeight);
-            
-            if (isComplete) {
-                context.fillStyle = '#334155';
-                context.fillRect(boxX + 40 * scale, statYStart + statLineHeight * 1.6, boxWidth - 80 * scale, 1 * scale);
-                
-                context.fillStyle = '#cbd5e1';
-                context.textAlign = 'left';
-                context.fillText('KILL BONUS', statLabelX, statYStart + statLineHeight * 2.5);
-                context.fillText('SURVIVAL BONUS', statLabelX, statYStart + statLineHeight * 3.5);
-                
-                context.textAlign = 'right';
-                context.fillText(`${killBonus}`, statValueX, statYStart + statLineHeight * 2.5);
-                context.fillText(`${survivalBonus}`, statValueX, statYStart + statLineHeight * 3.5);
-
-                context.fillStyle = '#334155';
-                context.fillRect(boxX + 40 * scale, statYStart + statLineHeight * 4.3, boxWidth - 80 * scale, 1 * scale);
-                
-                context.font = `bold ${22 * scale}px mono`;
-                context.fillStyle = '#e2e8f0';
-                context.textAlign = 'left';
-                context.fillText('TOTAL SCORE', statLabelX, statYStart + statLineHeight * 5.5);
-                context.textAlign = 'right';
-                context.fillText(`${totalScore}`, statValueX, statYStart + statLineHeight * 5.5);
-            }
-
-            context.font = `${24 * scale}px mono`;
-            context.fillStyle = '#e2e8f0';
-            const promptAlpha = (Math.sin(performance.now() / 400) * 0.25 + 0.75);
-            context.globalAlpha = contentAlpha * promptAlpha;
-            context.textAlign = 'center';
-            context.fillText("Tap or Press [R] to Return", canvas.width / 2, boxY + boxHeight + 40 * scale);
-
-            context.restore();
-        }
+      // --- Draw touch controls on top of everything ---
+      if (hasUsedTouchRef.current && !isEnded) {
+          context.save();
+          context.globalAlpha = customControls.opacity;
+          for (const key in touchButtonRectsRef.current) {
+              const { x, y, r } = touchButtonRectsRef.current[key];
+              const isActive = (touchStateRef.current as any)[key].id !== null;
+              context.beginPath();
+              context.arc(x, y, r, 0, Math.PI * 2);
+              context.fillStyle = isActive ? `rgba(255, 255, 255, 0.4)` : `rgba(255, 255, 255, 0.2)`;
+              context.fill();
+              
+              context.fillStyle = 'rgba(0,0,0,0.7)';
+              context.font = `bold ${r * 0.3}px mono`;
+              context.textAlign = 'center';
+              context.textBaseline = 'middle';
+              context.fillText(key.toUpperCase(), x, y);
+          }
+           // Draw joystick handle
+          const joystick = touchStateRef.current.movement;
+          if (joystick.id !== null) {
+              const { x, y, r } = touchButtonRectsRef.current.joystick;
+              const handleX = x + joystick.dx * r * 0.5;
+              const handleY = y + joystick.dy * r * 0.5;
+              context.beginPath();
+              context.arc(handleX, handleY, r * 0.4, 0, Math.PI * 2);
+              context.fillStyle = `rgba(255, 255, 255, ${customControls.opacity * 1.5})`;
+              context.fill();
+          }
+          context.restore();
       }
 
       animationFrameId = requestAnimationFrame(gameLoop);
     };
 
+    const resizeHandler = () => {
+        if (!canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const parent = canvas.parentElement;
+        if (parent) {
+            canvas.width = parent.clientWidth;
+            canvas.height = parent.clientHeight;
+            scaleRef.current = canvas.height / BASE_LOGICAL_HEIGHT;
+            resetGame();
+        }
+    };
+
+    const handleResize = () => {
+        setIsPortrait(window.innerHeight > window.innerWidth);
+        resizeHandler();
+    };
+
+    resizeHandler();
     gameLoop();
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat || isPausedRef.current) return;
-      const key = event.key.toLowerCase();
-      if (key === 'r' && (isGameOverRef.current || isMissionCompleteRef.current)) {
-        onMissionEnd(); return;
-      }
-      if (isGameOverRef.current || isMissionCompleteRef.current) return;
-      
-      if (key === 'h') {
-        startHealing();
-        return;
-      }
-
-      if (key === 'g') {
-        switchFireMode();
-        return;
-      }
-
-      if (key === 'q') {
-          combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun';
-          if (isAimingThrowableRef.current) {
-              isAimingThrowableRef.current = false;
-              cookingThrowableRef.current = null;
-          }
-          return;
-      }
-
-      if (key === 'f') {
-    const player = playerRef.current;
-    if (player.throwableTypes.length > 1 && !isAimingThrowableRef.current) { // Don't switch while cooking
-        player.currentThrowableIndex = (player.currentThrowableIndex + 1) % player.throwableTypes.length;
-    }
-    return;
-  }
-    
-      if (['1', '2'].includes(key)) {
-        const weaponIndex = parseInt(key, 10) - 1;
-        const player = playerRef.current;
-        if (weaponIndex < player.weapons.length && player.currentWeaponIndex !== weaponIndex && !player.isHealing) {
-            player.currentWeaponIndex = weaponIndex; 
-            player.isReloading = false; 
-            player.reloadTimer = 0; 
-            isShootingRef.current = false;
-            combatModeRef.current = 'gun';
-            isThrowableModeRef.current = false;
-            isAimingThrowableRef.current = false;
-            cookingThrowableRef.current = null;
-        }
-        return;
-      }
-
-      if (key === 'r') {
-        const player = playerRef.current;
-        const weapon = player.weapons[player.currentWeaponIndex];
-        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && !player.isHealing;
-        const hasAmmo = weapon.reserveAmmo > 0;
-        if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
-            player.isReloading = true; player.reloadTimer = weapon.reloadTime;
-        }
-        return;
-      }
-      
-      if (key === 'e') {
-          if (takedownHintEnemyRef.current) {
-              const enemy = takedownHintEnemyRef.current;
-              const healthBefore = enemy.health;
-              enemy.health = 0;
-              if (healthBefore > 0) {
-                takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
-              }
-              takedownHintEnemyRef.current = null;
-              return;
-          }
-
-          const now = performance.now();
-          const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-
-          if (doorToInteract && !doorToInteract.locked) {
-              if (now - lastEKeyPressTimeRef.current < 300 && doorToInteract.id === lastInteractedDoorIdRef.current) {
-                  const openPosition = doorToInteract.closedAngle + doorToInteract.maxOpenAngle * doorToInteract.swingDirection;
-                  const isMostlyOpen = Math.abs(doorToInteract.currentAngle - doorToInteract.closedAngle) > doorToInteract.maxOpenAngle / 2;
-                  
-                  doorToInteract.targetAngle = isMostlyOpen ? doorToInteract.closedAngle : openPosition;
-                  doorToInteract.angularVelocity = 0;
-                  doorToInteract.isPlayerHolding = false;
-                  interactingDoorIdRef.current = null;
-                  lastEKeyPressTimeRef.current = 0;
-                  lastInteractedDoorIdRef.current = null;
-                  return;
-              }
-              
-              lastEKeyPressTimeRef.current = now;
-              lastInteractedDoorIdRef.current = doorToInteract.id;
-              startDoorInteraction();
-          }
-      }
-
-      keysPressedRef.current.add(key);
-    };
-    const handleKeyUp = (event: KeyboardEvent) => {
-        if (isPausedRef.current) return;
-        const key = event.key.toLowerCase();
-        if (key === 'e') {
-            stopDoorInteraction();
-        }
-        keysPressedRef.current.delete(key);
-    };
-    
-    const handleResize = () => { 
-        setIsPortrait(window.innerHeight > window.innerWidth);
-        resetGame(); 
-    };
-
-    const handleMouseMove = (event: MouseEvent) => {
-        if (isGameOverRef.current || isMissionCompleteRef.current || !canvas || isPausedRef.current) return;
-
-        // For KBM, aiming is absolute based on cursor position, calculated in the game loop.
-        // For touch, aiming is handled by touch events.
-        // This function now only needs to update the mouse's screen coordinates.
-        const rect = canvas.getBoundingClientRect();
-        mouseScreenPosRef.current = {
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-        };
-    };
-const handleMouseDown = (event: MouseEvent) => {
-    if (isGameOverRef.current || isMissionCompleteRef.current || isPausedRef.current) return;
-    
-    if (event.button === 2) { // Right mouse button
-        event.preventDefault(); // Prevent context menu
-        const player = playerRef.current;
-        if (player.isHealing) return;
-        const throwableType = player.throwableTypes[player.currentThrowableIndex];
-        if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
-            isAimingThrowableRef.current = true;
-            const maxTimer = throwableType === 'grenade' ? 4.0 : 2.5; // seconds
-            cookingThrowableRef.current = { type: throwableType, timer: maxTimer, maxTimer: maxTimer };
-        }
-        return;
-    }
-    
-    if (event.button === 0) { // Left mouse button
-        if (isAimingThrowableRef.current) return;
-
-        if (combatModeRef.current === 'slash') {
-            startSlash();
-            return;
-        }
-        isShootingRef.current = true;
-    }
-};
-const handleMouseUp = (event: MouseEvent) => {
-    if (isPausedRef.current) return;
-    if (event.button === 0) { // Left mouse button up
-        isShootingRef.current = false;
-        hasFiredSemiThisPressRef.current = false;
-        hasStartedBurstThisPressRef.current = false;
-    }
-    if (event.button === 2) { // Right mouse button up
-        if (cookingThrowableRef.current) {
-            throwThrowable();
-            isAimingThrowableRef.current = false;
-            cookingThrowableRef.current = null;
-        }
-    }
-};
-
-const handleTouchStart = (event: TouchEvent) => {
-    if (isPausedRef.current) return;
-    if (!hasUsedTouchRef.current) {
-        hasUsedTouchRef.current = true;
-    }
-    event.preventDefault();
-    if (isGameOverRef.current || isMissionCompleteRef.current) {
-      onMissionEnd();
-      return;
-    }
-    const rect = canvas.getBoundingClientRect();
-    const w = canvas.width;
-
-    for (const touch of Array.from(event.changedTouches)) {
-        const x = touch.clientX - rect.left;
-        const y = touch.clientY - rect.top;
-
-        let consumed = false;
-        for (const [name, rect] of Object.entries(touchButtonRectsRef.current)) {
-            if (name !== 'joystick' && Math.hypot(x - rect.x, y - rect.y) < rect.r) {
-                if ((touchStateRef.current as any)[name].id === null) {
-                    
-                    if (name === 'fire') {
-                        const fireState = touchStateRef.current.fire;
-                        fireState.id = touch.identifier;
-                        fireState.lastX = touch.clientX;
-                        fireState.lastY = touch.clientY;
-                    } else if (name === 'fixedFire') {
-                        touchStateRef.current.fixedFire.id = touch.identifier;
-                    } else {
-                        (touchStateRef.current as any)[name].id = touch.identifier;
-                    }
-
-                    if (name === 'fire' || name === 'fixedFire') {
-                        if (isThrowableModeRef.current) {
-                            const player = playerRef.current;
-                            if (player.isHealing) continue;
-                            const throwableType = player.throwableTypes[player.currentThrowableIndex];
-                            if (((player.throwables[throwableType] ?? 0) > 0 || level.name === 'TRAINING GROUND') && !cookingThrowableRef.current) {
-                                isAimingThrowableRef.current = true;
-                                const maxTimer = throwableType === 'grenade' ? 4.0 : 2.5;
-                                cookingThrowableRef.current = { type: throwableType, timer: maxTimer, maxTimer: maxTimer };
-                            }
-                        } else if (combatModeRef.current === 'slash') {
-                            startSlash();
-                        }
-                    } else if (name === 'reload') {
-                        const player = playerRef.current;
-                        const weapon = player.weapons[player.currentWeaponIndex];
-                        const canReload = !player.isReloading && weapon.magSize !== -1 && weapon.ammoInMag < weapon.magSize && !player.isHealing;
-                        const hasAmmo = weapon.reserveAmmo > 0;
-                        if (canReload && (hasAmmo || level.name === 'TRAINING GROUND')) {
-                            player.isReloading = true;
-                            player.reloadTimer = weapon.reloadTime;
-                        }
-                    } else if (name === 'interact') {
-                        if (takedownHintEnemyRef.current) {
-                            const enemy = takedownHintEnemyRef.current;
-                            enemy.health = 0;
-                            takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: enemy.radius * 2.5, lifetime: 0.25, maxLifetime: 0.25 });
-                            takedownHintEnemyRef.current = null;
-                        } else {
-                            startDoorInteraction();
-                        }
-                    } else if (name === 'switchWeapon') {
-                        const player = playerRef.current;
-                        if (player.isHealing) continue;
-                        player.currentWeaponIndex = (player.currentWeaponIndex + 1) % player.weapons.length;
-                        player.isReloading = false;
-                        player.reloadTimer = 0;
-                        combatModeRef.current = 'gun';
-                        isThrowableModeRef.current = false;
-                        isAimingThrowableRef.current = false;
-                        cookingThrowableRef.current = null;
-                    } else if (name === 'melee') {
-                        if (playerRef.current.isHealing) continue;
-                        combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun';
-                        isThrowableModeRef.current = false;
-                        if (isAimingThrowableRef.current) {
-                            isAimingThrowableRef.current = false;
-                            cookingThrowableRef.current = null;
-                        }
-                    } else if (name === 'throwableSelect') {
-                        const player = playerRef.current;
-                        if (player.isHealing) continue;
-                        if (player.throwableTypes.length > 0) {
-                            if (isThrowableModeRef.current) {
-                                player.currentThrowableIndex = (player.currentThrowableIndex + 1) % player.throwableTypes.length;
-                            } else {
-                                isThrowableModeRef.current = true;
-                                combatModeRef.current = 'gun';
-                            }
-                        }
-                    } else if (name === 'fireModeSwitch') {
-                        switchFireMode();
-                    } else if (name === 'heal') {
-                        startHealing();
-                    }
-                    consumed = true;
-                    break;
-                }
-            }
-        }
-
-        if (consumed) continue;
-
-        const joystickRect = touchButtonRectsRef.current.joystick;
-        if (joystickRect && touchStateRef.current.movement.id === null && Math.hypot(x - joystickRect.x, y - joystickRect.y) < joystickRect.r) {
-            const movement = touchStateRef.current.movement;
-            movement.id = touch.identifier;
-            movement.startX = joystickRect.x;
-            movement.startY = joystickRect.y;
-            movement.currentX = x;
-            movement.currentY = y;
-            movement.dx = 0;
-            movement.dy = 0;
-            continue;
-        }
-        
-        if (touchStateRef.current.aim.id === null) {
-            const aimState = touchStateRef.current.aim;
-            aimState.id = touch.identifier;
-            aimState.lastX = touch.clientX;
-            aimState.lastY = touch.clientY;
-        }
-    }
-};
-
-const handleTouchMove = (event: TouchEvent) => {
-    if (isPausedRef.current) return;
-    event.preventDefault();
-    if (isGameOverRef.current || isMissionCompleteRef.current || !canvas) return;
-    const rect = canvas.getBoundingClientRect();
-
-    for (const touch of Array.from(event.changedTouches)) {
-        const x = touch.clientX - rect.left;
-        const y = touch.clientY - rect.top;
-
-        if (touch.identifier === touchStateRef.current.movement.id) {
-            const movement = touchStateRef.current.movement;
-            movement.currentX = x;
-            movement.currentY = y;
-            const dx = movement.currentX - movement.startX;
-            const dy = movement.currentY - movement.startY;
-            const dist = Math.hypot(dx, dy);
-            const maxDist = touchButtonRectsRef.current.joystick?.r || 60 * scaleRef.current;
-
-            if (dist > 0) {
-                const limitedDist = Math.min(dist, maxDist);
-                movement.dx = (dx / dist) * (limitedDist / maxDist);
-                movement.dy = (dy / dist) * (limitedDist / maxDist);
-                
-                movement.currentX = movement.startX + movement.dx * maxDist;
-                movement.currentY = movement.startY + movement.dy * maxDist;
-            } else {
-                movement.dx = 0;
-                movement.dy = 0;
-            }
-        } else if (touch.identifier === touchStateRef.current.fire.id) {
-            const fireState = touchStateRef.current.fire;
-            const dx = touch.clientX - fireState.lastX;
-            playerDirectionRef.current += dx * BASE_AIM_SENSITIVITY * aimSensitivity;
-            fireState.lastX = touch.clientX;
-            fireState.lastY = touch.clientY;
-            mouseScreenPosRef.current = { x, y };
-        } else if (touch.identifier === touchStateRef.current.aim.id) {
-            const aimState = touchStateRef.current.aim;
-            const dx = touch.clientX - aimState.lastX;
-            playerDirectionRef.current += dx * BASE_AIM_SENSITIVITY * aimSensitivity;
-            aimState.lastX = touch.clientX;
-            aimState.lastY = touch.clientY;
-            mouseScreenPosRef.current = { x, y };
-        }
-    }
-};
-
-const handleTouchEnd = (event: TouchEvent) => {
-    if (isPausedRef.current) return;
-    event.preventDefault();
-    for (const touch of Array.from(event.changedTouches)) {
-        const id = touch.identifier;
-        const touchState = touchStateRef.current;
-
-        if (id === touchState.movement.id) {
-            touchState.movement.id = null;
-            touchState.movement.dx = 0;
-            touchState.movement.dy = 0;
-        } else if (id === touchState.fire.id) {
-            touchState.fire.id = null;
-            if (cookingThrowableRef.current) {
-                throwThrowable();
-                isAimingThrowableRef.current = false;
-                cookingThrowableRef.current = null;
-            }
-        } else if (id === touchState.fixedFire.id) {
-            touchState.fixedFire.id = null;
-            if (cookingThrowableRef.current) {
-                throwThrowable();
-                isAimingThrowableRef.current = false;
-                cookingThrowableRef.current = null;
-            }
-        } else if (id === touchState.aim.id) {
-            touchState.aim.id = null;
-        } else if (id === touchState.reload.id) {
-            touchState.reload.id = null;
-        } else if (id === touchState.interact.id) {
-            touchState.interact.id = null;
-            stopDoorInteraction();
-        } else if (id === touchState.switchWeapon.id) {
-            touchState.switchWeapon.id = null;
-        } else if (id === touchState.melee.id) {
-            touchState.melee.id = null;
-        } else if (id === touchState.throwableSelect.id) {
-            touchState.throwableSelect.id = null;
-        } else if (id === touchState.fireModeSwitch.id) {
-            touchState.fireModeSwitch.id = null;
-        } else if (id === touchState.heal.id) {
-            touchState.heal.id = null;
-        }
-    }
-};
-
     window.addEventListener('resize', handleResize);
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
-    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-    canvas.addEventListener('touchend', handleTouchEnd);
-    canvas.addEventListener('touchcancel', handleTouchEnd);
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('keyup', handleKeyUp);
-    
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('keyup', handleKeyUp);
-      
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('contextmenu', e => e.preventDefault());
-      canvas.removeEventListener('touchstart', handleTouchStart);
-      canvas.removeEventListener('touchmove', handleTouchMove);
-      canvas.removeEventListener('touchend', handleTouchEnd);
-      canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [level, loadout, onMissionEnd, showSoundWaves, agentSkinColor, isPortrait, customControls, aimSensitivity, difficulty]);
+  }, [level, difficulty, loadout, customControls, aimSensitivity, agentSkinColor, isMultiplayer]);
+
+  useEffect(() => {
+    if (!networkClient || !isMultiplayer) return;
+
+    const handleConnect = (payload: { id: string }) => console.log('Connected to mock server with ID:', payload.id);
+    const handlePlayerJoined = (payload: PlayerState) => remotePlayersRef.current.set(payload.id, { ...payload, targetX: payload.x, targetY: payload.y, lastUpdateTime: performance.now(), isShooting: false });
+    const handlePlayerLeft = (payload: { id: string }) => remotePlayersRef.current.delete(payload.id);
+    const handlePlayerUpdate = (payload: PlayerState & { isShooting: boolean }) => {
+        const p = remotePlayersRef.current.get(payload.id);
+        if (p) {
+            p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
+        } else {
+            handlePlayerJoined(payload);
+        }
+    };
+    const handleFireWeapon = (payload: FireEventPayload) => {
+        const p = remotePlayersRef.current.get(payload.ownerId);
+        const weaponDef = WEAPONS[payload.weaponName];
+        if (p && weaponDef) {
+            // FIX: Create a proper Weapon instance for the remote player to pass to createFireEffects
+            const scale = scaleRef.current;
+            const cameraScale = cameraScaleRef.current;
+            const remoteWeapon: Weapon = {
+                ...weaponDef,
+                bulletSpeed: weaponDef.bulletSpeed * scale / cameraScale,
+                bulletRadius: weaponDef.bulletRadius * scale / cameraScale,
+                shake: (ux: number, uy: number) => {
+                    const shakeFunc = weaponShakeFunctions[weaponDef.name];
+                    if (shakeFunc) {
+                        shakeFunc(shakerRef.current, scale, ux, uy);
+                    }
+                },
+                currentFireMode: weaponDef.defaultFireMode,
+                ammoInMag: weaponDef.magSize,
+                reserveAmmo: weaponDef.reserveAmmo,
+            };
+            const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
+            doorsRef.current.forEach(d => dynamicSegments.push({ a: d.hinge, b: { x: d.hinge.x + d.length * Math.cos(d.currentAngle), y: d.hinge.y + d.length * Math.sin(d.currentAngle) } }));
+            createFireEffects(p.x, p.y, playerRef.current.radius, payload.baseAngle, remoteWeapon, 'enemy', dynamicSegments);
+        }
+    };
+
+    networkClient.on('connect', handleConnect);
+    networkClient.on('player-joined', handlePlayerJoined);
+    networkClient.on('player-left', handlePlayerLeft);
+    networkClient.on('player-update', handlePlayerUpdate);
+    networkClient.on('fire-weapon', handleFireWeapon);
+    networkClient.connect({ x: playerRef.current.x, y: playerRef.current.y, skinColor: agentSkinColor });
+    const intervalId = setInterval(() => {
+        // FIX: Accessing private property 'connected'. Changed to public in network.ts.
+        if (networkClient.connected) {
+            const player = playerRef.current;
+            const isShooting = isShootingRef.current || touchStateRef.current.fire.id !== null || touchStateRef.current.fixedFire.id !== null;
+            networkClient.send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
+        }
+    }, 100);
+
+    return () => {
+        networkClient.off('connect', handleConnect);
+        networkClient.off('player-joined', handlePlayerJoined);
+        networkClient.off('player-left', handlePlayerLeft);
+        networkClient.off('player-update', handlePlayerUpdate);
+        networkClient.off('fire-weapon', handleFireWeapon);
+        clearInterval(intervalId);
+    };
+  }, [networkClient, isMultiplayer, agentSkinColor]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isGameOverRef.current || isMissionCompleteRef.current) { onMissionEnd(); return; }
+      if (e.key.toLowerCase() === 'p') { setIsPaused(p => !p); setShowInGameSettings(false); return; }
+      if (isPausedRef.current) return;
+      keysPressedRef.current.add(e.key.toLowerCase());
+      const player = playerRef.current;
+      switch (e.key.toLowerCase()) {
+        case 'r': if (!player.isReloading && player.weapons[player.currentWeaponIndex].ammoInMag < player.weapons[player.currentWeaponIndex].magSize) { player.isReloading = true; player.reloadTimer = player.weapons[player.currentWeaponIndex].reloadTime; } break;
+        case 'e':
+            const now = performance.now();
+            if (takedownHintEnemyRef.current) {
+                const enemy = takedownHintEnemyRef.current;
+                const healthBefore = enemy.health;
+                enemy.health = 0;
+                if (healthBefore > 0) {
+                    takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 60 * scaleRef.current, lifetime: 0.4, maxLifetime: 0.4 });
+                    soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
+                }
+            } else if (interactionHintDoorIdRef.current !== null) {
+                if (now - lastEKeyPressTimeRef.current < 300 && lastInteractedDoorIdRef.current === interactionHintDoorIdRef.current) {
+                    const door = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                    if (door) door.targetAngle = Math.abs(door.currentAngle - door.closedAngle) < 0.1 ? (door.closedAngle + door.maxOpenAngle * door.swingDirection) : door.closedAngle;
+                } else {
+                    // FIX: 'startDoorInteraction' is now in scope.
+                    startDoorInteraction();
+                }
+                lastEKeyPressTimeRef.current = now;
+                lastInteractedDoorIdRef.current = interactionHintDoorIdRef.current;
+            }
+            break;
+        case '1': if (!player.isReloading) player.currentWeaponIndex = 0; break;
+        case '2': if (!player.isReloading) player.currentWeaponIndex = 1; break;
+        case 'f':
+             isAimingThrowableRef.current = true;
+             const type = player.throwableTypes[player.currentThrowableIndex];
+             if (type) cookingThrowableRef.current = { type, timer: THROWABLES[type].fuse, maxTimer: THROWABLES[type].fuse };
+             break;
+        case 'q': combatModeRef.current = combatModeRef.current === 'gun' ? 'slash' : 'gun'; if (combatModeRef.current === 'slash') startSlash(); break;
+        case 'g': switchFireMode(); break;
+        case 'h': startHealing(); break;
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysPressedRef.current.delete(e.key.toLowerCase());
+      // FIX: 'stopDoorInteraction' is now in scope.
+      if (e.key.toLowerCase() === 'e') stopDoorInteraction();
+      if (e.key.toLowerCase() === 'f') {
+        if (isAimingThrowableRef.current && cookingThrowableRef.current) throwThrowable();
+        isAimingThrowableRef.current = false;
+        cookingThrowableRef.current = null;
+      }
+    };
+    const handleMouseDown = (e: MouseEvent) => { if (e.button === 0) isShootingRef.current = true; };
+    const handleMouseUp = (e: MouseEvent) => { if (e.button === 0) isShootingRef.current = false; };
+    const handleMouseMove = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      mouseScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, [onMissionEnd, startDoorInteraction, stopDoorInteraction]);
+
+  // FIX: Changed event type to match canvas element and removed local var from dependency array.
+  const handleTouch = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
+    if (isEnded) { onMissionEnd(); return; }
+    hasUsedTouchRef.current = true;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const touches = Array.from(e.touches);
+    const changedTouches = Array.from(e.changedTouches);
+    const touchState = touchStateRef.current;
+
+    const findTouchTarget = (touch: React.Touch | Touch) => {
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        for (const key in touchButtonRectsRef.current) {
+            const button = touchButtonRectsRef.current[key];
+            const distSq = (x - button.x)**2 + (y - button.y)**2;
+            if (distSq < button.r**2) return { key, x, y };
+        }
+        return { key: 'aim', x, y };
+    };
+
+    const processTouchStart = (touch: React.Touch | Touch) => {
+        const target = findTouchTarget(touch);
+        const controlKey = target.key as keyof typeof touchState;
+        if (controlKey === 'aim') {
+            if (touchState.aim.id === null) {
+                touchState.aim.id = touch.identifier;
+                touchState.aim.lastX = touch.clientX;
+                touchState.aim.lastY = touch.clientY;
+            }
+        } else if ((touchState as any)[controlKey].id === null) {
+            (touchState as any)[controlKey].id = touch.identifier;
+            if (controlKey === 'movement') {
+                touchState.movement.startX = touch.clientX;
+                touchState.movement.startY = touch.clientY;
+            }
+        }
+    };
+    const processTouchMove = (touch: React.Touch | Touch) => {
+        if (touch.identifier === touchState.movement.id) {
+            const joystickRect = touchButtonRectsRef.current.joystick;
+            const dx = touch.clientX - touchState.movement.startX;
+            const dy = touch.clientY - touchState.movement.startY;
+            const dist = Math.hypot(dx, dy);
+            const maxDist = joystickRect.r * 0.75;
+            const clampedDist = Math.min(dist, maxDist);
+            touchState.movement.dx = (dist > 0) ? (dx / dist) * (clampedDist / maxDist) : 0;
+            touchState.movement.dy = (dist > 0) ? (dy / dist) * (clampedDist / maxDist) : 0;
+        } else if (touch.identifier === touchState.aim.id || touch.identifier === touchState.fire.id) {
+            const lastX = touchState.aim.id === touch.identifier ? touchState.aim.lastX : touchState.fire.lastX;
+            const deltaX = touch.clientX - lastX;
+            const sensitivity = BASE_AIM_SENSITIVITY * aimSensitivity;
+            playerDirectionRef.current += deltaX * sensitivity;
+            if (touch.identifier === touchState.aim.id) touchState.aim.lastX = touch.clientX;
+            else touchState.fire.lastX = touch.clientX;
+        }
+    };
+    const processTouchEnd = (touch: React.Touch | Touch) => {
+        for (const key in touchState) {
+            if ((touchState as any)[key].id === touch.identifier) {
+                (touchState as any)[key].id = null;
+                if (key === 'movement') {
+                    touchState.movement.dx = 0;
+                    touchState.movement.dy = 0;
+                }
+            }
+        }
+    };
+
+    if (e.type === 'touchstart') changedTouches.forEach(processTouchStart);
+    else if (e.type === 'touchmove') changedTouches.forEach(processTouchMove);
+    else if (e.type === 'touchend' || e.type === 'touchcancel') changedTouches.forEach(processTouchEnd);
+  }, [onMissionEnd, aimSensitivity]);
 
   return (
-    <div className="w-full h-full relative font-mono">
-        <canvas ref={canvasRef} className="w-full h-full" />
-        
-        {level.name === 'TRAINING GROUND' && !isPaused && !isGameOverRef.current && !isMissionCompleteRef.current && (
-            <>
-                <button 
-                    onClick={onMissionEnd}
-                    className="absolute top-4 left-4 px-4 py-2 bg-red-800 bg-opacity-50 rounded-md text-white text-lg font-bold flex items-center justify-center border-2 border-red-600 hover:bg-opacity-75 hover:border-red-500 transition-all"
-                    aria-label="Quit Mission"
-                >
-                    QUIT
-                </button>
-                <button 
-                    onClick={() => {
-                        setIsPaused(true);
-                        setShowInGameSettings(true);
-                    }}
-                    className="absolute top-4 right-4 w-12 h-12 bg-black bg-opacity-30 rounded-full text-white text-2xl flex items-center justify-center border-2 border-gray-600 hover:bg-opacity-50 hover:border-teal-500 transition-all"
-                    aria-label="Open Settings"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </button>
-            </>
-        )}
-        
-        {showInGameSettings && (
-             <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true">
-                <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
-                    <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
-                    <div className="flex flex-col gap-2 py-4">
-                        <label htmlFor="ingame-sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
-                            <span>Aim Sensitivity</span>
-                            <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
-                        </label>
-                        <input
-                            id="ingame-sensitivity-slider"
-                            type="range" min="0.5" max="2.0" step="0.05"
-                            value={aimSensitivity}
-                            onChange={(e) => onAimSensitivityChange(parseFloat(e.target.value))}
-                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                        />
-                    </div>
-                    <button
-                        onClick={() => {
-                            setShowInGameSettings(false);
-                            setIsCustomizingInGame(true);
-                        }}
-                        className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
-                    >
-                        CUSTOMIZE CONTROLS
-                    </button>
-                    <button
-                        onClick={() => {
-                            setShowInGameSettings(false);
-                            setIsPaused(false);
-                        }}
-                        className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
-                    >
-                        RESUME
-                    </button>
-                </div>
+    <>
+      <canvas ref={canvasRef} className="w-full h-full" onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} onTouchCancel={handleTouch} />
+      {isPaused && (
+        <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40" role="dialog" aria-modal="true">
+          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30 text-center">
+            <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6">PAUSED</h2>
+            <button onClick={() => { setIsPaused(false); setShowInGameSettings(true); }} className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200">SETTINGS</button>
+            <button onClick={() => setIsPaused(false)} className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200">RESUME</button>
+            <button onClick={onMissionEnd} className="mt-8 w-full px-6 py-3 bg-red-800 text-white font-bold text-lg tracking-widest rounded-md border-2 border-red-600 hover:bg-red-700 hover:border-red-500 transition-colors duration-200">QUIT MISSION</button>
+          </div>
+        </div>
+      )}
+      {showInGameSettings && (
+         <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true">
+          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
+            <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
+            <div className="flex flex-col gap-2 py-4">
+              <label className="flex items-center justify-between text-lg text-gray-300">
+                <span>Aim Sensitivity</span>
+                <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
+              </label>
+              <input type="range" min="0.5" max="2.0" step="0.05" value={aimSensitivity} onChange={(e) => onAimSensitivityChange(parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
             </div>
-        )}
-        
-        {isCustomizingInGame && (
-            <ControlCustomizer
-                initialLayout={customControls}
-                defaultLayout={defaultControlsLayout}
-                onSave={(newLayout) => {
-                    onCustomControlsChange(newLayout);
-                    setIsCustomizingInGame(false);
-                    setShowInGameSettings(true);
-                }}
-                onClose={() => {
-                    setIsCustomizingInGame(false);
-                    setShowInGameSettings(true);
-                }}
-            />
-        )}
-    </div>
+            <button onClick={() => { setShowInGameSettings(false); setIsCustomizingInGame(true); }} className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200">CUSTOMIZE CONTROLS</button>
+            <button onClick={() => { setShowInGameSettings(false); setIsPaused(true); }} className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200">BACK</button>
+          </div>
+        </div>
+      )}
+      {isCustomizingInGame && (
+          <ControlCustomizer 
+            initialLayout={customControls}
+            defaultLayout={defaultControlsLayout}
+            onSave={(newLayout) => { onCustomControlsChange(newLayout); setIsCustomizingInGame(false); setIsPaused(true); }}
+            onClose={() => { setIsCustomizingInGame(false); setIsPaused(true); }}
+          />
+      )}
+    </>
   );
 };
 

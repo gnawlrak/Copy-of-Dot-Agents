@@ -14,6 +14,7 @@ export interface AttachmentModifier {
     muzzleFlash?: number; // multiplier
     addFireModes?: ('burst' | 'auto')[];
     damage?: number; // multiplier
+    specialEffect?: string;
 }
 
 export interface Attachment {
@@ -57,7 +58,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'A well-rounded rifle suitable for most combat scenarios. Controllable in full-auto.',
         category: 'primary',
         type: 'hitscan',
-        damage: 34,
+        damage: 40,
         fireRate: 0.12,
         bulletSpeed: 0, // Not used for hitscan
         bulletRadius: 2.8,
@@ -101,7 +102,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         description: 'A compact weapon with a high rate of fire, deadly in close quarters.',
         category: 'primary',
         type: 'hitscan',
-        damage: 24,
+        damage: 30,
         fireRate: 0.08,
         bulletSpeed: 0,
         bulletRadius: 2.5,
@@ -140,7 +141,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
     'Shotgun': {
         name: 'Shotgun',
         description: 'Devastating at close range. Wide spread.',
-        category: 'primary',
+        category: 'secondary',
         type: 'projectile',
         damage: 20, // Per pellet
         fireRate: 0.83,
@@ -172,6 +173,7 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
                 { name: '独头弹', description: '将霰弹替换为一发高精度、高伤害的独头弹。', modifiers: { pellets: -7, damage: 6.0, spread: 0.1 } },
                 { name: '箭形弹', description: '收束弹道，但单发毁伤能力略微下降。', modifiers: { damage: 0.9, spread: 0.65 } },
                 { name: '马格南鹿弹', description: '威力巨大的鹿弹，近距离杀伤力无与伦比，但后坐力也相应增加。', modifiers: { damage: 1.25, fireRate: 1.2 } },
+                { name: '龙息弹', description: '发射燃烧的弹丸，造成持续伤害并点燃小范围区域。', modifiers: { damage: 0.5, pellets: -2, specialEffect: 'burn' } },
             ],
         },
     },
@@ -259,16 +261,18 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
 };
 
 // FIX: Export THROWABLES constant for use in the loadout menu.
-export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: string; description: string; } } = {
+export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: string; description: string; fuse: number; } } = {
     grenade: {
         type: 'grenade',
         name: 'Frag Grenade',
-        description: 'Standard fragmentation grenade. Clears rooms effectively.'
+        description: 'Standard fragmentation grenade. Clears rooms effectively.',
+        fuse: 4.0,
     },
     flashbang: {
         type: 'flashbang',
         name: 'Flashbang',
-        description: 'Disorients targets with a bright flash and loud noise.'
+        description: 'Disorients targets with a bright flash and loud noise.',
+        fuse: 2.0,
     }
 };
 

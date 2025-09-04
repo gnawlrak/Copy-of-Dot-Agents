@@ -6,7 +6,6 @@ import { ThrowableType, AGENT_SKINS } from '../data/definitions';
 interface LoadoutMenuProps {
     currentLoadout: PlayerLoadout;
     onLoadoutChange: (newLoadout: PlayerLoadout) => void;
-    onBack: () => void;
     currentSkinName: string;
     onSkinChange: (newSkinName: string) => void;
     onModifyWeapon: (weaponType: 'primary' | 'secondary') => void;
@@ -14,27 +13,15 @@ interface LoadoutMenuProps {
 
 type SelectionPanelType = 'primary' | 'secondary' | null;
 
-const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChange, onBack, currentSkinName, onSkinChange, onModifyWeapon }) => {
+const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChange, currentSkinName, onSkinChange, onModifyWeapon }) => {
     const [selectionPanel, setSelectionPanel] = useState<SelectionPanelType>(null);
 
     const throwableTotal = useMemo(() => {
         return Object.values(currentLoadout.throwables).reduce((sum, count) => sum + (count || 0), 0);
     }, [currentLoadout.throwables]);
 
-    const currentSkin = useMemo(() => {
-        return AGENT_SKINS.find(s => s.name === currentSkinName) || AGENT_SKINS[0];
-    }, [currentSkinName]);
-
-    const handleSkinChange = (direction: 'next' | 'prev') => {
-        const currentIndex = AGENT_SKINS.findIndex(s => s.name === currentSkinName);
-        let nextIndex;
-        if (direction === 'next') {
-            nextIndex = (currentIndex + 1) % AGENT_SKINS.length;
-        } else {
-            nextIndex = (currentIndex - 1 + AGENT_SKINS.length) % AGENT_SKINS.length;
-        }
-        onSkinChange(AGENT_SKINS[nextIndex].name);
-    };
+    const skin = AGENT_SKINS.find(s => s.name === currentSkinName);
+    const skinColor = skin ? skin.color : '#FFFFFF';
 
     const handleWeaponSelect = (category: 'primary' | 'secondary', weaponName: string) => {
         // When selecting a new weapon, clear its attachments
@@ -137,21 +124,15 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
             </div>
         );
     };
+    
 
     return (
         <div className="w-full max-w-6xl text-center p-4 h-full flex flex-col">
             <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-8">OPERATOR LOADOUT</h1>
             
             <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
-                {/* Left Column: Melee & Throwables */}
+                {/* Left Column: Throwables */}
                 <div className="space-y-8">
-                    <div>
-                        <h3 className="text-lg text-gray-400 tracking-widest uppercase">Melee</h3>
-                        <div className="w-full mt-2 p-4 bg-gray-900 border-2 border-gray-700 rounded-md text-left">
-                            <h4 className="text-2xl font-bold text-teal-400 tracking-wider">Combat Knife</h4>
-                            <p className="text-gray-400 mt-1">Standard issue high-frequency blade. Fast and silent.</p>
-                        </div>
-                    </div>
                      <div>
                         <h3 className="text-lg text-gray-400 tracking-widest uppercase flex justify-between items-baseline">
                           <span>THROWABLES</span>
@@ -183,14 +164,12 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
 
                 {/* Center Column: Visual display */}
                 <div className="flex flex-col items-center justify-center h-full pt-8 md:pt-0">
-                    <div className="flex items-center justify-center gap-4">
-                        <button onClick={() => handleSkinChange('prev')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-14 h-14 flex items-center justify-center" aria-label="Previous skin">&lt;</button>
-                        
+                    <div className="flex items-center justify-center">
                         <div className="w-48 h-96 relative flex items-center justify-center" aria-live="polite">
-                            {/* Agent Body */}
+                            {/* Agent Body with Skin Color */}
                             <div style={{ 
-                                backgroundColor: currentSkin.color, 
-                                boxShadow: `0 0 25px ${currentSkin.color}, 0 0 10px ${currentSkin.color}` 
+                                backgroundColor: skinColor, 
+                                boxShadow: `0 0 35px ${skinColor}, 0 0 15px ${skinColor}` 
                             }} className="w-24 h-24 rounded-full transition-colors duration-300"></div>
                             
                             {/* Agent Arms/Weapon - simple representation */}
@@ -198,10 +177,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                             <div className="absolute w-3 h-24 bg-gray-600 rounded-full" style={{ transform: 'translateX(-10px) translateY(-15px) rotate(-15deg)' }}></div>
                             <div className="absolute w-32 h-4 bg-gray-700 rounded-sm" style={{ transform: 'translateY(25px)' }}></div>
                         </div>
-
-                        <button onClick={() => handleSkinChange('next')} className="p-2 text-4xl text-gray-600 rounded-full hover:bg-gray-800 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 w-14 h-14 flex items-center justify-center" aria-label="Next skin">&gt;</button>
                     </div>
-                    <p className="mt-4 text-xl text-teal-300 tracking-wider h-7">{currentSkin.name}</p>
                 </div>
 
                 {/* Right Column: Weapons */}
@@ -211,14 +187,6 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                 </div>
             </div>
 
-            <div className="mt-auto pt-8">
-                <button
-                    onClick={onBack}
-                    className="px-8 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
-                >
-                    BACK TO MENU
-                </button>
-            </div>
             {renderSelectionPanel()}
         </div>
     );

@@ -36,6 +36,7 @@ export interface LevelDefinition {
   enemies: LevelEnemy[];
   enemyCount?: number;
   extractionZone?: LevelWall;
+  cameraScale?: number;
 }
 
 // --- LocalStorage Utilities for Custom Maps ---
@@ -231,7 +232,173 @@ const THE_FACTORY: LevelDefinition = {
   ],
 };
 
+
+// Helper function to generate the expanded map (won't be exported)
+const generateExpandedFactory = (): LevelDefinition => {
+  const original = THE_FACTORY;
+  const newLevel: LevelDefinition = {
+    name: "THE FACTORY (EXPANSION)",
+    description: "A massive industrial zone with four interconnected sectors. High threat density. Ideal for multi-squad operations.",
+    playerStart: { x: 0.5, y: 0.98 },
+    walls: [],
+    doors: [],
+    enemies: [],
+    enemyCount: 32, // Increased enemy count
+    extractionZone: { x: 0.45, y: 0.45, width: 0.1, height: 0.1 },
+    cameraScale: 2,
+  };
+
+  let doorIdCounter = 1;
+
+  const quadrants: ('TL' | 'TR' | 'BL' | 'BR')[] = ['TL', 'TR', 'BL', 'BR'];
+
+  // Define the original outer shell for precise removal logic
+  const outerShellWalls = new Set([
+    JSON.stringify({ x: 0.05, y: 0.05, width: 0.9, height: 0.015 }), // Top
+    JSON.stringify({ x: 0.05, y: 0.05, width: 0.01, height: 0.85 }), // Left
+    JSON.stringify({ x: 0.94, y: 0.05, width: 0.01, height: 0.85 }), // Right
+    JSON.stringify({ x: 0.05, y: 0.885, width: 0.35, height: 0.015 }), // Bottom Left part
+    JSON.stringify({ x: 0.5, y: 0.885, width: 0.44, height: 0.015 }), // Bottom Right part
+  ]);
+
+  for (const quadrant of quadrants) {
+    const transformWall = (wall: LevelWall): LevelWall => {
+      const { x, y, width: w, height: h } = wall;
+      switch (quadrant) {
+        case 'TL': return { x: x / 2, y: y / 2, width: w / 2, height: h / 2 };
+        case 'TR': return { x: 0.5 + (1 - x - w) / 2, y: y / 2, width: w / 2, height: h / 2 };
+        case 'BL': return { x: x / 2, y: 0.5 + (1 - y - h) / 2, width: w / 2, height: h / 2 };
+        case 'BR': return { x: 0.5 + (1 - x - w) / 2, y: 0.5 + (1 - y - h) / 2, width: w / 2, height: h / 2 };
+      }
+    };
+    
+    const transformDoor = (door: LevelDoor): LevelDoor => {
+        let hinge = {x: door.hinge.x, y: door.hinge.y};
+        let closedAngle = door.closedAngle;
+        let swingDirection = door.swingDirection;
+
+        switch(quadrant) {
+            case 'TL':
+                hinge = { x: hinge.x/2, y: hinge.y/2 };
+                break;
+            case 'TR':
+                hinge = { x: 0.5 + (1-hinge.x)/2, y: hinge.y/2 };
+                closedAngle = Math.PI - closedAngle;
+                swingDirection = -swingDirection as 1 | -1;
+                break;
+            case 'BL':
+                hinge = { x: hinge.x/2, y: 0.5 + (1-hinge.y)/2 };
+                closedAngle = -closedAngle;
+                swingDirection = -swingDirection as 1 | -1;
+                break;
+            case 'BR':
+                hinge = { x: 0.5 + (1-hinge.x)/2, y: 0.5 + (1-hinge.y)/2 };
+                closedAngle = Math.PI + closedAngle;
+                break;
+        }
+
+        return {
+            ...door,
+            id: doorIdCounter++,
+            hinge,
+            length: door.length / 2,
+            closedAngle,
+            swingDirection,
+        };
+    };
+
+    const transformEnemy = (enemy: LevelEnemy): LevelEnemy => {
+        let {x, y, direction} = enemy;
+        switch(quadrant) {
+            case 'TL':
+                x /= 2; y /= 2;
+                break;
+            case 'TR':
+                x = 0.5 + (1-x)/2; y /= 2;
+                direction = Math.PI - direction;
+                break;
+            case 'BL':
+                x /= 2; y = 0.5 + (1-y)/2;
+                direction = -direction;
+                break;
+            case 'BR':
+                x = 0.5 + (1-x)/2; y = 0.5 + (1-y)/2;
+                direction = Math.PI + direction;
+                break;
+        }
+        return { ...enemy, x, y, direction };
+    };
+    
+    original.walls.forEach(w => {
+        const isOuterShell = outerShellWalls.has(JSON.stringify(w));
+
+        if (!isOuterShell) {
+            // It's an internal wall, always keep it.
+            newLevel.walls.push(transformWall(w));
+            return;
+        }
+
+        // It's an outer shell wall. Decide if we keep it based on the quadrant.
+        const isTop = w.y < 0.1 && w.height < 0.1;
+        const isBottom = w.y > 0.8;
+        const isLeft = w.x < 0.1 && w.width < 0.1;
+        const isRight = w.x > 0.9;
+        
+        let keep = false;
+        switch(quadrant) {
+            case 'TL': if (isTop || isLeft) keep = true; break;
+            case 'TR': if (isTop || isRight) keep = true; break;
+            case 'BL': if (isBottom || isLeft) keep = true; break;
+            case 'BR': if (isBottom || isRight) keep = true; break;
+        }
+        
+        if (keep) {
+            newLevel.walls.push(transformWall(w));
+        }
+    });
+
+    original.doors.forEach(d => {
+        // Exclude doors that were on the now-removed outer walls
+        const isOnRightWall = d.hinge.x > 0.9;
+        const isOnBottomWall = d.hinge.y > 0.8; // main entrance has no doors
+        
+        let shouldBeRemoved = false;
+        switch(quadrant) {
+            case 'TL': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
+            case 'TR': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break; // Original right becomes new right, but its door needs to become internal
+            case 'BL': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
+            case 'BR': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
+        }
+
+        if (!shouldBeRemoved) {
+             newLevel.doors.push(transformDoor(d));
+        }
+    });
+
+    original.enemies.forEach(e => newLevel.enemies.push(transformEnemy(e)));
+  }
+
+  // Add new central doors
+  const doorLength = 0.1 / 2;
+  const doorMaxAngle = Math.PI / 2 * 0.9;
+  
+  // Vertical Connector
+  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.495, y: 0.45 }, length: doorLength, closedAngle: -Math.PI/2, maxOpenAngle: doorMaxAngle, swingDirection: -1 });
+  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.495, y: 0.55 }, length: doorLength, closedAngle: Math.PI/2, maxOpenAngle: doorMaxAngle, swingDirection: 1 });
+  
+  // Horizontal Connector
+  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.45, y: 0.505 }, length: doorLength, closedAngle: Math.PI, maxOpenAngle: doorMaxAngle, swingDirection: 1 });
+  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.55, y: 0.505 }, length: doorLength, closedAngle: 0, maxOpenAngle: doorMaxAngle, swingDirection: -1 });
+
+
+  return newLevel;
+};
+
+const THE_FACTORY_EXPANSION = generateExpandedFactory();
+
+
 export const MISSIONS: LevelDefinition[] = [
   TRAINING_GROUND,
   THE_FACTORY,
+  THE_FACTORY_EXPANSION,
 ];

@@ -6,7 +6,6 @@ interface WeaponModificationMenuProps {
     weaponName: string;
     currentAttachments: { [slot: string]: string };
     onAttachmentsChange: (newAttachments: { [slot: string]: string }) => void;
-    onBack: () => void;
 }
 
 // Tier/Rarity mapping based on array index
@@ -57,7 +56,7 @@ const StatBar: React.FC<{ label: string; baseValue: number; modifiedValue: numbe
     );
 };
 
-const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponName, currentAttachments, onAttachmentsChange, onBack }) => {
+const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponName, currentAttachments, onAttachmentsChange }) => {
     const weaponDef = WEAPONS[weaponName];
     const [selectedSlot, setSelectedSlot] = useState<string | null>(weaponDef.attachmentSlots ? Object.keys(weaponDef.attachmentSlots)[0] : null);
     const [hoveredAttachment, setHoveredAttachment] = useState<Attachment | null>(null);
@@ -213,16 +212,6 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                         </div>
                     </div>
                 </div>
-            </div>
-
-
-            <div className="mt-auto pt-6 text-center">
-                <button
-                    onClick={onBack}
-                    className="px-8 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
-                >
-                    BACK TO LOADOUT
-                </button>
             </div>
         </div>
     );

@@ -5,7 +5,6 @@ import { Difficulty } from '../App';
 interface LevelSelectProps {
   officialLevels: LevelDefinition[];
   onSelectLevel: (level: LevelDefinition) => void;
-  onBack: () => void;
   onEditLevel: (level: LevelDefinition) => void;
   onDeleteLevel: (uuid: string) => void;
   onCreateNew: () => void;
@@ -13,7 +12,7 @@ interface LevelSelectProps {
   onDifficultyChange: (difficulty: Difficulty) => void;
 }
 
-const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel, onBack, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
+const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
   const [customLevels, setCustomLevels] = useState<LevelDefinition[]>([]);
   
   useEffect(() => {
@@ -74,12 +73,6 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel
         {customLevels.map((level) => renderLevelButton(level, true))}
       </div>
        <div className="flex items-center justify-center gap-4">
-        <button
-          onClick={onBack}
-          className="px-8 py-3 bg-gray-800 text-gray-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-gray-500 transition-colors duration-200"
-        >
-          BACK TO MENU
-        </button>
         <button
           onClick={onCreateNew}
           className="px-8 py-3 bg-teal-600 text-white font-bold text-lg rounded-md hover:bg-teal-500 transition-colors"

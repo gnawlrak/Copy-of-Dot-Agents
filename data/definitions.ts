@@ -36,6 +36,7 @@ export interface Weapon {
   // Custom properties added at runtime in GameCanvas
   allowedFireModes: FireMode[];
   currentFireMode: FireMode;
+  specialEffect?: string;
 }
 
 export interface AgentSkin {

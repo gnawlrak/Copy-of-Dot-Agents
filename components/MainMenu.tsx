@@ -1,13 +1,14 @@
+
 import React from 'react';
 
 interface MainMenuProps {
   onStart: () => void;
   onGoToLoadout: () => void;
   onGoToEditor: () => void;
-  onGoToSettings: () => void;
+  onGoToMultiplayer: () => void;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToSettings }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer }) => {
   return (
     <div className="text-center flex flex-col items-center justify-center w-full h-full">
       <div className="mb-12">
@@ -15,12 +16,20 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         <p className="text-gray-400 mt-2 text-lg">Close-Quarters Battle Simulation</p>
       </div>
       <div className="flex flex-col gap-6">
-        <button
-          onClick={onStart}
-          className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
-        >
-          START MISSION
-        </button>
+        <div className="flex justify-center gap-4">
+            <button
+              onClick={onStart}
+              className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
+            >
+              START MISSION
+            </button>
+            <button
+              onClick={onGoToMultiplayer}
+              className="px-8 py-4 bg-sky-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-sky-300 shadow-lg shadow-sky-500/50 hover:bg-sky-400 hover:shadow-sky-400/50 transition-all duration-300 transform hover:scale-105"
+            >
+              MULTIPLAYER
+            </button>
+        </div>
         <div className="flex justify-center gap-4">
           <button
             onClick={onGoToLoadout}
@@ -34,15 +43,9 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
           >
             MAP EDITOR
           </button>
-          <button
-            onClick={onGoToSettings}
-            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
-          >
-            SETTINGS
-          </button>
         </div>
       </div>
-       <p className="text-gray-500 mt-6 h-6"></p>
+       <p className="text-gray-500 mt-6 h-6">INTDGYISGOD + gnaWlraK</p>
     </div>
   );
 };
