@@ -11,7 +11,7 @@ interface LoadoutMenuProps {
     onModifyWeapon: (weaponType: 'primary' | 'secondary') => void;
 }
 
-type SelectionPanelType = 'primary' | 'secondary' | null;
+type SelectionPanelType = 'primary' | 'secondary' | 'melee' | null;
 
 const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChange, currentSkinName, onSkinChange, onModifyWeapon }) => {
     const [selectionPanel, setSelectionPanel] = useState<SelectionPanelType>(null);
@@ -23,8 +23,17 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
     const skin = AGENT_SKINS.find(s => s.name === currentSkinName);
     const skinColor = skin ? skin.color : '#FFFFFF';
 
-    const handleWeaponSelect = (category: 'primary' | 'secondary', weaponName: string) => {
-        // When selecting a new weapon, clear its attachments
+    const handleWeaponSelect = (category: 'primary' | 'secondary' | 'melee', weaponName: string) => {
+        // When selecting a new weapon, clear its attachments if it's not a melee weapon
+        if (category === 'melee') {
+             onLoadoutChange({
+                ...currentLoadout,
+                [category]: weaponName,
+            });
+            setSelectionPanel(null);
+            return;
+        }
+
         const attachmentField = category === 'primary' ? 'primaryAttachments' : 'secondaryAttachments';
         onLoadoutChange({
             ...currentLoadout,
@@ -46,10 +55,10 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
     };
 
 
-    const renderWeaponSlot = (category: 'primary' | 'secondary') => {
+    const renderWeaponSlot = (category: 'primary' | 'secondary' | 'melee') => {
         const weaponName = currentLoadout[category];
         const weapon = WEAPONS[weaponName];
-        const hasAttachments = weapon.attachmentSlots && Object.keys(weapon.attachmentSlots).length > 0;
+        const hasAttachments = category !== 'melee' && weapon.attachmentSlots && Object.keys(weapon.attachmentSlots).length > 0;
         
         return (
             <div className="w-full">
@@ -64,7 +73,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                     </button>
                     {hasAttachments && (
                          <button 
-                            onClick={() => onModifyWeapon(category)}
+                            onClick={() => onModifyWeapon(category as 'primary' | 'secondary')}
                             className="w-full px-6 py-2 bg-gray-800 text-teal-300 font-bold text-base tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
                          >
                              MODIFY
@@ -104,10 +113,19 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                                     <h4 className="text-xl font-bold text-teal-400">{weapon.name}</h4>
                                     <p className="text-sm text-gray-400 mt-1">{weapon.description}</p>
                                     <div className="mt-3 text-xs text-gray-300 grid grid-cols-2 gap-x-4 gap-y-1">
-                                        <span>TYPE: {weapon.type}</span>
-                                        <span>FIRE RATE: {weapon.fireRate}s</span>
-                                        <span>MAGAZINE: {weapon.magSize === -1 ? '∞' : weapon.magSize}</span>
-                                        <span>AMMO: {weapon.magSize === -1 ? '∞' : `${weapon.magSize}/${weapon.reserveAmmo}`}</span>
+                                        {weapon.category !== 'melee' ? (
+                                            <>
+                                                <span>TYPE: {weapon.type}</span>
+                                                <span>FIRE RATE: {weapon.fireRate}s</span>
+                                                <span>MAGAZINE: {weapon.magSize === -1 ? '∞' : weapon.magSize}</span>
+                                                <span>AMMO: {weapon.magSize === -1 ? '∞' : `${weapon.magSize}/${weapon.reserveAmmo}`}</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>DAMAGE: {weapon.damage}</span>
+                                                <span>SPEED: {weapon.fireRate}s</span>
+                                            </>
+                                        )}
                                     </div>
                                 </button>
                             );
@@ -131,7 +149,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
             <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-8">OPERATOR LOADOUT</h1>
             
             <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
-                {/* Left Column: Throwables */}
+                {/* Left Column: Throwables & Melee */}
                 <div className="space-y-8">
                      <div>
                         <h3 className="text-lg text-gray-400 tracking-widest uppercase flex justify-between items-baseline">
@@ -160,6 +178,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                             ))}
                         </div>
                     </div>
+                    {renderWeaponSlot('melee')}
                 </div>
 
                 {/* Center Column: Visual display */}

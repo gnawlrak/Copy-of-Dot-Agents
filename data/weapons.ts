@@ -28,7 +28,7 @@ export type FireMode = 'semi' | 'burst' | 'auto';
 export interface WeaponDefinition {
     name:string;
     description: string;
-    category: 'primary' | 'secondary';
+    category: 'primary' | 'secondary' | 'melee';
     type: 'projectile' | 'hitscan';
     damage: number;
     fireRate: number;
@@ -44,6 +44,7 @@ export interface WeaponDefinition {
     reserveAmmo: number;
     reloadTime: number;
     soundRadius: number;
+    durability?: number;
     attachmentSlots?: {[slotName: string]: Attachment[];};
 }
 
@@ -258,6 +259,47 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
             ],
         },
     },
+    // --- Melee Weapons ---
+    'Combat Knife': {
+        name: 'Combat Knife',
+        description: 'Standard issue combat knife. Fast and deadly for silent takedowns.',
+        category: 'melee',
+        type: 'hitscan', // For simplicity, though it's not really hitscan
+        damage: 150, // High damage for melee
+        fireRate: 0.67, // Corresponds to slash cooldown in GameCanvas
+        bulletSpeed: 0,
+        bulletRadius: 0,
+        pellets: 1,
+        spread: 0,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: -1, // Infinite
+        ammoInMag: -1,
+        reserveAmmo: -1,
+        reloadTime: 0,
+        soundRadius: 50,
+        // No attachments for now
+    },
+    'Riot Shield': {
+        name: 'Riot Shield',
+        description: 'A ballistic shield that provides full frontal protection at the cost of mobility. Can be used to bash enemies.',
+        category: 'melee',
+        type: 'hitscan',
+        damage: 50,
+        fireRate: 2.0,
+        bulletSpeed: 0,
+        bulletRadius: 0,
+        pellets: 1,
+        spread: 0,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: -1,
+        ammoInMag: -1,
+        reserveAmmo: -1,
+        reloadTime: 0,
+        soundRadius: 60,
+        durability: 600,
+    },
 };
 
 // FIX: Export THROWABLES constant for use in the loadout menu.
@@ -277,9 +319,10 @@ export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: 
 };
 
 // FIX: Export WEAPON_TYPES constant and populate it from the WEAPONS object.
-export const WEAPON_TYPES: { primary: string[], secondary: string[] } = {
+export const WEAPON_TYPES: { primary: string[], secondary: string[], melee: string[] } = {
     primary: [],
-    secondary: []
+    secondary: [],
+    melee: [],
 };
 
 Object.keys(WEAPONS).forEach(weaponName => {
@@ -288,5 +331,7 @@ Object.keys(WEAPONS).forEach(weaponName => {
         WEAPON_TYPES.primary.push(weaponName);
     } else if (weapon.category === 'secondary') {
         WEAPON_TYPES.secondary.push(weaponName);
+    } else if (weapon.category === 'melee') {
+        WEAPON_TYPES.melee.push(weaponName);
     }
 });

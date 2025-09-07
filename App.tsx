@@ -22,6 +22,7 @@ export type Difficulty = 'simple' | 'normal' | 'hard';
 const DEFAULT_LOADOUT: PlayerLoadout = {
   primary: 'Assault Rifle',
   secondary: WEAPON_TYPES.secondary[0],
+  melee: 'Combat Knife',
   primaryAttachments: {
     'Trigger': '三连发扳机组' // Default with burst fire
   },
@@ -44,6 +45,7 @@ const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
         switchWeapon:   { x: 0.85,  y: 0.86, scale: 0.8 },
         melee:          { x: 0.78,  y: 0.75, scale: 0.8 },
         throwableSelect:{ x: 0.78,  y: 0.86, scale: 0.8 },
+        switchThrowable:{ x: 0.71,  y: 0.86, scale: 0.8 },
         fireModeSwitch: { x: 0.78,  y: 0.65, scale: 0.8 },
         heal:           { x: 0.85,  y: 0.65, scale: 0.8 },
         skill:          { x: 0.71,  y: 0.55, scale: 0.9 },
@@ -136,6 +138,7 @@ const App: React.FC = () => {
           return {
             ...DEFAULT_LOADOUT,
             ...parsed,
+            melee: parsed.melee || DEFAULT_LOADOUT.melee,
             primaryAttachments: parsed.primaryAttachments || {},
             secondaryAttachments: parsed.secondaryAttachments || {},
           };

@@ -17,7 +17,8 @@ export interface Throwable {
 export interface Weapon {
   name: string;
   description: string;
-  category: 'primary' | 'secondary';
+  // FIX: Added 'melee' to the weapon category to align with WeaponDefinition and prevent type errors.
+  category: 'primary' | 'secondary' | 'melee';
   type: 'projectile' | 'hitscan';
   damage: number;
   fireRate: number; // seconds between shots
@@ -37,6 +38,8 @@ export interface Weapon {
   allowedFireModes: FireMode[];
   currentFireMode: FireMode;
   specialEffect?: string;
+  durability?: number;
+  maxDurability?: number;
 }
 
 export interface AgentSkin {

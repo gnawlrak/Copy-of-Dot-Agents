@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useRef, TouchEvent } from 'react';
 import type { CustomControls } from '../types';
 
@@ -19,7 +20,7 @@ const CONTROL_NAMES: { [key: string]: string } = {
     interact: 'Interact / Takedown',
     switchWeapon: 'Switch Weapon',
     melee: 'Melee / Weapon Mode',
-    throwableSelect: 'Select Throwable',
+    throwableSelect: 'Throw Grenade',
     fireModeSwitch: 'Switch Fire Mode',
     heal: 'Use Medkit',
     skill: 'Operator Skill',
