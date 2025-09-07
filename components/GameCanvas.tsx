@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
@@ -188,6 +183,15 @@ type ShakeWave = {
     diry: number;
     phase: number;
 };
+type SmokeCloud = {
+    x: number;
+    y: number;
+    radius: number;
+    maxRadius: number;
+    lifetime: number; // seconds
+    maxLifetime: number; // seconds
+};
+
 
 interface GameCanvasProps {
     level: LevelDefinition;
@@ -448,6 +452,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const sparksRef = useRef<Array<Spark>>([]);
   const throwablesRef = useRef<Array<Throwable>>([]);
   const explosionsRef = useRef<Array<Explosion>>([]);
+  const smokeCloudsRef = useRef<Array<SmokeCloud>>([]);
   const shockwavesRef = useRef<Array<Shockwave>>([]);
   const hitEffectsRef = useRef<Array<HitEffect>>([]);
   const isGameOverRef = useRef<boolean>(false);
@@ -1334,6 +1339,7 @@ const startHealing = () => {
       sparksRef.current = [];
       throwablesRef.current = [];
       explosionsRef.current = [];
+      smokeCloudsRef.current = [];
       shockwavesRef.current = [];
       hitEffectsRef.current = [];
       isAimingThrowableRef.current = false;
@@ -1432,6 +1438,19 @@ const startHealing = () => {
       });
 
       const detonate = (n: Throwable) => {
+        const scale = scaleRef.current;
+        const cameraScale = cameraScaleRef.current;
+
+        if (n.type === 'smoke') {
+            soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: 150 * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'door' });
+            smokeCloudsRef.current.push({
+                x: n.x, y: n.y,
+                radius: 0, maxRadius: 180 * scale / cameraScale,
+                lifetime: 15.0, maxLifetime: 15.0,
+            });
+            return;
+        }
+
         const rad = (n.type === 'grenade' ? 230 : 280) * scale / cameraScale;
         
         shakerRef.current.addImpulse({ amp: (n.type === 'grenade' ? 18 : 12) * scale, rotAmp: 0.04, freq: 50, decay: 15, dirx: 0, diry: 0 });
@@ -2202,6 +2221,16 @@ doorsRef.current.forEach(door => {
           spark.vy += 480 * scale * dt; // Gravity
           spark.vx *= (1 - dt * 1);
       });
+      
+      smokeCloudsRef.current.forEach(cloud => {
+        cloud.lifetime -= dt;
+        const expansionRate = 2.0;
+        if (cloud.radius < cloud.maxRadius) {
+            cloud.radius += cloud.maxRadius * expansionRate * dt;
+            if (cloud.radius > cloud.maxRadius) cloud.radius = cloud.maxRadius;
+        }
+      });
+      smokeCloudsRef.current = smokeCloudsRef.current.filter(c => c.lifetime > 0);
 
        // Interpolate remote players
       if (isMultiplayer) {
@@ -2259,6 +2288,14 @@ doorsRef.current.forEach(door => {
                             if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
                                 isObstructed = true;
                                 break;
+                            }
+                        }
+                        if (!isObstructed) {
+                            for (const smoke of smokeCloudsRef.current) {
+                                if (intersectSegCircle(enemy.x, enemy.y, player.x, player.y, smoke.x, smoke.y, smoke.radius)) {
+                                    isObstructed = true;
+                                    break;
+                                }
                             }
                         }
                         if (!isObstructed) canSeePlayer = true;
@@ -2327,6 +2364,14 @@ doorsRef.current.forEach(door => {
                                         if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
                                             isObstructed = true;
                                             break;
+                                        }
+                                    }
+                                    if (!isObstructed) {
+                                        for (const smoke of smokeCloudsRef.current) {
+                                            if (intersectSegCircle(enemy.x, enemy.y, player.x, player.y, smoke.x, smoke.y, smoke.radius)) {
+                                                isObstructed = true;
+                                                break;
+                                            }
                                         }
                                     }
                                     if (!isObstructed) canSeePlayer = true;
@@ -3040,7 +3085,27 @@ doorsRef.current.forEach(door => {
         context.fillStyle = `rgba(255,255,255,${0.6 * finalAlpha})`;
         context.fill();
       });
+
+      // Render smoke clouds
+      context.globalCompositeOperation = 'lighter';
+      smokeCloudsRef.current.forEach(cloud => {
+          if (!pointInPoly(cloud.x, cloud.y, viewPoly)) return; // Simple culling
+          const life_p = cloud.lifetime / cloud.maxLifetime;
+          const numParticles = 15;
+          for (let i = 0; i < numParticles; i++) {
+              const p_rad = cloud.radius * (0.2 + (i/numParticles) * 0.8) * (Math.sin( (now / 400 + i * 0.5) ) * 0.1 + 0.95);
+              const p_alpha = life_p * (1 - p_rad / cloud.radius) * 0.2;
+              const angle = i * (Math.PI * 2 / numParticles) + (now / 800);
+              const px = cloud.x + Math.cos(angle) * p_rad * 0.3;
+              const py = cloud.y + Math.sin(angle) * p_rad * 0.3;
+              context.fillStyle = `rgba(200, 200, 200, ${p_alpha})`;
+              context.beginPath();
+              context.arc(px, py, p_rad * 0.6, 0, Math.PI * 2);
+              context.fill();
+          }
+      });
       context.globalCompositeOperation = 'source-over';
+
 
       if (showSoundWaves && !isEnded) {
         const radarRadius = 40 * scale;
@@ -3900,153 +3965,156 @@ doorsRef.current.forEach(door => {
             }
         }
     };
-    
+
     const processTouchEnd = (touch: React.Touch | Touch) => {
-        let releasedControlId: string | null = null;
-        for (const key in touchState) {
-            if ((touchState as any)[key].id === touch.identifier) {
-                releasedControlId = key;
-                (touchState as any)[key].id = null;
-                if (key === 'joystick') {
+        const keys = Object.keys(touchState) as (keyof typeof touchState)[];
+        for (const controlKey of keys) {
+            if ((touchState as any)[controlKey].id === touch.identifier) {
+                (touchState as any)[controlKey].id = null;
+                
+                if (controlKey === 'joystick') {
                     touchState.joystick.dx = 0;
                     touchState.joystick.dy = 0;
+                } else if (controlKey === 'interact') {
+                    if (takedownHintEnemyRef.current) {
+                        const enemy = takedownHintEnemyRef.current;
+                        const healthBefore = enemy.health;
+                        enemy.health = 0;
+                        if (healthBefore > 0) {
+                            takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 60 * scaleRef.current, lifetime: 0.4, maxLifetime: 0.4 });
+                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
+                        }
+                    } else {
+                         stopDoorInteraction();
+                    }
+                } else if (controlKey === 'reload') {
+                    const player = playerRef.current;
+                    if (!player.isReloading && player.weapons[player.currentWeaponIndex].ammoInMag < player.weapons[player.currentWeaponIndex].magSize) {
+                        player.isReloading = true;
+                        player.reloadTimer = player.weapons[player.currentWeaponIndex].reloadTime;
+                    }
+                } else if (controlKey === 'switchWeapon') {
+                     const player = playerRef.current;
+                     if (!player.isReloading) {
+                        previousWeaponIndexRef.current = player.currentWeaponIndex;
+                        player.currentWeaponIndex = (player.currentWeaponIndex + 1) % 2; // Cycle primary/secondary
+                     }
+                } else if (controlKey === 'melee') {
+                    const player = playerRef.current;
+                    if (player.isReloading) break;
+                    if (player.currentWeaponIndex === 2) {
+                        player.currentWeaponIndex = previousWeaponIndexRef.current;
+                    } else {
+                        previousWeaponIndexRef.current = player.currentWeaponIndex;
+                        player.currentWeaponIndex = 2;
+                    }
+                } else if (controlKey === 'throwableSelect') { // This is the throw button
+                    if (isAimingThrowableRef.current && cookingThrowableRef.current) throwThrowable();
+                    isAimingThrowableRef.current = false;
+                    cookingThrowableRef.current = null;
+                } else if (controlKey === 'switchThrowable') {
+                    switchThrowable();
+                } else if (controlKey === 'fireModeSwitch') {
+                    switchFireMode();
+                } else if (controlKey === 'heal') {
+                    startHealing();
                 }
-                break;
+                
+                break; 
             }
         }
-
-        if (!releasedControlId) return;
-
-        const player = playerRef.current;
-        switch(releasedControlId) {
-            case 'reload':
-                if (!player.isReloading && player.weapons[player.currentWeaponIndex].ammoInMag < player.weapons[player.currentWeaponIndex].magSize) { 
-                    player.isReloading = true; 
-                    player.reloadTimer = player.weapons[player.currentWeaponIndex].reloadTime; 
-                }
-                break;
-            case 'switchWeapon':
-                 if (player.isReloading) break;
-                 const nextIndex = (player.currentWeaponIndex + 1) % 2; // Only switch between primary and secondary
-                 previousWeaponIndexRef.current = player.currentWeaponIndex;
-                 player.currentWeaponIndex = nextIndex;
-                break;
-            case 'melee':
-                if (player.isReloading) break;
-                if (player.currentWeaponIndex === 2) {
-                    player.currentWeaponIndex = previousWeaponIndexRef.current;
-                } else {
-                    previousWeaponIndexRef.current = player.currentWeaponIndex;
-                    player.currentWeaponIndex = 2;
-                }
-                break;
-            case 'interact':
-                if (takedownHintEnemyRef.current) {
-                    const enemy = takedownHintEnemyRef.current;
-                    const healthBefore = enemy.health;
-                    enemy.health = 0;
-                    if (healthBefore > 0) {
-                        takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 60 * scaleRef.current, lifetime: 0.4, maxLifetime: 0.4 });
-                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
-                    }
-                }
-                stopDoorInteraction();
-                break;
-            case 'fireModeSwitch':
-                switchFireMode();
-                break;
-            case 'heal':
-                startHealing();
-                break;
-            case 'switchThrowable':
-                switchThrowable();
-                break;
-            case 'throwableSelect': // Repurposed as throw
-                if (isAimingThrowableRef.current && cookingThrowableRef.current) {
-                    throwThrowable();
-                }
-                isAimingThrowableRef.current = false;
-                cookingThrowableRef.current = null;
-                break;
-        }
     };
+    
+    changedTouches.forEach(touch => {
+        if (e.type === 'touchstart') {
+            processTouchStart(touch);
+        } else if (e.type === 'touchmove') {
+            processTouchMove(touch);
+        } else if (e.type === 'touchend' || e.type === 'touchcancel') {
+            processTouchEnd(touch);
+        }
+    });
 
-    if (e.type === 'touchstart') changedTouches.forEach(processTouchStart);
-    else if (e.type === 'touchmove') changedTouches.forEach(processTouchMove);
-    else if (e.type === 'touchend' || e.type === 'touchcancel') changedTouches.forEach(processTouchEnd);
-  }, [onMissionEnd, aimSensitivity, startDoorInteraction, stopDoorInteraction]);
+  }, [aimSensitivity, onMissionEnd, startDoorInteraction, stopDoorInteraction]);
 
   return (
-    <>
-      <canvas ref={canvasRef} className="w-full h-full" onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} onTouchCancel={handleTouch} />
-      {isPaused && (
-        <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40" role="dialog" aria-modal="true">
-          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30 text-center">
-            <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6">PAUSED</h2>
-            <button onClick={() => { setIsPaused(false); setShowInGameSettings(true); }} className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200">SETTINGS</button>
-            <button onClick={() => setIsPaused(false)} className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200">RESUME</button>
-            <button onClick={onMissionEnd} className="mt-8 w-full px-6 py-3 bg-red-800 text-white font-bold text-lg tracking-widest rounded-md border-2 border-red-600 hover:bg-red-700 hover:border-red-500 transition-colors duration-200">QUIT MISSION</button>
-          </div>
-        </div>
-      )}
-      {showInGameSettings && (
-        <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true">
-          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
-            <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
-            
-            <div className="flex flex-col gap-2 py-4">
-              <label htmlFor="sensitivity-slider-ingame" className="flex items-center justify-between text-lg text-gray-300">
-                <span>Aim Sensitivity</span>
-                <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
-              </label>
-              <input
-                id="sensitivity-slider-ingame"
-                type="range"
-                min="0.5"
-                max="2.0"
-                step="0.05"
-                value={aimSensitivity}
-                onChange={(e) => onAimSensitivityChange(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-              />
+    <div className="relative w-full h-full font-mono">
+        <canvas ref={canvasRef} onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} className="w-full h-full" />
+        {isPortrait && (
+             <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-center p-4">
+                <p className="text-xl text-white">Please rotate your device to landscape mode for the best experience.</p>
             </div>
-            
-            <button
-              onClick={() => {
-                  setShowInGameSettings(false);
-                  setIsCustomizingInGame(true);
-              }}
-              className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
-            >
-              CUSTOMIZE CONTROLS
-            </button>
-            <button
-              onClick={() => { setShowInGameSettings(false); setIsPaused(true); }}
-              className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
-            >
-              BACK TO PAUSE MENU
-            </button>
-          </div>
-        </div>
-      )}
-      {isCustomizingInGame && (
-        <ControlCustomizer
-            initialLayout={customControls}
-            defaultLayout={defaultControlsLayout}
-            onSave={(newLayout) => {
-                onCustomControlsChange(newLayout);
-                setIsCustomizingInGame(false);
-                setShowInGameSettings(true); // Go back to settings menu after saving
-            }}
-            onClose={() => {
-                setIsCustomizingInGame(false);
-                setShowInGameSettings(true); // Go back to settings menu
-            }}
-        />
-      )}
-    </>
+        )}
+        {(isPaused || showInGameSettings) && !isCustomizingInGame && (
+            <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                 <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30 text-white">
+                    <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">{showInGameSettings ? "SETTINGS" : "PAUSED"}</h2>
+                    
+                    {showInGameSettings ? (
+                        <>
+                         <div className="flex flex-col gap-2 py-4">
+                            <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
+                                <span>Aim Sensitivity</span>
+                                <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
+                            </label>
+                            <input
+                                id="sensitivity-slider"
+                                type="range" min="0.5" max="2.0" step="0.05"
+                                value={aimSensitivity}
+                                onChange={(e) => onAimSensitivityChange(parseFloat(e.target.value))}
+                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                            />
+                            </div>
+                             <button
+                                onClick={() => {
+                                    setShowInGameSettings(false);
+                                    setIsCustomizingInGame(true);
+                                }}
+                                className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+                                >
+                                CUSTOMIZE CONTROLS
+                            </button>
+                            <button
+                                onClick={() => setShowInGameSettings(false)}
+                                className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+                                >
+                                BACK TO PAUSE MENU
+                            </button>
+                        </>
+                    ) : (
+                         <>
+                            <button onClick={() => { setIsPaused(false); setShowInGameSettings(false); }} className="w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200">
+                                RESUME
+                            </button>
+                             <button onClick={() => setShowInGameSettings(true)} className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200">
+                                SETTINGS
+                            </button>
+                            <button onClick={onMissionEnd} className="mt-8 w-full px-6 py-3 bg-red-800 text-white font-bold text-lg tracking-widest rounded-md border-2 border-red-600 hover:bg-red-700 hover:border-red-500 transition-colors duration-200">
+                                END MISSION
+                            </button>
+                         </>
+                    )}
+                 </div>
+            </div>
+        )}
+        {isCustomizingInGame && (
+             <ControlCustomizer
+                initialLayout={customControls}
+                defaultLayout={defaultControlsLayout}
+                onSave={(newLayout) => {
+                    onCustomControlsChange(newLayout);
+                    setIsCustomizingInGame(false);
+                    setShowInGameSettings(true); // Go back to settings menu
+                }}
+                onClose={() => {
+                    setIsCustomizingInGame(false);
+                    setShowInGameSettings(true); // Go back to settings menu
+                }}
+            />
+        )}
+    </div>
   );
 };
 
-// FIX: Add default export to make the component importable in App.tsx.
+// FIX: Export GameCanvas as the default export of this module. This resolves the import error in App.tsx and the associated "must return a value" error, which was a symptom of the compiler failing to parse the file as a component module correctly.
 export default GameCanvas;

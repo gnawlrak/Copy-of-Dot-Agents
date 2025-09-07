@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
@@ -28,8 +29,9 @@ const DEFAULT_LOADOUT: PlayerLoadout = {
   },
   secondaryAttachments: {},
   throwables: {
-    'grenade': 3,
-    'flashbang': 2,
+    'grenade': 2,
+    'flashbang': 1,
+    'smoke': 2,
   },
 };
 

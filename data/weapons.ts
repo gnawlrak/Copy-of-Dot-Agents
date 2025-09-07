@@ -1,4 +1,5 @@
 
+
 import { ThrowableType } from "./definitions";
 
 // 接口定义保持不变
@@ -315,6 +316,12 @@ export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: 
         name: 'Flashbang',
         description: 'Disorients targets with a bright flash and loud noise.',
         fuse: 2.0,
+    },
+    smoke: {
+        type: 'smoke',
+        name: 'Smoke Grenade',
+        description: 'Creates a dense cloud of smoke to block vision.',
+        fuse: 3.0,
     }
 };
 

@@ -1,6 +1,6 @@
 import { FireMode } from "./weapons";
 
-export type ThrowableType = 'grenade' | 'flashbang';
+export type ThrowableType = 'grenade' | 'flashbang' | 'smoke';
 
 export interface Throwable {
   id: number;
