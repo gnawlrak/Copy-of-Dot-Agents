@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { LevelDefinition, LevelWall, LevelDoor, LevelEnemy, saveCustomLevel } from '../levels/level-definitions';
+import { LevelDefinition, LevelWall, LevelDoor, LevelEnemy } from '../levels/level-definitions';
 
 // Define types for editor state
 type EditorTool = 'wall' | 'door' | 'enemy' | 'player' | 'erase' | 'extract';
@@ -7,7 +7,7 @@ type Point = { x: number; y: number };
 
 interface MapEditorProps {
     levelToEdit: LevelDefinition | null;
-    onBack: () => void;
+    onBack: (editedLevel: LevelDefinition) => void;
 }
 
 const LOGICAL_GRID_SIZE = 20;
@@ -36,14 +36,6 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
     const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
     
     const nextDoorId = useRef(1);
-
-    const debouncedLevel = useDebounce(level, 500);
-
-    useEffect(() => {
-        if (debouncedLevel && isInitializedRef.current) {
-            saveCustomLevel(debouncedLevel);
-        }
-    }, [debouncedLevel]);
     
     useEffect(() => {
         setLevel(levelToEdit || createNewLevel());
@@ -215,7 +207,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
              setLevel(currentLevel => {
                 if (!currentLevel) return createNewLevel();
 
-                 if (!isInitializedRef.current && newWidth > 0) {
+                 if (!isInitializedRef.current && newWidth > 0 && currentLevel.walls.every(w => w.width <= 1)) {
                      const newLevel = JSON.parse(JSON.stringify(currentLevel));
                      newLevel.playerStart = { x: newLevel.playerStart.x * newWidth, y: newLevel.playerStart.y * newHeight };
                      newLevel.walls = newLevel.walls.map(w => ({...w, x: w.x * newWidth, y: w.y * newHeight, width: w.width * newWidth, height: w.height * newHeight}));
@@ -263,14 +255,10 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
         }
     }, [draw]);
 
-    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const handlePointerDown = useCallback((x: number, y: number) => {
         if (!level) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
         const scale = scaleRef.current;
+        setMousePos({ x, y });
 
         switch (tool) {
             case 'wall':
@@ -306,16 +294,9 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
                 break;
             }
         }
-    };
+    }, [level, tool]);
 
-    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    };
-
-    const handleMouseUp = () => {
+    const handleDragEnd = useCallback(() => {
         if (!isDragging || !dragStart || !level) return;
 
         const scale = scaleRef.current;
@@ -390,12 +371,53 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
 
         setIsDragging(false);
         setDragStart(null);
+    }, [isDragging, dragStart, level, mousePos, tool]);
+    
+    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        handlePointerDown(e.clientX - rect.left, e.clientY - rect.top);
+    };
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    };
+
+    const handleMouseUp = () => {
+        handleDragEnd();
     };
     
+    const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const touch = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        handlePointerDown(touch.clientX - rect.left, touch.clientY - rect.top);
+    };
+
+    const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const touch = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        setMousePos({ x: touch.clientX - rect.left, y: touch.clientY - rect.top });
+    };
+
+    const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        handleDragEnd();
+    };
+
     const handleBackClick = () => {
         const canvas = canvasRef.current;
         if (!canvas || !level) {
-            onBack();
+            onBack(levelToEdit || createNewLevel());
             return;
         }
 
@@ -404,7 +426,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
             playerStart: { x: level.playerStart.x / canvas.width, y: level.playerStart.y / canvas.height },
             walls: level.walls.map(w => ({ x: w.x / canvas.width, y: w.y / canvas.height, width: w.width / canvas.width, height: w.height / canvas.height })),
             doors: level.doors.map(d => ({ ...d, length: d.length / canvas.height, hinge: { x: d.hinge.x / canvas.width, y: d.hinge.y / canvas.height }})),
-            enemies: level.enemies.map(e => ({ x: e.x / canvas.width, y: e.y / canvas.height, direction: e.direction })),
+            enemies: level.enemies.map(e => ({ ...e, x: e.x / canvas.width, y: e.y / canvas.height })),
             extractionZone: level.extractionZone ? {
                 x: level.extractionZone.x / canvas.width,
                 y: level.extractionZone.y / canvas.height,
@@ -412,8 +434,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
                 height: level.extractionZone.height / canvas.height,
             } : undefined,
         };
-        saveCustomLevel(levelToSave);
-        onBack();
+        onBack(levelToSave);
     }
 
 
@@ -422,7 +443,19 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
     return (
         <div className="w-full h-full flex flex-col lg:flex-row gap-4">
             <div className="flex-grow h-[60%] lg:h-full w-full lg:w-auto bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
-                <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} className="w-full h-full rounded-md" />
+                <canvas 
+                    ref={canvasRef} 
+                    onMouseDown={handleMouseDown} 
+                    onMouseMove={handleMouseMove} 
+                    onMouseUp={handleMouseUp} 
+                    onMouseLeave={handleMouseUp}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchCancel={handleTouchEnd}
+                    className="w-full h-full rounded-md touch-none"
+                    style={{ touchAction: 'none' }}
+                />
             </div>
             <div className="w-full lg:w-96 bg-gray-900 p-4 rounded-md border-2 border-gray-700 flex flex-col gap-4">
                 <h1 className="text-2xl font-bold text-teal-300">MAP EDITOR</h1>
@@ -446,29 +479,11 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
                     </div>
                 </>}
                 <div className="flex-grow"></div>
-                <p className="text-sm text-gray-500 text-center">All changes are saved automatically.</p>
-                <button onClick={handleBackClick} className="w-full py-3 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors mt-auto font-bold text-lg">BACK TO LEVEL SELECT</button>
+                <p className="text-sm text-gray-500 text-center">Changes are saved when you go back.</p>
+                <button onClick={handleBackClick} className="w-full py-3 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors mt-auto font-bold text-lg">SAVE & BACK</button>
             </div>
         </div>
     );
 };
 
 export default MapEditor;
-
-// Custom hook for debouncing
-// Note: In a real project, this might be in its own file (e.g., hooks/useDebounce.ts)
-const useDebounce = <T,>(value: T, delay: number): T => {
-    const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  
-    useEffect(() => {
-      const handler = setTimeout(() => {
-        setDebouncedValue(value);
-      }, delay);
-  
-      return () => {
-        clearTimeout(handler);
-      };
-    }, [value, delay]);
-  
-    return debouncedValue;
-  };

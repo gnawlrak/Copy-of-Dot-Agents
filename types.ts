@@ -1,11 +1,14 @@
+
 import { ThrowableType } from './data/definitions';
 
 export interface PlayerLoadout {
   primary: string;
   secondary: string;
   melee: string;
+  special: string;
   primaryAttachments: { [slot: string]: string };
   secondaryAttachments: { [slot: string]: string };
+  specialAttachments: { [slot: string]: string };
   throwables: { [key in ThrowableType]?: number };
 }
 

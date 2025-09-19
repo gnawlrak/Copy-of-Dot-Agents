@@ -1,3 +1,4 @@
+
 // Using relative coordinates (0 to 1) for map elements, so they scale with canvas size.
 
 export interface LevelWall {
@@ -38,56 +39,6 @@ export interface LevelDefinition {
   extractionZone?: LevelWall;
   cameraScale?: number;
 }
-
-// --- LocalStorage Utilities for Custom Maps ---
-
-const CUSTOM_LEVELS_KEY = 'dot_agents_custom_levels';
-
-export const getCustomLevels = (): LevelDefinition[] => {
-  try {
-    const levelsJson = localStorage.getItem(CUSTOM_LEVELS_KEY);
-    if (levelsJson) {
-      const levels = JSON.parse(levelsJson);
-      // Ensure it's an array of objects
-      if (Array.isArray(levels) && levels.every(l => typeof l === 'object')) {
-        return levels;
-      }
-    }
-  } catch (error) {
-    console.error("Failed to load custom levels from localStorage:", error);
-  }
-  return [];
-};
-
-export const saveCustomLevel = (levelToSave: LevelDefinition): void => {
-  if (!levelToSave.uuid) {
-    console.error("Cannot save a level without a UUID.");
-    return;
-  }
-  try {
-    const levels = getCustomLevels();
-    const existingIndex = levels.findIndex(l => l.uuid === levelToSave.uuid);
-    if (existingIndex > -1) {
-      levels[existingIndex] = levelToSave;
-    } else {
-      levels.push(levelToSave);
-    }
-    localStorage.setItem(CUSTOM_LEVELS_KEY, JSON.stringify(levels));
-  } catch (error) {
-    console.error("Failed to save custom level to localStorage:", error);
-  }
-};
-
-export const deleteCustomLevel = (uuid: string): void => {
-  try {
-    const levels = getCustomLevels();
-    const filteredLevels = levels.filter(l => l.uuid !== uuid);
-    localStorage.setItem(CUSTOM_LEVELS_KEY, JSON.stringify(filteredLevels));
-  } catch (error) {
-    console.error("Failed to delete custom level from localStorage:", error);
-  }
-};
-
 
 // --- Official Missions ---
 

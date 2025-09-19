@@ -22,6 +22,7 @@ const getTierInfo = (index: number) => TIER_INFO[index] || TIER_INFO[0];
 
 const StatBar: React.FC<{ label: string; baseValue: number; modifiedValue: number; previewValue?: number; lowerIsBetter?: boolean; format?: (v: number) => string }> = ({ label, baseValue, modifiedValue, previewValue, lowerIsBetter = false, format }) => {
     if (baseValue === 0 && modifiedValue === 0 && (previewValue === undefined || previewValue === 0)) return null;
+    if (baseValue === -1) return null; // Hide stats for melee/special weapons that don't use them
 
     const hasPreview = typeof previewValue === 'number' && previewValue !== modifiedValue;
     const displayValue = hasPreview ? previewValue : modifiedValue;
@@ -125,7 +126,7 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
     const attachmentSlots = weaponDef.attachmentSlots ? Object.keys(weaponDef.attachmentSlots) : [];
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-4 h-full flex flex-col">
+        <div className="w-full max-w-screen-2xl mx-auto p-4 h-full flex flex-col">
              <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-2 text-center">{weaponName.toUpperCase()}</h1>
              <p className="text-gray-400 text-center mb-8">Configure your weapon attachments.</p>
 

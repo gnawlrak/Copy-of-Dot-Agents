@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { LevelDefinition, getCustomLevels } from '../levels/level-definitions';
+
+import React from 'react';
+import { LevelDefinition } from '../levels/level-definitions';
 import { Difficulty } from '../App';
 
 interface LevelSelectProps {
   officialLevels: LevelDefinition[];
+  customLevels: LevelDefinition[];
   onSelectLevel: (level: LevelDefinition) => void;
   onEditLevel: (level: LevelDefinition) => void;
   onDeleteLevel: (uuid: string) => void;
@@ -12,12 +14,7 @@ interface LevelSelectProps {
   onDifficultyChange: (difficulty: Difficulty) => void;
 }
 
-const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
-  const [customLevels, setCustomLevels] = useState<LevelDefinition[]>([]);
-  
-  useEffect(() => {
-    setCustomLevels(getCustomLevels());
-  }, []);
+const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels, onSelectLevel, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
 
   const renderLevelButton = (level: LevelDefinition, isCustom: boolean) => (
     <div key={level.uuid || level.name} className="flex items-center gap-2">
@@ -45,7 +42,7 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, onSelectLevel
     }`;
 
   return (
-    <div className="w-full max-w-4xl text-center">
+    <div className="w-full max-w-6xl text-center">
       <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-4">SELECT MISSION</h1>
 
       <div className="mb-6">

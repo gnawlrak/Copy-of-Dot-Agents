@@ -1,21 +1,20 @@
 
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
 import LevelSelect from './components/LevelSelect';
-import { LevelDefinition, MISSIONS, deleteCustomLevel } from './levels/level-definitions';
+import { LevelDefinition, MISSIONS } from './levels/level-definitions';
 import MapEditor from './components/MapEditor';
 import LoadoutMenu from './components/LoadoutMenu';
 import WeaponModificationMenu from './components/WeaponModificationMenu';
-import { ThrowableType, AGENT_SKINS } from './data/definitions';
-import { WEAPONS, WEAPON_TYPES } from './data/weapons';
+import { AGENT_SKINS } from './data/definitions';
+import { WEAPON_TYPES } from './data/weapons';
 import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
-import { Operator, OperatorClassID, OPERATORS } from './data/operators';
+import { OperatorClassID, OPERATORS } from './data/operators';
 import MultiplayerLobby from './components/MultiplayerLobby';
 import { MockNetworkClient } from './network';
+import { SaveSystem, GameData } from './data/services/save-system';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
 export type Difficulty = 'simple' | 'normal' | 'hard';
@@ -24,14 +23,17 @@ const DEFAULT_LOADOUT: PlayerLoadout = {
   primary: 'Assault Rifle',
   secondary: WEAPON_TYPES.secondary[0],
   melee: 'Combat Knife',
+  special: 'Rocket Launcher',
   primaryAttachments: {
     'Trigger': '三连发扳机组' // Default with burst fire
   },
   secondaryAttachments: {},
+  specialAttachments: {},
   throwables: {
     'grenade': 2,
     'flashbang': 1,
     'smoke': 2,
+    'molotov': 0,
   },
 };
 
@@ -50,8 +52,7 @@ const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
         switchThrowable:{ x: 0.71,  y: 0.86, scale: 0.8 },
         fireModeSwitch: { x: 0.78,  y: 0.65, scale: 0.8 },
         heal:           { x: 0.85,  y: 0.65, scale: 0.8 },
-        skill:          { x: 0.71,  y: 0.55, scale: 0.9 },
-        ultimate:       { x: 0.78,  y: 0.55, scale: 0.9 },
+        special:        { x: 0.92,  y: 0.59, scale: 0.8 },
     },
 };
 
@@ -60,14 +61,27 @@ const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>('main-menu');
   const [selectedLevel, setSelectedLevel] = useState<LevelDefinition | null>(null);
   const [levelToEdit, setLevelToEdit] = useState<LevelDefinition | null>(null);
-  const [levelVersion, setLevelVersion] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showSoundWaves, setShowSoundWaves] = useState(true);
-  const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | null>(null);
+  const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | 'special' | null>(null);
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('simple');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const networkClientRef = useRef<MockNetworkClient | null>(null);
+  const runScoreRef = useRef<number>(0);
+  
+  // State for saved data
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [operatorClassId, setOperatorClassId] = useState<OperatorClassID>('A-Red');
+  const [aimSensitivity, setAimSensitivity] = useState<number>(1.0);
+  const [agentSkin, setAgentSkin] = useState<string>(AGENT_SKINS[0].name);
+  const [playerLoadout, setPlayerLoadout] = useState<PlayerLoadout>(DEFAULT_LOADOUT);
+  const [customControls, setCustomControls] = useState<CustomControls>(DEFAULT_CONTROLS_LAYOUT);
+  const [customLevels, setCustomLevels] = useState<LevelDefinition[]>([]);
+  // Scoring state
+  const [totalScore, setTotalScore] = useState<number>(0);
+  const [highScore, setHighScore] = useState<number>(0);
 
   useEffect(() => {
     if (!networkClientRef.current) {
@@ -75,130 +89,89 @@ const App: React.FC = () => {
     }
   }, []);
   
-  const [operatorClassId, setOperatorClassId] = useState<OperatorClassID>(() => {
-    try {
-        const saved = localStorage.getItem('dot_agents_operator_class_id');
-        if (saved && OPERATORS[saved as OperatorClassID]) {
-            return saved as OperatorClassID;
+  // Data Loading Effect
+  useEffect(() => {
+    const loadData = async () => {
+        let loadedData = await SaveSystem.loadGameData();
+
+        // One-time migration from old format to the new unified save object
+        if (!loadedData && localStorage.getItem('dot_agents_player_loadout')) {
+            console.log("Migrating old data to new save system...");
+            const oldCustomLevels = (() => {
+                try {
+                    const levelsJson = localStorage.getItem('dot_agents_custom_levels');
+                    return levelsJson ? JSON.parse(levelsJson) : [];
+                } catch { return []; }
+            })();
+            
+            const migratedData: GameData = {
+                version: 1,
+                operatorClassId: (localStorage.getItem('dot_agents_operator_class_id') || 'A-Red') as OperatorClassID,
+                aimSensitivity: parseFloat(localStorage.getItem('dot_agents_aim_sensitivity') || '1.0'),
+                agentSkin: localStorage.getItem('dot_agents_agent_skin') || AGENT_SKINS[0].name,
+                playerLoadout: {
+                    ...JSON.parse(localStorage.getItem('dot_agents_player_loadout') || JSON.stringify(DEFAULT_LOADOUT)),
+                    special: 'Rocket Launcher', // Add default special weapon
+                    specialAttachments: {},
+                },
+                customControls: JSON.parse(localStorage.getItem('dot_agents_custom_controls') || JSON.stringify(DEFAULT_CONTROLS_LAYOUT)),
+                customLevels: oldCustomLevels
+            };
+            loadedData = migratedData;
+            await SaveSystem.saveGameData(migratedData);
+            await SaveSystem.clearOldData();
         }
-    } catch (e) {
-        console.error("Failed to load operator class id:", e);
-    }
-    return 'A-Red'; // Default to Assault
-  });
 
-  useEffect(() => {
-    try {
-        localStorage.setItem('dot_agents_operator_class_id', operatorClassId);
-    } catch (e) {
-        console.error("Failed to save operator class id:", e);
-    }
-  }, [operatorClassId]);
-
-  const [aimSensitivity, setAimSensitivity] = useState<number>(() => {
-    try {
-        const saved = localStorage.getItem('dot_agents_aim_sensitivity');
-        if (saved) {
-            const parsed = parseFloat(saved);
-            if (!isNaN(parsed) && parsed >= 0.5 && parsed <= 2.0) {
-                return parsed;
-            }
+        if (loadedData) {
+            // Apply loaded data to state
+            setOperatorClassId(loadedData.operatorClassId || 'A-Red');
+            setAimSensitivity(loadedData.aimSensitivity || 1.0);
+            setAgentSkin(loadedData.agentSkin || AGENT_SKINS[0].name);
+            setPlayerLoadout(loadedData.playerLoadout || DEFAULT_LOADOUT);
+            setCustomControls(loadedData.customControls || DEFAULT_CONTROLS_LAYOUT);
+            setCustomLevels(loadedData.customLevels || []);
+            setTotalScore(loadedData.totalScore || 0);
+            setHighScore(loadedData.highScore || 0);
         }
-    } catch (e) {
-        console.error("Failed to load aim sensitivity:", e);
-    }
-    return 1.0; // Default value
-  });
+        setIsDataLoaded(true);
+    };
+    loadData();
+  }, []);
 
+  // Centralized Data Saving Effect
   useEffect(() => {
-    try {
-        localStorage.setItem('dot_agents_aim_sensitivity', aimSensitivity.toString());
-    } catch (e) {
-        console.error("Failed to save aim sensitivity:", e);
+    if (!isDataLoaded) {
+        return; // Don't save before initial data is loaded, to prevent overwriting save with defaults.
     }
-  }, [aimSensitivity]);
 
-  const [agentSkin, setAgentSkin] = useState<string>(() => {
-    try {
-      const savedSkin = localStorage.getItem('dot_agents_agent_skin');
-      if (savedSkin && AGENT_SKINS.find(s => s.name === savedSkin)) {
-        return savedSkin;
-      }
-    } catch (e) {
-      console.error("Failed to load agent skin:", e);
-    }
-    return AGENT_SKINS[0].name;
-  });
+    const gameData: GameData = {
+        version: 1,
+        operatorClassId,
+        aimSensitivity,
+        agentSkin,
+        playerLoadout,
+        customControls,
+        customLevels,
+        totalScore,
+        highScore,
+    };
+    
+    setSyncStatus('syncing');
+    const handler = setTimeout(() => {
+        SaveSystem.saveGameData(gameData).then(() => {
+            setSyncStatus('synced');
+            setTimeout(() => setSyncStatus('idle'), 1500);
+        }).catch(() => {
+             setSyncStatus('error');
+        });
+    }, 1000); // Debounce saving by 1 second
 
-  const [playerLoadout, setPlayerLoadout] = useState<PlayerLoadout>(() => {
-    try {
-      const saved = localStorage.getItem('dot_agents_player_loadout');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Basic validation and migration for new attachment fields
-        if (parsed.primary && parsed.secondary && parsed.throwables) {
-          return {
-            ...DEFAULT_LOADOUT,
-            ...parsed,
-            melee: parsed.melee || DEFAULT_LOADOUT.melee,
-            primaryAttachments: parsed.primaryAttachments || {},
-            secondaryAttachments: parsed.secondaryAttachments || {},
-          };
-        }
-      }
-    } catch (e) {
-      console.error("Failed to load player loadout:", e);
-    }
-    return DEFAULT_LOADOUT;
-  });
+    return () => {
+        clearTimeout(handler);
+    };
 
-  const [customControls, setCustomControls] = useState<CustomControls>(() => {
-    try {
-        const saved = localStorage.getItem('dot_agents_custom_controls');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            // Basic validation
-            if (parsed.baseScale && parsed.opacity && parsed.layout) {
-                // Merge with default to ensure all controls are present if new ones were added in an update
-                return {
-                    ...DEFAULT_CONTROLS_LAYOUT,
-                    ...parsed,
-                    layout: {
-                        ...DEFAULT_CONTROLS_LAYOUT.layout,
-                        ...parsed.layout,
-                    }
-                };
-            }
-        }
-    } catch (e) {
-        console.error("Failed to load custom controls:", e);
-    }
-    return DEFAULT_CONTROLS_LAYOUT;
-  });
+    }, [operatorClassId, aimSensitivity, agentSkin, playerLoadout, customControls, customLevels, totalScore, highScore, isDataLoaded]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('dot_agents_custom_controls', JSON.stringify(customControls));
-    } catch (e) {
-      console.error("Failed to save custom controls:", e);
-    }
-  }, [customControls]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('dot_agents_agent_skin', agentSkin);
-    } catch (e) {
-      console.error("Failed to save agent skin:", e);
-    }
-  }, [agentSkin]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('dot_agents_player_loadout', JSON.stringify(playerLoadout));
-    } catch (e) {
-      console.error("Failed to save player loadout:", e);
-    }
-  }, [playerLoadout]);
   
   const handleStartMission = () => {
     setGameState('level-select');
@@ -234,19 +207,66 @@ const App: React.FC = () => {
     networkClientRef.current?.disconnect();
     const previousState = isMultiplayer ? 'multiplayer-lobby' : 'level-select';
     setIsMultiplayer(false);
-    setGameState(previousState);
+    // When mission ends, accumulate run score into total and update high score
+    const run = runScoreRef.current || 0;
+    const prevTotal = totalScore || 0;
+    const prevHigh = highScore || 0;
+    const nextTotal = prevTotal + run;
+    const nextHigh = Math.max(prevHigh, run);
+    console.log('[Score] Mission end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
+    setTotalScore(nextTotal);
+    setHighScore(nextHigh);
+    // Persist immediately so main menu shows updated values
+    const gameData: GameData = {
+        version: 1,
+        operatorClassId,
+        aimSensitivity,
+        agentSkin,
+        playerLoadout,
+        customControls,
+        customLevels,
+        totalScore: nextTotal,
+        highScore: nextHigh,
+    };
+    // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
+    const targetState = isMultiplayer ? previousState : 'main-menu';
+    SaveSystem.saveGameData(gameData).then(() => {
+        setSyncStatus('synced');
+        setTimeout(() => setSyncStatus('idle'), 1500);
+        setGameState(targetState);
+    }).catch(err => {
+        console.error('Failed to save score on mission end', err);
+        setGameState(previousState);
+    });
+    // Reset run score reference
+    runScoreRef.current = 0;
   };
   
   const handleBackToMenu = () => {
     setGameState('main-menu');
   };
-
-  const handleBackToLevelSelect = useCallback(() => {
-    setLevelVersion(v => v + 1); // Increment to force LevelSelect to re-fetch levels
-    setGameState('level-select');
-  }, []);
   
-  const handleGoToModifyWeapon = (weaponType: 'primary' | 'secondary') => {
+  const handleSaveCustomLevel = useCallback((level: LevelDefinition) => {
+      setCustomLevels(prevLevels => {
+          const existingIndex = prevLevels.findIndex(l => l.uuid === level.uuid);
+          if (existingIndex > -1) {
+              const newLevels = [...prevLevels];
+              newLevels[existingIndex] = level;
+              return newLevels;
+          } else {
+              return [...prevLevels, level];
+          }
+      });
+      setGameState('level-select');
+  }, []);
+
+  const handleDeleteLevel = useCallback((uuid: string) => {
+    if (window.confirm('Are you sure you want to delete this custom map?')) {
+        setCustomLevels(prevLevels => prevLevels.filter(l => l.uuid !== uuid));
+    }
+  }, []);
+
+  const handleGoToModifyWeapon = (weaponType: 'primary' | 'secondary' | 'special') => {
     setWeaponToModify(weaponType);
     setGameState('weapon-modification');
   };
@@ -258,18 +278,16 @@ const App: React.FC = () => {
 
   const handleAttachmentsChange = (newAttachments: { [slot: string]: string }) => {
       if (!weaponToModify) return;
+      
+      let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
+      if(weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
+      if(weaponToModify === 'special') attachmentField = 'specialAttachments';
+
       setPlayerLoadout(prev => ({
           ...prev,
-          [weaponToModify === 'primary' ? 'primaryAttachments' : 'secondaryAttachments']: newAttachments,
+          [attachmentField]: newAttachments,
       }));
   };
-
-  const handleDeleteLevel = useCallback((uuid: string) => {
-    if (window.confirm('Are you sure you want to delete this custom map?')) {
-        deleteCustomLevel(uuid);
-        setLevelVersion(v => v + 1); // Force re-render of level list
-    }
-  }, []);
 
   const handleGlobalBack = useCallback(() => {
     switch (gameState) {
@@ -279,7 +297,9 @@ const App: React.FC = () => {
             setGameState('main-menu');
             break;
         case 'map-editor':
-            handleBackToLevelSelect();
+            // The global back button is not shown in the editor,
+            // but if it were, this would be a "cancel without saving" action.
+            setGameState('level-select');
             break;
         case 'weapon-modification':
             handleBackToLoadout();
@@ -287,10 +307,13 @@ const App: React.FC = () => {
         default:
             break;
     }
-  }, [gameState, handleBackToLevelSelect, handleBackToLoadout]);
+  }, [gameState, handleBackToLoadout]);
 
 
   const renderContent = () => {
+    if (!isDataLoaded) {
+      return <div className="text-2xl text-teal-300 animate-pulse">LOADING DATA...</div>
+    }
     switch (gameState) {
       case 'in-game':
         if (selectedLevel) {
@@ -298,7 +321,7 @@ const App: React.FC = () => {
           const operator = OPERATORS[operatorClassId];
           return (
             <div className="w-full h-full flex items-center justify-center p-4">
-              <div className="w-full h-full max-w-6xl max-h-[calc(100vh-2rem)] aspect-video bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
+              <div className="w-full h-full max-h-[calc(100vh-2rem)] aspect-video bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
                 <GameCanvas 
                     level={selectedLevel} 
                     loadout={playerLoadout} 
@@ -314,6 +337,12 @@ const App: React.FC = () => {
                     difficulty={difficulty}
                     isMultiplayer={isMultiplayer}
                     networkClient={networkClientRef.current}
+                    initialRunScore={0}
+                    onScoreChange={(newRunScore: number) => {
+                        runScoreRef.current = newRunScore;
+                    }}
+                    totalScore={totalScore}
+                    highScore={highScore}
                 />
               </div>
             </div>
@@ -324,8 +353,8 @@ const App: React.FC = () => {
         return null;
       case 'level-select':
         return <LevelSelect 
-          key={levelVersion} 
           officialLevels={MISSIONS} 
+          customLevels={customLevels}
           onSelectLevel={handleSelectLevel} 
           onEditLevel={(level) => handleGoToEditor(level)}
           onDeleteLevel={handleDeleteLevel}
@@ -336,7 +365,7 @@ const App: React.FC = () => {
       case 'map-editor':
         return (
           <div className="w-full h-full p-4">
-            <MapEditor levelToEdit={levelToEdit} onBack={handleBackToLevelSelect} />
+            <MapEditor levelToEdit={levelToEdit} onBack={handleSaveCustomLevel} />
           </div>
         );
       case 'loadout':
@@ -353,7 +382,12 @@ const App: React.FC = () => {
               return null;
           }
           const weaponName = playerLoadout[weaponToModify];
-          const currentAttachments = playerLoadout[weaponToModify === 'primary' ? 'primaryAttachments' : 'secondaryAttachments'];
+          
+          let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
+          if(weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
+          if(weaponToModify === 'special') attachmentField = 'specialAttachments';
+          const currentAttachments = playerLoadout[attachmentField];
+
           return (
             <WeaponModificationMenu 
                 weaponName={weaponName}
@@ -374,6 +408,9 @@ const App: React.FC = () => {
             onGoToLoadout={handleGoToLoadout} 
             onGoToEditor={() => handleGoToEditor(null)} 
             onGoToMultiplayer={handleGoToMultiplayer}
+            syncStatus={syncStatus}
+            totalScore={totalScore}
+            highScore={highScore}
         />;
     }
   };

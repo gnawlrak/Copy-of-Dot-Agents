@@ -1,6 +1,7 @@
+
 import { FireMode } from "./weapons";
 
-export type ThrowableType = 'grenade' | 'flashbang' | 'smoke';
+export type ThrowableType = 'grenade' | 'flashbang' | 'smoke' | 'molotov';
 
 export interface Throwable {
   id: number;
@@ -17,8 +18,7 @@ export interface Throwable {
 export interface Weapon {
   name: string;
   description: string;
-  // FIX: Added 'melee' to the weapon category to align with WeaponDefinition and prevent type errors.
-  category: 'primary' | 'secondary' | 'melee';
+  category: 'primary' | 'secondary' | 'melee' | 'special';
   type: 'projectile' | 'hitscan';
   damage: number;
   fireRate: number; // seconds between shots
@@ -40,6 +40,9 @@ export interface Weapon {
   specialEffect?: string;
   durability?: number;
   maxDurability?: number;
+  equipTime?: number;
+  unequipTime?: number;
+  weaponClass?: 'charge';
 }
 
 export interface AgentSkin {
@@ -53,4 +56,3 @@ export const AGENT_SKINS: AgentSkin[] = [
     { name: 'Desert Ops', color: '#fb923c' }, // tailwind orange-400
     { name: 'Urban Shadow', color: '#60a5fa' }, // tailwind blue-400
     { name: 'Crimson Strike', color: '#f87171' }, // tailwind red-400
-];

@@ -39,6 +39,17 @@ type Bullet = {
   damage: number;
   owner: 'player' | 'enemy';
   isIncendiary?: boolean;
+  weaponName?: string;
+  // Kunai specific
+  isKunai?: boolean;
+  originX?: number;
+  originY?: number;
+  maxTravelDistance?: number; // pixels
+  isCharged?: boolean;
+  hasReachedMax?: boolean;
+  // New properties for Kunai homing
+  homingTarget?: Enemy | null;
+  hasHomed?: boolean;
 };
 type Enemy = {
   x: number;
@@ -79,6 +90,10 @@ type Enemy = {
   moveSoundTimer?: number;
   burnTimer?: number;
   burnDamage?: number;
+  // Kunai bleed state
+  bleedLayers?: number; // 0..2
+  bleedTimer?: number; // seconds remaining for bleed (shared timer for layers)
+  hitTimer?: number;
 };
 type Player = {
     x: number;
@@ -100,6 +115,8 @@ type Player = {
     medkits: number;
     isHealing: boolean;
     healTimer: number; // seconds
+    burnTimer?: number;
+    burnDamage?: number;
 }
 type Light = {
   x: number;
@@ -191,6 +208,21 @@ type SmokeCloud = {
     lifetime: number; // seconds
     maxLifetime: number; // seconds
 };
+type FirePatch = {
+    x: number;
+    y: number;
+    radius: number;
+    maxRadius: number;
+    lifetime: number; // seconds
+    maxLifetime: number; // seconds
+    damagePerSecond: number;
+};
+type StuckKunai = {
+    x: number;
+    y: number;
+    detonationTimer: number;
+    owner: 'player' | 'enemy';
+}
 
 
 interface GameCanvasProps {
@@ -208,10 +240,26 @@ interface GameCanvasProps {
     difficulty: Difficulty;
     isMultiplayer?: boolean;
     networkClient?: MockNetworkClient | null;
+    // Score callbacks/state
+    onScoreChange?: (newScore: number) => void;
+    initialRunScore?: number;
+    // Global persisted scores (from App)
+    totalScore?: number;
+    highScore?: number;
 }
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
 const BASE_AIM_SENSITIVITY = 0.0025; // Base sensitivity for mouse and touch aiming
+
+// Scoring constants
+const SCORE_PER_KILL = 100;
+
+// Difficulty multipliers
+const DIFFICULTY_MULTIPLIERS: { [key in import('../App').Difficulty]: number } = {
+  simple: 0.75,
+  normal: 1.0,
+  hard: 1.5,
+};
 
 // --- Manual Healing Constants ---
 const HEAL_DURATION = 2.0; // seconds
@@ -226,6 +274,24 @@ const AXE_RECOVER_DURATION = 0.6; // seconds
 const RIFLE_RELOAD_TIME = 2.5; // seconds
 const RIFLE_BURST_PAUSE = 0.8; // seconds between bursts
 const RIFLE_INTER_BURST_DELAY = 0.1; // seconds between shots in a burst
+
+// --- Kunai Homing Constants ---
+const KUNAI_HOMING_ACQUISITION_RANGE = 120; // pixels from flight path
+const KUNAI_HOMING_TURN_RATE = Math.PI * 2.5; // radians per second
+// --- Kunai Gameplay Constants (meters-based in design) ---
+const METERS_TO_PIXELS = 48; // 1 meter = 48 pixels (adjust as needed)
+const KUNAI_NORMAL_DISTANCE_M = 12; // meters
+const KUNAI_NORMAL_SPEED_MPS = 20; // meters per second
+const KUNAI_AIRBURST_RADIUS_M = 5; // meters
+const KUNAI_AIRBURST_BASE_DAMAGE = 40; // instant HP
+const KUNAI_BLEED_DPS = 8; // HP per second per layer
+const KUNAI_BLEED_DURATION = 5.0; // seconds
+const KUNAI_BLEED_MAX_LAYERS = 2;
+
+// Charged throw parameters (meters)
+const CHARGE_MIN_TIME = 0.3;
+const CHARGE_MAX_TIME = 2.0;
+const CHARGE_MAP = [{t:0.3,d:5},{t:1.0,d:10},{t:2.0,d:20}];
 
 const normalizeAngle = (angle: number) => {
     while (angle <= -Math.PI) angle += 2 * Math.PI;
@@ -420,7 +486,7 @@ const weaponShakeFunctions: { [key: string]: (shaker: any, scale: number, ux: nu
   },
 };
 
-const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient }: GameCanvasProps): JSX.Element => {
+const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient, onScoreChange, initialRunScore, totalScore, highScore }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -431,8 +497,20 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       x: 100, y: 100, radius: 10, speed: 240, health: 100, maxHealth: 100, hitTimer: 0,
       weapons: [], currentWeaponIndex: 0, shootCooldown: 0, isReloading: false, reloadTimer: 0,
       throwables: {}, throwableTypes: [], currentThrowableIndex: 0, flashTimer: 0, 
-      medkits: 0, isHealing: false, healTimer: 0
+      medkits: 0, isHealing: false, healTimer: 0, burnTimer: 0, burnDamage: 0,
   });
+  const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
+
+  // Helper to increment score and notify parent (applies difficulty multiplier)
+  const addScore = (amount: number) => {
+      const mult = DIFFICULTY_MULTIPLIERS[difficulty] ?? 1.0;
+      const applied = Math.round(amount * mult);
+      setRunScore(prev => {
+          const next = prev + applied;
+          try { if (onScoreChange) onScoreChange(next); } catch {}
+          return next;
+      });
+  };
   const previousWeaponIndexRef = useRef<number>(0);
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const playerMoveSoundTimerRef = useRef<number>(0);
@@ -448,16 +526,19 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const initialDummyEnemiesRef = useRef<Array<Enemy>>([]);
   const respawningDummiesRef = useRef<Array<{ enemy: Enemy; respawnTimer: number }>>([]);
   const missionTimeRef = useRef<number>(0);
+  const enemyRangeDisplayTimerRef = useRef<number>(0);
   const lightsRef = useRef<Array<Light>>([]);
   const sparksRef = useRef<Array<Spark>>([]);
   const throwablesRef = useRef<Array<Throwable>>([]);
   const explosionsRef = useRef<Array<Explosion>>([]);
   const smokeCloudsRef = useRef<Array<SmokeCloud>>([]);
+  const firePatchesRef = useRef<Array<FirePatch>>([]);
   const shockwavesRef = useRef<Array<Shockwave>>([]);
   const hitEffectsRef = useRef<Array<HitEffect>>([]);
   const isGameOverRef = useRef<boolean>(false);
   const isMissionCompleteRef = useRef<boolean>(false);
   const missionEndTimeRef = useRef<number | null>(null);
+  const endAutoCloseTimerRef = useRef<number | null>(null);
   const interactingDoorIdRef = useRef<number | null>(null);
   const interactionHintDoorIdRef = useRef<number | null>(null);
   const lockedDoorHintIdRef = useRef<number | null>(null);
@@ -468,6 +549,9 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const cookingThrowableRef = useRef<{ type: ThrowableType; timer: number; maxTimer: number; } | null>(null);
   let nextThrowableId = 0;
   const isThrowableModeRef = useRef<boolean>(false);
+  // Kunai charging refs
+  const isChargingKunaiRef = useRef<boolean>(false);
+  const kunaiChargeStartRef = useRef<number>(0);
   const slashStateRef = useRef({
     active: false, t: 0, dur: 0.15, // seconds
     startA: 0, endA: 0, curA: 0, prevA: 0,
@@ -502,6 +586,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const burstStateRef = useRef({ active: false, shotsLeft: 0 });
   const hasFiredSemiThisPressRef = useRef(false);
   const hasStartedBurstThisPressRef = useRef(false);
+  const stuckKunaisRef = useRef<Array<StuckKunai>>([]);
 
   const [isPaused, setIsPaused] = useState(false);
   const [showInGameSettings, setShowInGameSettings] = useState(false);
@@ -522,10 +607,10 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         switchThrowable:{ id: null as number | null },
         fireModeSwitch: { id: null as number | null },
         heal:           { id: null as number | null },
-        skill:          { id: null as number | null },
-        ultimate:       { id: null as number | null },
+        special:        { id: null as number | null },
     });
     const touchButtonRectsRef = useRef<{ [key: string]: { x: number; y: number; r: number } }>({});
+    const pauseButtonCircleRef = useRef({ x: 0, y: 0, r: 0 });
 
   // FIX: Moved door interaction functions into component scope to be accessible by multiple effects.
   const startDoorInteraction = useCallback(() => {
@@ -757,6 +842,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                 hitEnemy.health -= weapon.damage;
                 if (hitEnemy.health <= 0 && healthBefore > 0) {
                   hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
+                  try { addScore(SCORE_PER_KILL); } catch {}
                 }
                 impact(hitEnemy.x, hitEnemy.y);
             } else {
@@ -788,6 +874,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                     damage: weapon.damage,
                     owner: ownerType,
                     isIncendiary: weapon.specialEffect === 'burn',
+                    weaponName: weapon.name,
                 });
             }
         } else { // Single projectile logic (e.g., Pistol)
@@ -799,10 +886,18 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                 dx: Math.cos(finalAngle),
                 dy: Math.sin(finalAngle),
                 radius: weapon.bulletRadius,
-                speed: weapon.bulletSpeed,
                 damage: weapon.damage,
                 owner: ownerType,
                 isIncendiary: weapon.specialEffect === 'burn',
+                weaponName: weapon.name,
+                // Kunai specific initializers
+                homingTarget: null,
+                hasHomed: false,
+                isKunai: weapon.name === 'Explosive Kunai',
+                originX: muzzleX,
+                originY: muzzleY,
+                maxTravelDistance: KUNAI_NORMAL_DISTANCE_M * METERS_TO_PIXELS,
+                speed: (weapon.name === 'Explosive Kunai') ? (KUNAI_NORMAL_SPEED_MPS * METERS_TO_PIXELS) : weapon.bulletSpeed,
             });
         }
     }
@@ -843,7 +938,8 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         if (!currentMelee.durability || currentMelee.durability <= 0) return; // Can't bash with broken shield
         
         const scale = scaleRef.current;
-        const bashRange = 60 * scale;
+        const cameraScale = cameraScaleRef.current;
+        const bashRange = 60 * scale / cameraScale;
         const playerDirection = playerDirectionRef.current;
         const ux = Math.cos(playerDirection);
         const uy = Math.sin(playerDirection);
@@ -863,6 +959,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                     enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
                     if (enemy.health <= 0 && healthBefore > 0) {
                         hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                        try { addScore(SCORE_PER_KILL); } catch {}
                     }
                 }
             }
@@ -873,6 +970,45 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         startSlash();
     }
     player.shootCooldown = currentMelee.fireRate;
+  };
+
+  const applyDamageToPlayer = (damage: number, sourceDirection: { x: number, y: number }, impactPoint: { x: number, y: number }) => {
+    const player = playerRef.current;
+    if (isGameOverRef.current) return;
+
+    let damageToApply = damage;
+    const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
+    
+    if (shield) {
+        const angleToDamageSource = Math.atan2(sourceDirection.y, sourceDirection.x);
+        const angleDiff = Math.abs(normalizeAngle(angleToDamageSource - playerDirectionRef.current));
+        const isEquipped = player.weapons[player.currentWeaponIndex] === shield;
+
+        if (isEquipped && angleDiff > Math.PI / 2) { // Frontal block
+            shield.durability! -= damageToApply;
+            damageToApply = 0;
+            // Play shield hit sparks
+            const sparkCount = 4 + Math.floor(Math.random() * 3);
+            for (let j = 0; j < sparkCount; j++) {
+                const sparkAngle = angleToDamageSource + Math.PI + (Math.random() - 0.5) * 0.8; // Sparks fly back
+                const speed = (180 + Math.random() * 240);
+                sparksRef.current.push({ x: impactPoint.x, y: impactPoint.y, vx: Math.cos(sparkAngle) * speed, vy: Math.sin(sparkAngle) * speed, ttl: 0.2, life: 0.2 });
+            }
+        } else if (!isEquipped && angleDiff > Math.PI * 0.75) { // Back protection
+            shield.durability! -= damage * 0.8; 
+            damageToApply *= 0.2;
+        }
+    }
+
+    if (damageToApply > 0) {
+        player.health -= damageToApply;
+        player.hitTimer = 0.17;
+    }
+
+    if (player.health <= 0) {
+        player.health = 0;
+        isGameOverRef.current = true;
+    }
   };
 
 
@@ -1063,10 +1199,30 @@ const startHealing = () => {
         });
         
         level.doors.forEach(d => {
+            // Algorithmic length selection by aspect ratio:
+            // - portrait (aspect ~< 1): use canvas.height as base
+            // - square: interpolate between height and width
+            // - wide desktop: smoothly bias toward canvas.width but cap to avoid excessive length
+            const aspect = canvas.width / canvas.height;
+            // map aspect 1.0..2.0 to t 0..1, clamp
+            const tRaw = (aspect - 1.0) / (2.0 - 1.0);
+            const t = Math.max(0, Math.min(1, tRaw));
+            // smoothstep for nicer transition
+            const smooth = t * t * (3 - 2 * t);
+            const base = canvas.height + (canvas.width - canvas.height) * smooth; // lerp(height, width, smooth)
+
+            // Scale down doors slightly to avoid visually oversized doors across modes.
+            const DOOR_LENGTH_SCALE = 0.7; // Reduce by ~30% (adjustable)
+            let lengthPixels = d.length * base * DOOR_LENGTH_SCALE;
+            // Cap: do not exceed 65% of the longer canvas side
+            const maxLen = Math.max(canvas.width, canvas.height) * 0.65;
+            const minLen = Math.min(canvas.width, canvas.height) * 0.06; // ensure not vanishingly small
+            lengthPixels = Math.max(minLen, Math.min(lengthPixels, maxLen));
+
             doorsRef.current.push({
               ...d,
               hinge: { x: d.hinge.x * canvas.width, y: d.hinge.y * canvas.height },
-              length: d.length * canvas.height,
+              length: lengthPixels,
               thickness: wallThickness,
               currentAngle: d.closedAngle,
               angularVelocity: 0,
@@ -1122,7 +1278,17 @@ const startHealing = () => {
         };
 
         const enemyPool = shuffleArray(level.enemies);
-        const enemyCount = level.enemyCount || level.enemies.length;
+        // Determine enemy count for this run. Support dynamic per-level ranges.
+        let enemyCount = level.enemyCount || level.enemies.length;
+        if ((level as any).enemyCountRange) {
+            const range = (level as any).enemyCountRange as { min: number; max: number };
+            const minC = Math.max(0, Math.floor(range.min));
+            const maxC = Math.max(minC, Math.floor(range.max));
+            const cappedMax = Math.min(maxC, level.enemies.length);
+            // Random integer in [minC, cappedMax]
+            enemyCount = Math.min(level.enemies.length, Math.floor(Math.random() * (cappedMax - minC + 1)) + minC);
+            if (enemyCount < 0) enemyCount = 0;
+        }
         const chosenSpawns = enemyPool.slice(0, enemyCount);
         initialEnemyCountRef.current = chosenSpawns.length;
 
@@ -1213,6 +1379,8 @@ const startHealing = () => {
       player.medkits = INITIAL_MEDKITS;
       player.isHealing = false;
       player.healTimer = 0;
+      player.burnTimer = 0;
+      player.burnDamage = 0;
       
       const shaker = shakerRef.current;
       
@@ -1280,7 +1448,8 @@ const startHealing = () => {
       player.weapons = [
           createWeaponInstance(loadout.primary, loadout.primaryAttachments),
           createWeaponInstance(loadout.secondary, loadout.secondaryAttachments),
-          createWeaponInstance(loadout.melee, {})
+          createWeaponInstance(loadout.melee, {}),
+          createWeaponInstance(loadout.special, loadout.specialAttachments)
       ];
 
       player.currentWeaponIndex = 0;
@@ -1305,6 +1474,7 @@ const startHealing = () => {
       hasUsedTouchRef.current = false;
       initialDummyEnemiesRef.current = [];
       respawningDummiesRef.current = [];
+      stuckKunaisRef.current = [];
       remotePlayersRef.current.clear();
       const parent = canvas.parentElement;
       if (parent) {
@@ -1332,6 +1502,8 @@ const startHealing = () => {
 
       setupMap();
       setupEnemies();
+      // Show enemy range on start for 4 seconds
+      enemyRangeDisplayTimerRef.current = 4.0;
       initializePlayer();
       bulletsRef.current = [];
       keysPressedRef.current.clear();
@@ -1340,6 +1512,7 @@ const startHealing = () => {
       throwablesRef.current = [];
       explosionsRef.current = [];
       smokeCloudsRef.current = [];
+      firePatchesRef.current = [];
       shockwavesRef.current = [];
       hitEffectsRef.current = [];
       isAimingThrowableRef.current = false;
@@ -1392,6 +1565,15 @@ const startHealing = () => {
       const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
       if (isEnded && missionEndTimeRef.current === null) {
         missionEndTimeRef.current = now;
+        // Start auto-close timer (60s)
+        if (!endAutoCloseTimerRef.current) {
+            endAutoCloseTimerRef.current = window.setTimeout(() => {
+                // Clear ref before calling
+                endAutoCloseTimerRef.current && clearTimeout(endAutoCloseTimerRef.current);
+                endAutoCloseTimerRef.current = null;
+                onMissionEnd();
+            }, 60000);
+        }
       }
       if (!isEnded) {
         missionTimeRef.current += dt;
@@ -1447,6 +1629,21 @@ const startHealing = () => {
                 x: n.x, y: n.y,
                 radius: 0, maxRadius: 180 * scale / cameraScale,
                 lifetime: 15.0, maxLifetime: 15.0,
+            });
+            return;
+        }
+
+        if (n.type === 'molotov') {
+            soundWavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: 200 * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'explosion' });
+            shockwavesRef.current.push({ x: n.x, y: n.y, radius: 0, maxRadius: 80 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2 });
+            firePatchesRef.current.push({
+                x: n.x,
+                y: n.y,
+                radius: 0,
+                maxRadius: 120 * scale / cameraScale,
+                lifetime: 7.0, // burns for 7 seconds
+                maxLifetime: 7.0,
+                damagePerSecond: 35,
             });
             return;
         }
@@ -1544,6 +1741,7 @@ const startHealing = () => {
                     enemy.health -= damage;
                     if (enemy.health <= 0 && healthBefore > 0) {
                       hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                      try { addScore(SCORE_PER_KILL); } catch {}
                     }
                 }
             } else { // flashbang
@@ -1600,6 +1798,78 @@ const startHealing = () => {
         });
     };
 
+    const createExplosion = (x: number, y: number, radius: number, maxDamage: number, dynamicSegments: Segment[]) => {
+        const scale = scaleRef.current;
+        const cameraScale = cameraScaleRef.current;
+
+        shakerRef.current.addImpulse({ amp: 18 * scale, rotAmp: 0.04, freq: 50, decay: 15, dirx: 0, diry: 0 });
+        
+        lightsRef.current.push({ x, y, ttl: 0.23, life: 0.23, power: 2.0, type: 'grenade', openWindow: true });
+        shockwavesRef.current.push({ x, y, radius: 0, maxRadius: radius, lifetime: 0.37, maxLifetime: 0.37 });
+        explosionsRef.current.push({ x, y, radius: 0, maxRadius: radius, lifetime: 0.5, maxLifetime: 0.5, type: 'grenade' });
+        soundWavesRef.current.push({ x, y, radius: 0, maxRadius: 800 * scale / cameraScale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
+
+        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
+            const dist = Math.hypot(unit.x - x, unit.y - y);
+            if (dist > radius) return;
+
+            let isObstructed = false;
+            for (const segment of dynamicSegments) {
+                if (intersectSegSeg(x, y, unit.x, unit.y, segment)) {
+                    isObstructed = true;
+                    break;
+                }
+            }
+            if (isObstructed) return;
+
+            const damage = (1 - (dist / radius)) * maxDamage;
+            if (isPlayer) {
+                const player = unit as Player;
+                if (isEnded) return;
+
+                let damageToApply = damage;
+                const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
+                if (shield) {
+                    const angleToExplosion = Math.atan2(y - player.y, x - player.x);
+                    const angleDiff = Math.abs(normalizeAngle(angleToExplosion - playerDirectionRef.current));
+                    const isEquipped = player.weapons[player.currentWeaponIndex] === shield;
+
+                    if (isEquipped && angleDiff < Math.PI / 2) {
+                        shield.durability! -= damageToApply;
+                        damageToApply = 0;
+                    } else if (!isEquipped && angleDiff > Math.PI * 0.75) {
+                        shield.durability! -= damage * 0.8;
+                        damageToApply *= 0.2;
+                    }
+                }
+                
+                if (damageToApply > 0) {
+                    player.health -= damageToApply;
+                    player.hitTimer = 0.17;
+                }
+                
+                if (player.health <= 0) {
+                    player.health = 0;
+                    isGameOverRef.current = true;
+                }
+            } else {
+                const enemy = unit as Enemy;
+                const healthBefore = enemy.health;
+                enemy.health -= damage;
+                if (enemy.health <= 0 && healthBefore > 0) {
+                  hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                }
+            }
+        };
+
+        affectUnit(playerRef.current, true);
+        enemiesRef.current.forEach(e => {
+            if (e.health > 0) {
+                affectUnit(e, false)
+            }
+        });
+    };
+
       const raycast = (px: number, py: number, ang: number, maxDist: number) => {
           const dx = Math.cos(ang), dy = Math.sin(ang); let best = maxDist;
           for(const s of dynamicSegments){ const hit=intersectRaySegment(px,py,dx,dy,s); if(hit) best=Math.min(best, hit.t); }
@@ -1609,6 +1879,25 @@ const startHealing = () => {
       if(player.shootCooldown > 0) player.shootCooldown -= dt;
       if (player.flashTimer > 0) player.flashTimer -= dt;
       if (player.hitTimer > 0) player.hitTimer -= dt;
+      if (player.burnTimer && player.burnTimer > 0) {
+          const damageToApply = player.burnDamage! * dt;
+          // Use a dummy direction for DoT, as it's not from a specific angle
+          applyDamageToPlayer(damageToApply, {x: 0, y: 0}, {x: player.x, y: player.y}); 
+          player.burnTimer -= dt;
+      }
+
+      // --- Kunai Bleed DOT for enemies ---
+      for (const enemy of enemiesRef.current) {
+          if (enemy.health <= 0) continue;
+          if (enemy.bleedTimer && enemy.bleedTimer > 0 && enemy.bleedLayers && enemy.bleedLayers > 0) {
+              const totalDPS = KUNAI_BLEED_DPS * enemy.bleedLayers; // DPS per second
+              const damageToApply = totalDPS * dt;
+              enemy.health -= damageToApply;
+              enemy.bleedTimer -= dt;
+              enemy.hitTimer = 0.12;
+              if (enemy.health <= 0) enemy.health = 0;
+          }
+      }
 
       if (cookingThrowableRef.current) {
         cookingThrowableRef.current.timer -= dt;
@@ -1963,136 +2252,316 @@ doorsRef.current.forEach(door => {
 
       const activeBullets: Bullet[] = [];
         for (const bullet of bulletsRef.current) {
+            // --- NEW: KUNAI HOMING LOGIC ---
+            if (bullet.weaponName === 'Explosive Kunai' && !bullet.hasHomed) {
+                let bestTarget: Enemy | null = null;
+                let bestDistSq = (KUNAI_HOMING_ACQUISITION_RANGE * scale) ** 2;
+
+                const futureX = bullet.x + bullet.dx * bullet.speed * dt * 5; // Look ahead a bit
+                const futureY = bullet.y + bullet.dy * bullet.speed * dt * 5;
+
+                for (const enemy of enemiesRef.current) {
+                    if (enemy.health <= 0) continue;
+
+                    // Check if enemy is in front of the kunai
+                    const toEnemyX = enemy.x - bullet.x;
+                    const toEnemyY = enemy.y - bullet.y;
+                    const dot = toEnemyX * bullet.dx + toEnemyY * bullet.dy;
+                    if (dot < 0) continue; // Enemy is behind
+
+                    const { d2 } = distPtSegSquared(enemy.x, enemy.y, bullet.x, bullet.y, futureX, futureY);
+                    
+                    if (d2 < bestDistSq) {
+                        bestDistSq = d2;
+                        bestTarget = enemy;
+                    }
+                }
+
+                if (bestTarget) {
+                    bullet.homingTarget = bestTarget;
+                    bullet.hasHomed = true; // Lock in the turn, it won't change target again.
+                }
+            }
+
+            if (bullet.homingTarget) {
+                const target = bullet.homingTarget;
+                const targetAngle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
+                const currentAngle = Math.atan2(bullet.dy, bullet.dx);
+                const angleDiff = normalizeAngle(targetAngle - currentAngle);
+
+                const turnAmount = Math.min(Math.abs(angleDiff), KUNAI_HOMING_TURN_RATE * dt);
+                const newAngle = currentAngle + Math.sign(angleDiff) * turnAmount;
+
+                bullet.dx = Math.cos(newAngle);
+                bullet.dy = Math.sin(newAngle);
+
+                // If we are close enough to the target angle, stop turning.
+                if (Math.abs(angleDiff) < 0.1) {
+                    bullet.homingTarget = null;
+                }
+            }
+            // --- END KUNAI LOGIC ---
+
+            // If kunai has a maxTravelDistance, check traveled distance and mark reached max
+            if (bullet.isKunai && bullet.maxTravelDistance && !bullet.hasReachedMax) {
+                const traveled = Math.hypot(bullet.x - (bullet.originX || 0), bullet.y - (bullet.originY || 0));
+                if (traveled >= bullet.maxTravelDistance) {
+                    // Trigger airburst behavior at this location similar to proximity detonation
+                    bullet.hasReachedMax = true;
+                    // perform airburst now
+                    const airburstX = bullet.x;
+                    const airburstY = bullet.y;
+                    const radiusPx = KUNAI_AIRBURST_RADIUS_M * METERS_TO_PIXELS;
+                    let bestCenter = { x: airburstX, y: airburstY };
+                    let bestCount = 0;
+                    const candidates: Point[] = [];
+                    for (const e of enemiesRef.current) {
+                        if (e.health <= 0) continue;
+                        const d = Math.hypot(e.x - airburstX, e.y - airburstY);
+                        if (d <= radiusPx + e.radius) candidates.push({ x: e.x, y: e.y });
+                    }
+                    if (candidates.length > 0) {
+                        for (const c of candidates) {
+                            let cnt = 0;
+                            for (const e of enemiesRef.current) {
+                                if (e.health <= 0) continue;
+                                const dd = Math.hypot(e.x - c.x, e.y - c.y);
+                                if (dd <= radiusPx + e.radius) cnt++;
+                            }
+                            if (cnt > bestCount) { bestCount = cnt; bestCenter = c; }
+                        }
+                    }
+                    for (const e of enemiesRef.current) {
+                        if (e.health <= 0) continue;
+                        const d = Math.hypot(e.x - bestCenter.x, e.y - bestCenter.y);
+                        if (d <= radiusPx + e.radius) {
+                            e.health -= KUNAI_AIRBURST_BASE_DAMAGE;
+                            e.hitTimer = 0.17;
+                            e.bleedLayers = Math.min(KUNAI_BLEED_MAX_LAYERS, (e.bleedLayers || 0) + 1);
+                            e.bleedTimer = KUNAI_BLEED_DURATION;
+                            if (e.health <= 0) e.health = 0;
+                        }
+                    }
+                    stuckKunaisRef.current.push({ x: airburstX, y: airburstY, detonationTimer: 0.01, owner: bullet.owner });
+                }
+            }
+
             const nextX = bullet.x + bullet.dx * bullet.speed * dt;
             const nextY = bullet.y + bullet.dy * bullet.speed * dt;
             let removed = false;
 
-            // --- Continuous Collision Detection ---
-            
-            // 1. Find the closest wall impact
-            const wallHit = firstImpactPoint(bullet.x, bullet.y, nextX, nextY);
-            let closestT = wallHit ? wallHit.t : 1.0;
-            let hitUnit: Enemy | Player | null = null;
-            let hitUnitType: 'enemy' | 'player' | null = null;
-            
-            // 2. Check for unit impacts (enemies or player) that happen before the wall impact
-            if (bullet.owner === 'player') {
+            // --- Proximity Detonation Logic ---
+            const isProximityFuseWeapon = bullet.weaponName === 'Rocket Launcher' || bullet.weaponName === 'Explosive Kunai';
+            if (isProximityFuseWeapon && bullet.owner === 'player' && !isEnded) {
+                let triggered = false;
                 for (const enemy of enemiesRef.current) {
                     if (enemy.health <= 0) continue;
-                    const enemyHit = intersectSegCircle(
-                        bullet.x, bullet.y, nextX, nextY,
-                        enemy.x, enemy.y, bullet.radius + enemy.radius
-                    );
-                    if (enemyHit && enemyHit.t < closestT) {
-                        closestT = enemyHit.t;
-                        hitUnit = enemy;
-                        hitUnitType = 'enemy';
+
+                    const proximityRadius = (bullet.weaponName === 'Rocket Launcher' ? 40 : 35) * scale;
+                    // Check distance from the bullet's path segment to the enemy center
+                    const { d2 } = distPtSegSquared(enemy.x, enemy.y, bullet.x, bullet.y, nextX, nextY);
+                    
+                    if (d2 < (enemy.radius + proximityRadius) ** 2) {
+                        triggered = true;
+                        break;
                     }
                 }
-            } else { // bullet.owner === 'enemy'
-                if (!isEnded) {
-                    const playerHit = intersectSegCircle(
-                        bullet.x, bullet.y, nextX, nextY,
-                        player.x, player.y, bullet.radius + player.radius
-                    );
-                    if (playerHit && playerHit.t < closestT) {
-                        closestT = playerHit.t;
-                        hitUnit = player;
-                        hitUnitType = 'player';
+
+                if (triggered) {
+                    removed = true;
+                    if (bullet.weaponName === 'Rocket Launcher') {
+                        createExplosion(bullet.x, bullet.y, 200 * scale, bullet.damage, dynamicSegments);
+                    } else { // Explosive Kunai - airburst at current bullet position
+                        // Instead of immediate explosion, perform airburst selection at this point
+                        const airburstX = bullet.x;
+                        const airburstY = bullet.y;
+                        // Choose best center: for each enemy within airburst radius, count neighbors within airburst radius
+                        const radiusPx = KUNAI_AIRBURST_RADIUS_M * METERS_TO_PIXELS;
+                        let bestCenter = { x: airburstX, y: airburstY };
+                        let bestCount = 0;
+                        // Candidate centers: each enemy position within radius
+                        const candidates: Point[] = [];
+                        for (const e of enemiesRef.current) {
+                            if (e.health <= 0) continue;
+                            const d = Math.hypot(e.x - airburstX, e.y - airburstY);
+                            if (d <= radiusPx + e.radius) candidates.push({ x: e.x, y: e.y });
+                        }
+                        if (candidates.length === 0) {
+                            // No enemies nearby; default to current point
+                        } else {
+                            for (const c of candidates) {
+                                let cnt = 0;
+                                for (const e of enemiesRef.current) {
+                                    if (e.health <= 0) continue;
+                                    const dd = Math.hypot(e.x - c.x, e.y - c.y);
+                                    if (dd <= radiusPx + e.radius) cnt++;
+                                }
+                                if (cnt > bestCount) { bestCount = cnt; bestCenter = c; }
+                            }
+                        }
+                        // Apply bleed to enemies within radius of bestCenter
+                        for (const e of enemiesRef.current) {
+                            if (e.health <= 0) continue;
+                            const d = Math.hypot(e.x - bestCenter.x, e.y - bestCenter.y);
+                            if (d <= radiusPx + e.radius) {
+                                // Apply instant damage
+                                e.health -= KUNAI_AIRBURST_BASE_DAMAGE;
+                                e.hitTimer = 0.17;
+                                // Apply bleed layers
+                                e.bleedLayers = Math.min(KUNAI_BLEED_MAX_LAYERS, (e.bleedLayers || 0) + 1);
+                                e.bleedTimer = KUNAI_BLEED_DURATION;
+                                if (e.health <= 0) e.health = 0;
+                            }
+                        }
+                        // Spawn a visual stuck kunai for consistency
+                        stuckKunaisRef.current.push({ x: airburstX, y: airburstY, detonationTimer: 0.01, owner: bullet.owner });
                     }
                 }
             }
-            
-            // 3. Process the closest hit (if any)
-            if (hitUnit) {
-                removed = true;
-                const impactX = bullet.x + (nextX - bullet.x) * closestT;
-                const impactY = bullet.y + (nextY - bullet.y) * closestT;
+            // --- End Proximity Logic ---
 
-                if (hitUnitType === 'enemy') {
-                    const enemy = hitUnit as Enemy;
-                    const healthBefore = enemy.health;
-                    enemy.health -= bullet.damage;
-
-                    if (bullet.isIncendiary) {
-                        enemy.burnTimer = 3.0; // 3 seconds
-                        enemy.burnDamage = 40; // 40 dmg/sec
-                        enemy.isAlert = true; // Make them react
-                    }
-
-                    if (enemy.health <= 0 && healthBefore > 0) {
-                      hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                    }
-                    impact(impactX, impactY);
-                    soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
-                } else { // hitUnitType === 'player'
-                    const playerUnit = hitUnit as Player;
-                    let damageToApply = bullet.damage;
-                    const shield = playerUnit.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
-                    
-                    if (shield) {
-                        const angleToBullet = Math.atan2(-bullet.dy, -bullet.dx);
-                        const angleDiff = Math.abs(normalizeAngle(angleToBullet - playerDirectionRef.current));
-                        const isEquipped = playerUnit.weapons[playerUnit.currentWeaponIndex] === shield;
-
-                        if (isEquipped && angleDiff < Math.PI / 2) { // Frontal block
-                            shield.durability! -= damageToApply;
-                            damageToApply = 0;
-                            // Play shield hit sparks
-                            const sparkCount = 4 + Math.floor(Math.random() * 3);
-                            for (let j = 0; j < sparkCount; j++) {
-                                const sparkAngle = angleToBullet + (Math.random() - 0.5) * 0.8;
-                                const speed = (180 + Math.random() * 240);
-                                sparksRef.current.push({ x: impactX, y: impactY, vx: Math.cos(sparkAngle) * speed, vy: Math.sin(sparkAngle) * speed, ttl: 0.2, life: 0.2 });
-                            }
-                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) { // Back protection
-                            shield.durability! -= bullet.damage * 0.8; 
-                            damageToApply *= 0.2;
+            if (!removed) {
+                const wallHit = firstImpactPoint(bullet.x, bullet.y, nextX, nextY);
+                let closestT = wallHit ? wallHit.t : 1.0;
+                let hitUnit: Enemy | Player | null = null;
+                let hitUnitType: 'enemy' | 'player' | null = null;
+                
+                if (bullet.owner === 'player') {
+                    for (const enemy of enemiesRef.current) {
+                        if (enemy.health <= 0) continue;
+                        const enemyHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, enemy.x, enemy.y, bullet.radius + enemy.radius);
+                        if (enemyHit && enemyHit.t < closestT) {
+                            closestT = enemyHit.t;
+                            hitUnit = enemy;
+                            hitUnitType = 'enemy';
                         }
                     }
-
-                    if (damageToApply > 0) {
-                        playerUnit.health -= damageToApply;
-                        playerUnit.hitTimer = 0.17;
-                        shakerRef.current.addImpulse({ amp: 15 * scale, rotAmp: 0.03, freq: 40, decay: 25, dirx: bullet.dx, diry: bullet.dy });
-                    }
-
-                    if (playerUnit.health <= 0) {
-                        playerUnit.health = 0;
-                        isGameOverRef.current = true;
+                } else { 
+                    if (!isEnded) {
+                        const playerHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, player.x, player.y, bullet.radius + player.radius);
+                        if (playerHit && playerHit.t < closestT) {
+                            closestT = playerHit.t;
+                            hitUnit = player;
+                            hitUnitType = 'player';
+                        }
                     }
                 }
-            } else if (wallHit && closestT === wallHit.t) { // Wall hit is the closest
-                removed = true;
-                impact(wallHit.x, wallHit.y);
-                soundWavesRef.current.push({ x: wallHit.x, y: wallHit.y, radius: 0, maxRadius: 200 * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
-                const ix = wallHit.x; const iy = wallHit.y;
-                const apx = bullet.x - ix; const apy = bullet.y - iy;
-                const al = Math.hypot(apx, apy) || 1;
-                const reflectX = apx / al; const reflectY = apy / al;
-                const spawnX = ix + reflectX * 1.5; const spawnY = iy + reflectY * 1.5;
+                
+                if (closestT < 1.0) {
+                    removed = true;
+                    const impactX = bullet.x + (nextX - bullet.x) * closestT;
+                    const impactY = bullet.y + (nextY - bullet.y) * closestT;
 
-                lightsRef.current.push({ x: spawnX, y: spawnY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
-                const sparkCount = 10 + Math.floor(Math.random() * 6);
-                for (let i = 0; i < sparkCount; i++) {
-                    const spread = 1.1;
-                    const angle = Math.atan2(reflectY, reflectX) + (Math.random() - 0.5) * spread;
-                    const speed = (270 + Math.random() * 360);
-                    sparksRef.current.push({ x: spawnX, y: spawnY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, ttl: 0.28, life: 0.28 });
+                    if (bullet.weaponName === 'Rocket Launcher') {
+                        createExplosion(impactX, impactY, 200 * scale, bullet.damage, dynamicSegments);
+                    } else if (bullet.weaponName === 'Explosive Kunai') {
+                        stuckKunaisRef.current.push({ x: impactX, y: impactY, detonationTimer: 0.5, owner: bullet.owner });
+                        if (hitUnit) { // Apply direct impact damage as well
+                            if (hitUnitType === 'enemy') {
+                                const enemy = hitUnit as Enemy;
+                                const healthBefore = enemy.health;
+                                enemy.health = 0; // Instant kill
+                                enemy.hitTimer = 0.17; // Red flash
+                                if (healthBefore > 0) {
+                                    hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                    try { addScore(SCORE_PER_KILL); } catch {}
+                                }
+                            } else {
+                                applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                            }
+                        }
+                    } else { // Standard projectile logic
+                        if (hitUnit) {
+                            if (hitUnitType === 'enemy') {
+                                const enemy = hitUnit as Enemy;
+                                const healthBefore = enemy.health;
+                                enemy.health -= bullet.damage;
+                                enemy.hitTimer = 0.17; // Red flash
+                                if (bullet.isIncendiary) {
+                                    enemy.burnTimer = (enemy.burnTimer || 0) + 3.0;
+                                    enemy.burnDamage = 20;
+                                    enemy.isAlert = true;
+                                }
+                                if (enemy.health <= 0 && healthBefore > 0) {
+                                    hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                }
+                                impact(impactX, impactY);
+                                soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
+                            } else { // Player hit
+                                const healthBefore = player.health;
+                                applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                                if (bullet.isIncendiary) {
+                                    player.burnTimer = (player.burnTimer || 0) + 3.0;
+                                    player.burnDamage = 20;
+                                }
+                                if (player.health < healthBefore) {
+                                    shakerRef.current.addImpulse({ amp: 15 * scale, rotAmp: 0.03, freq: 40, decay: 25, dirx: bullet.dx, diry: bullet.dy });
+                                }
+                            }
+                        } else { // Wall hit
+                            impact(impactX, impactY);
+                            soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 200 * scale / cameraScale, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
+                            const apx = bullet.x - impactX, apy = bullet.y - impactY;
+                            const al = Math.hypot(apx, apy) || 1;
+                            const reflectX = apx / al, reflectY = apy / al;
+                            const spawnX = impactX + reflectX * 1.5, spawnY = impactY + reflectY * 1.5;
+                            lightsRef.current.push({ x: spawnX, y: spawnY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
+                            const sparkCount = 10 + Math.floor(Math.random() * 6);
+                            for (let i = 0; i < sparkCount; i++) {
+                                const angle = Math.atan2(reflectY, reflectX) + (Math.random() - 0.5) * 1.1;
+                                const speed = (270 + Math.random() * 360);
+                                sparksRef.current.push({ x: spawnX, y: spawnY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, ttl: 0.28, life: 0.28 });
+                            }
+                        }
+                    }
                 }
             }
             
-            // 4. Update bullet position if it wasn't removed
             if (!removed) {
                 bullet.x = nextX;
                 bullet.y = nextY;
-            }
-
-            if (!removed) {
                 activeBullets.push(bullet);
             }
         }
         bulletsRef.current = activeBullets;
+
+        const activeKunais: StuckKunai[] = [];
+        for (const kunai of stuckKunaisRef.current) {
+            kunai.detonationTimer -= dt;
+            if (kunai.detonationTimer <= 0) {
+                explosionsRef.current.push({ x: kunai.x, y: kunai.y, radius: 0, maxRadius: 150 * scale, lifetime: 0.4, maxLifetime: 0.4, type: 'grenade' });
+                soundWavesRef.current.push({ x: kunai.x, y: kunai.y, radius: 0, maxRadius: 300 * scale, lifetime: 0.4, maxLifetime: 0.4, type: 'explosion' });
+                
+                const explosionRadius = 180 * scale;
+                enemiesRef.current.forEach(enemy => {
+                    if (enemy.health <= 0) return;
+                    const dist = Math.hypot(kunai.x - enemy.x, kunai.y - enemy.y);
+                    if (dist < explosionRadius + enemy.radius) {
+                        let isObstructed = false;
+                        for (const segment of dynamicSegments) {
+                            if (intersectSegSeg(kunai.x, kunai.y, enemy.x, enemy.y, segment)) {
+                                isObstructed = true;
+                                break;
+                            }
+                        }
+                        if (!isObstructed) {
+                            const KUNAI_EXPLOSION_DAMAGE = 120;
+                            const healthBefore = enemy.health;
+                            enemy.health -= KUNAI_EXPLOSION_DAMAGE;
+                            enemy.hitTimer = 0.17; // Add red flash
+                            if (enemy.health <= 0 && healthBefore > 0) {
+                                hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                            }
+                        }
+                    }
+                });
+
+            } else {
+                activeKunais.push(kunai);
+            }
+        }
+        stuckKunaisRef.current = activeKunais;
+
 
       const activeThrowables: Throwable[] = [];
       for (const throwable of throwablesRef.current) {
@@ -2232,6 +2701,16 @@ doorsRef.current.forEach(door => {
       });
       smokeCloudsRef.current = smokeCloudsRef.current.filter(c => c.lifetime > 0);
 
+      firePatchesRef.current.forEach(patch => {
+        patch.lifetime -= dt;
+        const expansionRate = 1.5;
+        if (patch.radius < patch.maxRadius) {
+            patch.radius += patch.maxRadius * expansionRate * dt;
+            if (patch.radius > patch.maxRadius) patch.radius = patch.maxRadius;
+        }
+      });
+      firePatchesRef.current = firePatchesRef.current.filter(p => p.lifetime > 0);
+
        // Interpolate remote players
       if (isMultiplayer) {
           remotePlayersRef.current.forEach(p => {
@@ -2239,6 +2718,24 @@ doorsRef.current.forEach(door => {
               p.x += (p.targetX - p.x) * t;
               p.y += (p.targetY - p.y) * t;
           });
+      }
+
+       for (const patch of firePatchesRef.current) {
+        // Check player
+        if (!isEnded && Math.hypot(player.x - patch.x, player.y - patch.y) < player.radius + patch.radius) {
+            player.burnTimer = 1.0; // Refresh burn timer while in fire
+            player.burnDamage = patch.damagePerSecond;
+        }
+        // Check enemies
+        for (const enemy of enemiesRef.current) {
+            if (enemy.health > 0 && Math.hypot(enemy.x - patch.x, enemy.y - patch.y) < enemy.radius + patch.radius) {
+                enemy.burnTimer = 1.0;
+                enemy.burnDamage = patch.damagePerSecond;
+                if (!enemy.isAlert) {
+                     enemy.isAlert = true; // Make them react to being on fire
+                }
+            }
+        }
       }
 
       const activeEnemies: Enemy[] = [];
@@ -2256,20 +2753,45 @@ doorsRef.current.forEach(door => {
                     }
                 }
             } else {
+                if (enemy.hitTimer && enemy.hitTimer > 0) enemy.hitTimer -= dt;
                 if (enemy.isDummy) {
                     activeEnemies.push(enemy);
                     continue; // Skip all AI logic for dummy enemies
                 }
 
+                // Universal Timer Decrements
+                if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
+                if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
+                if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
+                if (enemy.moveSoundTimer && enemy.moveSoundTimer > 0) enemy.moveSoundTimer -= dt;
+
                 if (enemy.burnTimer && enemy.burnTimer > 0) {
                     const healthBefore = enemy.health;
                     const damageToApply = enemy.burnDamage! * dt;
                     enemy.health -= damageToApply;
+                    enemy.hitTimer = 0.17;
                     enemy.burnTimer -= dt;
 
                     if (enemy.health <= 0 && healthBefore > 0) {
                       hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                     }
+                }
+                
+                // Stun overrides ALL AI logic
+                if (enemy.stunTimer && enemy.stunTimer > 0) {
+                    enemy.isAlert = false;
+                    enemy.isInvestigating = false;
+                    enemy.targetX = undefined;
+                    enemy.targetY = undefined;
+                    enemy.searchTimer = 0;
+                    enemy.isReturningToPost = false;
+                    if (enemy.type === 'advanced') {
+                        enemy.axeState = 'idle';
+                        enemy.axeTimer = 0;
+                        enemy.isReloadingRifle = false;
+                    }
+                    activeEnemies.push(enemy);
+                    continue; 
                 }
 
                 const wasAlert = enemy.isAlert;
@@ -2313,11 +2835,12 @@ doorsRef.current.forEach(door => {
                                 const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
                                 tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: player.x, y2: player.y, ttl: 0.07, life: 0.07 });
                                 
-                                player.health -= 15;
-                                player.hitTimer = 0.17;
-                                shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
-                                if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
-
+                                const healthBefore = player.health;
+                                applyDamageToPlayer(15, { x: finalUx, y: finalUy }, { x: player.x, y: player.y });
+                                if (player.health < healthBefore) {
+                                    shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
+                                }
+                                
                                 enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
                             } else {
                                 bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 30, owner: 'enemy' });
@@ -2330,278 +2853,290 @@ doorsRef.current.forEach(door => {
                 } else {
                     // --- SIMPLE / NORMAL MODE AI ---
                     if (!isEnded) {
-                        // Handle timers
-                        if (enemy.stunTimer && enemy.stunTimer > 0) enemy.stunTimer -= dt;
-                        if (enemy.suppressionTimer && enemy.suppressionTimer > 0) enemy.suppressionTimer -= dt;
-                        if (enemy.reactionTimer && enemy.reactionTimer > 0) enemy.reactionTimer -= dt;
-                        if (enemy.moveSoundTimer && enemy.moveSoundTimer > 0) enemy.moveSoundTimer -= dt;
+                        const lastKnownTargetX = enemy.targetX;
 
+                        // 1. SIGHT
+                        let canSeePlayer = false;
+                        const dxPlayer = player.x - enemy.x;
+                        const dyPlayer = player.y - enemy.y;
+                        const distToPlayer = Math.hypot(dxPlayer, dyPlayer);
 
-                        // Stun overrides everything
-                        if (enemy.stunTimer && enemy.stunTimer > 0) {
-                            enemy.isAlert = false;
-                            enemy.isInvestigating = false;
-                            enemy.targetX = undefined;
-                            enemy.targetY = undefined;
-                            enemy.searchTimer = 0;
-                            enemy.isReturningToPost = false;
-                        } else {
-                            // --- AI LOGIC ---
-                            const lastKnownTargetX = enemy.targetX;
-
-                            // 1. SIGHT
-                            let canSeePlayer = false;
-                            const dxPlayer = player.x - enemy.x;
-                            const dyPlayer = player.y - enemy.y;
-                            const distToPlayer = Math.hypot(dxPlayer, dyPlayer);
-
-                            if (distToPlayer > 0 && distToPlayer < enemy.viewDistance) {
-                                const angleToPlayer = Math.atan2(dyPlayer, dxPlayer);
-                                const angleDiff = normalizeAngle(angleToPlayer - normalizeAngle(enemy.direction));
-                                if (Math.abs(angleDiff) < enemy.fov / 2) {
-                                    let isObstructed = false;
-                                    for (const segment of dynamicSegments) {
-                                        if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
+                        if (distToPlayer > 0 && distToPlayer < enemy.viewDistance) {
+                            const angleToPlayer = Math.atan2(dyPlayer, dxPlayer);
+                            const angleDiff = normalizeAngle(angleToPlayer - normalizeAngle(enemy.direction));
+                            if (Math.abs(angleDiff) < enemy.fov / 2) {
+                                let isObstructed = false;
+                                for (const segment of dynamicSegments) {
+                                    if (intersectSegSeg(enemy.x, enemy.y, player.x, player.y, segment)) {
+                                        isObstructed = true;
+                                        break;
+                                    }
+                                }
+                                if (!isObstructed) {
+                                    for (const smoke of smokeCloudsRef.current) {
+                                        if (intersectSegCircle(enemy.x, enemy.y, player.x, player.y, smoke.x, smoke.y, smoke.radius)) {
                                             isObstructed = true;
                                             break;
                                         }
                                     }
-                                    if (!isObstructed) {
-                                        for (const smoke of smokeCloudsRef.current) {
-                                            if (intersectSegCircle(enemy.x, enemy.y, player.x, player.y, smoke.x, smoke.y, smoke.radius)) {
-                                                isObstructed = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if (!isObstructed) canSeePlayer = true;
                                 }
+                                if (!isObstructed) canSeePlayer = true;
                             }
+                        }
 
-                            if (canSeePlayer) {
-                                enemy.isAlert = true;
-                                enemy.isInvestigating = false;
-                                enemy.targetX = player.x;
-                                enemy.targetY = player.y;
-                                enemy.searchTimer = 0;
-                                enemy.isReturningToPost = false;
-                                enemy.lastSeenTime = now;
-                            } else {
-                                if (enemy.isAlert) {
-                                    enemy.searchTimer = 5; // Start searching if player is lost
-                                }
-                                 enemy.isAlert = false;
-                            }
-                            
-                             // Check for nearby player fire to trigger suppression
-                            if (!enemy.isAlert && !enemy.suppressionTimer) {
-                                for (const wave of soundWavesRef.current) {
-                                    if (wave.type === 'player_shoot' && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
-                                        enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // --- STATE MACHINE ---
+                        if (canSeePlayer) {
+                            enemy.isAlert = true;
+                            enemy.isInvestigating = false;
+                            enemy.targetX = player.x;
+                            enemy.targetY = player.y;
+                            enemy.searchTimer = 0;
+                            enemy.isReturningToPost = false;
+                            enemy.lastSeenTime = now;
+                        } else {
                             if (enemy.isAlert) {
-                                // --- COMBAT STATE ---
-                                enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+                                enemy.searchTimer = 5; // Start searching if player is lost
+                            }
+                                enemy.isAlert = false;
+                        }
+                        
+                            // Check for nearby player fire to trigger suppression
+                        if (!enemy.isAlert && !enemy.suppressionTimer) {
+                            for (const wave of soundWavesRef.current) {
+                                if (wave.type === 'player_shoot' && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < enemy.radius + 50 * scale) {
+                                    enemy.suppressionTimer = 1.5; // Suppressed for 1.5s
+                                    break;
+                                }
+                            }
+                        }
 
-                                if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
-                                    if (enemy.type === 'advanced') {
-                                        const scaledAxeRange = AXE_RANGE * scale / cameraScale;
-                                        // --- ADVANCED AI COMBAT ---
-                                        if (enemy.axeState !== 'idle') {
-                                            enemy.axeTimer! -= dt;
-                                            if (enemy.axeTimer! <= 0) {
-                                                if (enemy.axeState === 'windup') {
-                                                    enemy.axeState = 'swing';
-                                                    enemy.axeTimer = AXE_SWING_DURATION;
-                                                    const midX = enemy.x + (scaledAxeRange * 0.5) * Math.cos(enemy.direction);
-                                                    const midY = enemy.y + (scaledAxeRange * 0.5) * Math.sin(enemy.direction);
-                                                    soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
-                                                } else if (enemy.axeState === 'swing') {
-                                                    enemy.axeState = 'recover';
-                                                    enemy.axeTimer = AXE_RECOVER_DURATION;
-                                                } else if (enemy.axeState === 'recover') {
-                                                    enemy.axeState = 'idle';
-                                                }
+                        // --- STATE MACHINE ---
+                        if (enemy.isAlert) {
+                            // --- COMBAT STATE ---
+                            enemy.direction = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+
+                            if (!enemy.reactionTimer || enemy.reactionTimer <= 0) {
+                                if (enemy.type === 'advanced') {
+                                    const scaledAxeRange = AXE_RANGE * scale / cameraScale;
+                                    // --- ADVANCED AI COMBAT ---
+                                    if (enemy.axeState !== 'idle') {
+                                        enemy.axeTimer! -= dt;
+                                        if (enemy.axeTimer! <= 0) {
+                                            if (enemy.axeState === 'windup') {
+                                                enemy.axeState = 'swing';
+                                                enemy.axeTimer = AXE_SWING_DURATION;
+                                                const midX = enemy.x + (scaledAxeRange * 0.5) * Math.cos(enemy.direction);
+                                                const midY = enemy.y + (scaledAxeRange * 0.5) * Math.sin(enemy.direction);
+                                                soundWavesRef.current.push({ x: midX, y: midY, radius: 0, maxRadius: 100 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
+                                            } else if (enemy.axeState === 'swing') {
+                                                enemy.axeState = 'recover';
+                                                enemy.axeTimer = AXE_RECOVER_DURATION;
+                                            } else if (enemy.axeState === 'recover') {
+                                                enemy.axeState = 'idle';
                                             }
                                         }
-                                        
-                                        if (enemy.axeState === 'swing') {
-                                             const axeArc = 90 * (Math.PI / 180);
-                                             const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-                                             let angleDiff = Math.abs(enemy.direction - angleToPlayer);
-                                             if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-                                             if (distToPlayer < scaledAxeRange + player.radius && angleDiff < axeArc / 2) {
+                                    }
+                                    
+                                    if (enemy.axeState === 'swing') {
+                                            const axeArc = 90 * (Math.PI / 180);
+                                            const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+                                            let angleDiff = Math.abs(enemy.direction - angleToPlayer);
+                                            if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                                            if (distToPlayer < scaledAxeRange + player.radius && angleDiff < axeArc / 2) {
+                                            // Enemy melee hit — check for player's riot shield to block
+                                            const player = playerRef.current;
+                                            const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
+                                            const angleFromPlayerToEnemy = Math.atan2(enemy.y - player.y, enemy.x - player.x);
+                                            const playerAngleDiff = Math.abs(normalizeAngle(angleFromPlayerToEnemy - playerDirectionRef.current));
+                                            const isEquipped = player.weapons[player.currentWeaponIndex] === shield;
+
+                                            if (shield && shield.durability && isEquipped && playerAngleDiff < Math.PI / 2) {
+                                                // Blocked by shield: reduce shield durability by 1/4 of maxDurability
+                                                const maxDur = shield.maxDurability || shield.durability || 0;
+                                                const reduce = Math.max(1, Math.floor(maxDur / 4));
+                                                shield.durability! -= reduce;
+                                                // Visual sparks at impact
+                                                const impactX = player.x + Math.cos(angleFromPlayerToEnemy) * (player.radius + 8 * scaleRef.current);
+                                                const impactY = player.y + Math.sin(angleFromPlayerToEnemy) * (player.radius + 8 * scaleRef.current);
+                                                const sparkCount = 6 + Math.floor(Math.random() * 4);
+                                                for (let s = 0; s < sparkCount; s++) {
+                                                    const sparkAngle = angleFromPlayerToEnemy + Math.PI + (Math.random() - 0.5) * 1.2;
+                                                    const spd = 160 + Math.random() * 200;
+                                                    sparksRef.current.push({ x: impactX, y: impactY, vx: Math.cos(sparkAngle) * spd, vy: Math.sin(sparkAngle) * spd, ttl: 0.22, life: 0.22 });
+                                                }
+                                                player.hitTimer = 0.12;
+                                                if (shield.durability! <= 0) {
+                                                    shield.durability = 0;
+                                                    shockwavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.2, maxLifetime: 0.2 });
+                                                }
+                                            } else {
+                                                // No effective shield — melee is lethal
                                                 player.health = 0;
                                                 isGameOverRef.current = true;
-                                             }
-                                             const outer = scaledAxeRange;
-                                             slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
-                                        } else if (distToPlayer < scaledAxeRange && enemy.axeState === 'idle') {
-                                            enemy.axeState = 'windup';
-                                            enemy.axeTimer = AXE_WINDUP_DURATION;
-                                        } else if (enemy.axeState === 'idle') {
-                                            if (enemy.isReloadingRifle) {
-                                                enemy.reloadRifleTimer! -= dt;
-                                                if (enemy.reloadRifleTimer! <= 0) {
-                                                    enemy.isReloadingRifle = false;
-                                                    enemy.rifleAmmo = 30;
+                                            }
+                                            }
+                                            const outer = scaledAxeRange;
+                                            slashArcsRef.current.push({ x: enemy.x, y: enemy.y, a1: enemy.direction - axeArc / 2, a2: enemy.direction + axeArc / 2, inner: 0, outer, ttl: 0.1, life: 0.1, isEnemy: true });
+                                    } else if (distToPlayer < scaledAxeRange && enemy.axeState === 'idle') {
+                                        enemy.axeState = 'windup';
+                                        enemy.axeTimer = AXE_WINDUP_DURATION;
+                                    } else if (enemy.axeState === 'idle') {
+                                        if (enemy.isReloadingRifle) {
+                                            enemy.reloadRifleTimer! -= dt;
+                                            if (enemy.reloadRifleTimer! <= 0) {
+                                                enemy.isReloadingRifle = false;
+                                                enemy.rifleAmmo = 30;
+                                            }
+                                        } else if (enemy.rifleAmmo! <= 0) {
+                                            enemy.isReloadingRifle = true;
+                                            enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
+                                        } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
+                                            const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
+                                            let nearestWallT = 9999;
+                                            dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
+                                            
+                                            let hitPlayer = false, playerT = nearestWallT;
+                                            const dx = player.x - enemy.x, dy = player.y - enemy.y;
+                                            const t = dx * finalUx + dy * finalUy;
+                                            if (t > 0 && t < nearestWallT) {
+                                                const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
+                                                if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
+                                                    hitPlayer = true; playerT = t;
                                                 }
-                                            } else if (enemy.rifleAmmo! <= 0) {
-                                                enemy.isReloadingRifle = true;
-                                                enemy.reloadRifleTimer = RIFLE_RELOAD_TIME;
-                                            } else if (enemy.burstCooldown! <= 0 && enemy.shootCooldown <= 0) {
-                                                const finalUx = Math.cos(enemy.direction), finalUy = Math.sin(enemy.direction);
-                                                let nearestWallT = 9999;
-                                                dynamicSegments.forEach(s => { const hit = intersectRaySegment(enemy.x, enemy.y, finalUx, finalUy, s); if (hit && hit.t < nearestWallT) nearestWallT = hit.t; });
-                                                
-                                                let hitPlayer = false, playerT = nearestWallT;
-                                                const dx = player.x - enemy.x, dy = player.y - enemy.y;
-                                                const t = dx * finalUx + dy * finalUy;
-                                                if (t > 0 && t < nearestWallT) {
-                                                    const ex = enemy.x + t * finalUx; const ey = enemy.y + t * finalUy;
-                                                    if (Math.hypot(ex - player.x, ey - player.y) < player.radius) {
-                                                        hitPlayer = true; playerT = t;
-                                                    }
-                                                }
-                                                const hitDist = playerT;
-                                                const hitX = enemy.x + finalUx * hitDist;
-                                                const hitY = enemy.y + finalUy * hitDist;
-                                                tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
-                                                
-                                                if (hitPlayer) {
-                                                    player.health -= 15;
-                                                    player.hitTimer = 0.17;
+                                            }
+                                            const hitDist = playerT;
+                                            const hitX = enemy.x + finalUx * hitDist;
+                                            const hitY = enemy.y + finalUy * hitDist;
+                                            tracersRef.current.push({ x1: enemy.x, y1: enemy.y, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
+                                            
+                                            if (hitPlayer) {
+                                                const healthBefore = player.health;
+                                                applyDamageToPlayer(15, { x: finalUx, y: finalUy }, { x: player.x, y: player.y });
+                                                if (player.health < healthBefore) {
                                                     shakerRef.current.addImpulse({ amp: 10 * scale, rotAmp: 0.02, freq: 45, decay: 22, dirx: finalUx, diry: finalUy });
-                                                    if (player.health <= 0) { player.health = 0; isGameOverRef.current = true; }
-                                                } else {
-                                                   // wall impact fx from enemy
                                                 }
-
-                                                enemy.rifleAmmo!--;
-                                                enemy.burstShotsFired!++;
-                                                enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
-                                                soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
-                                                lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
-
-                                                if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
-                                                    enemy.burstShotsFired = 0;
-                                                    enemy.burstCooldown = RIFLE_BURST_PAUSE;
-                                                }
-                                            }
-                                        }
-                                        if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
-
-                                    } else {
-                                        // --- STANDARD AI COMBAT ---
-                                        if (enemy.shootCooldown <= 0) {
-                                            bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 30, owner: 'enemy' });
-                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
-                                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
-                                            enemy.shootCooldown = enemy.shootCooldownMax;
-                                        }
-                                    }
-                                }
-
-                            } else if (enemy.searchTimer && enemy.searchTimer > 0) {
-                                // --- SEARCHING STATE ---
-                                enemy.searchTimer -= dt;
-                                const baseAngle = enemy.patrolStartDirection ?? enemy.direction;
-                                enemy.direction = baseAngle + Math.sin(now / 150) * (Math.PI / 3);
-
-                                if (enemy.searchTimer <= 0) {
-                                    if (enemy.patrolStartX !== undefined) {
-                                        enemy.isReturningToPost = true;
-                                        enemy.targetX = enemy.patrolStartX;
-                                        enemy.targetY = enemy.patrolStartY;
-                                    }
-                                }
-                            } else if ((enemy.isInvestigating || enemy.isReturningToPost) && enemy.targetX !== undefined && enemy.targetY !== undefined) {
-                                // --- MOVING STATE (Investigating or Returning) ---
-                                const targetDist = Math.hypot(enemy.x - enemy.targetX, enemy.y - enemy.targetY);
-
-                                if (targetDist > enemy.radius * 1.5 && (!enemy.suppressionTimer || enemy.suppressionTimer <= 0)) {
-                                    let dxTarget = enemy.targetX - enemy.x, dyTarget = enemy.targetY - enemy.y;
-                                    const distToTarget = Math.hypot(dxTarget, dyTarget);
-                                    if (distToTarget > 0) {
-                                        dxTarget /= distToTarget;
-                                        dyTarget /= distToTarget;
-                                    }
-                                    
-                                    if ((enemy.moveSoundTimer || 0) <= 0) {
-                                        soundWavesRef.current.push({
-                                            x: enemy.x,
-                                            y: enemy.y,
-                                            radius: 0,
-                                            maxRadius: 120 * scale / cameraScale,
-                                            lifetime: 0.3,
-                                            maxLifetime: 0.3,
-                                            type: 'enemy_move'
-                                        });
-                                        enemy.moveSoundTimer = 0.4; // Cooldown
-                                    }
-                                    
-                                    enemy.direction = Math.atan2(dyTarget, dxTarget);
-                                    const moveSpeed = enemy.speed * (enemy.isInvestigating ? 0.7 : 1.0);
-                                    let newX = enemy.x + dxTarget * moveSpeed * dt;
-                                    let newY = enemy.y + dyTarget * moveSpeed * dt;
-                                    
-                                    let tempPos = { x: newX, y: newY };
-                                    
-                                    for(let i=0; i<2; i++) {
-                                        for (const wall of wallsRef.current) {
-                                            const resolved = resolveCollisionWithWall({ ...tempPos, radius: enemy.radius }, wall);
-                                            if (resolved) tempPos = resolved;
-                                        }
-                                        for (const door of doorsRef.current) {
-                                            const resolved = resolveCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
-                                            if (resolved) {
-                                                 tempPos = resolved;
                                             } else {
-                                                 // Check if trying to move through a closed door
-                                                const doorIsBlocking = checkCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
-                                                if (doorIsBlocking) {
-                                                    const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
-                                                    if (isClosed && !door.locked && !isPlayerCampingDoor(door, enemy)) {
-                                                        door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
-                                                    }
-                                                }
+                                                // wall impact fx from enemy
+                                            }
+
+                                            enemy.rifleAmmo!--;
+                                            enemy.burstShotsFired!++;
+                                            enemy.shootCooldown = RIFLE_INTER_BURST_DELAY;
+                                            soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                            lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.2, type: 'muzzle' });
+
+                                            if (enemy.burstShotsFired! >= 3 || enemy.rifleAmmo! <= 0) {
+                                                enemy.burstShotsFired = 0;
+                                                enemy.burstCooldown = RIFLE_BURST_PAUSE;
                                             }
                                         }
                                     }
-
-                                    enemy.x = tempPos.x;
-                                    enemy.y = tempPos.y;
+                                    if (enemy.burstCooldown! > 0) enemy.burstCooldown! -= dt;
 
                                 } else {
-                                    // Reached target or is suppressed
-                                    if (targetDist <= enemy.radius * 1.5) {
-                                        enemy.targetX = undefined;
-                                        enemy.targetY = undefined;
-                                        if (enemy.isReturningToPost) {
-                                            enemy.isReturningToPost = false;
-                                            enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
-                                        } else {
-                                            enemy.searchTimer = 3; 
-                                        }
-                                        enemy.isInvestigating = false;
+                                    // --- STANDARD AI COMBAT ---
+                                    if (enemy.shootCooldown <= 0) {
+                                        bulletsRef.current.push({ x: enemy.x, y: enemy.y, dx: Math.cos(enemy.direction), dy: Math.sin(enemy.direction), radius: 4 * scale, speed: 360 * scale, damage: 30, owner: 'enemy' });
+                                        soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 400 * scale / cameraScale, lifetime: 0.5, maxLifetime: 0.5, type: 'enemy_shoot' });
+                                        lightsRef.current.push({ x: enemy.x, y: enemy.y, ttl: 0.08, life: 0.08, power: 1.5, type: 'muzzle', openWindow: true });
+                                        enemy.shootCooldown = enemy.shootCooldownMax;
                                     }
                                 }
-                            } else {
-                                // --- IDLE STATE ---
-                                for (const wave of soundWavesRef.current) {
-                                    if (!enemy.isInvestigating && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
-                                        enemy.isInvestigating = true;
-                                        enemy.targetX = wave.x;
-                                        enemy.targetY = wave.y;
-                                        enemy.isReturningToPost = false;
-                                        enemy.searchTimer = 0;
-                                        break;
+                            }
+
+                        } else if (enemy.searchTimer && enemy.searchTimer > 0) {
+                            // --- SEARCHING STATE ---
+                            enemy.searchTimer -= dt;
+                            const baseAngle = enemy.patrolStartDirection ?? enemy.direction;
+                            enemy.direction = baseAngle + Math.sin(now / 150) * (Math.PI / 3);
+
+                            if (enemy.searchTimer <= 0) {
+                                if (enemy.patrolStartX !== undefined) {
+                                    enemy.isReturningToPost = true;
+                                    enemy.targetX = enemy.patrolStartX;
+                                    enemy.targetY = enemy.patrolStartY;
+                                }
+                            }
+                        } else if ((enemy.isInvestigating || enemy.isReturningToPost) && enemy.targetX !== undefined && enemy.targetY !== undefined) {
+                            // --- MOVING STATE (Investigating or Returning) ---
+                            const targetDist = Math.hypot(enemy.x - enemy.targetX, enemy.y - enemy.targetY);
+
+                            if (targetDist > enemy.radius * 1.5 && (!enemy.suppressionTimer || enemy.suppressionTimer <= 0)) {
+                                let dxTarget = enemy.targetX - enemy.x, dyTarget = enemy.targetY - enemy.y;
+                                const distToTarget = Math.hypot(dxTarget, dyTarget);
+                                if (distToTarget > 0) {
+                                    dxTarget /= distToTarget;
+                                    dyTarget /= distToTarget;
+                                }
+                                
+                                if ((enemy.moveSoundTimer || 0) <= 0) {
+                                    soundWavesRef.current.push({
+                                        x: enemy.x,
+                                        y: enemy.y,
+                                        radius: 0,
+                                        maxRadius: 120 * scale / cameraScale,
+                                        lifetime: 0.3,
+                                        maxLifetime: 0.3,
+                                        type: 'enemy_move'
+                                    });
+                                    enemy.moveSoundTimer = 0.4; // Cooldown
+                                }
+                                
+                                enemy.direction = Math.atan2(dyTarget, dxTarget);
+                                const moveSpeed = enemy.speed * (enemy.isInvestigating ? 0.7 : 1.0);
+                                let newX = enemy.x + dxTarget * moveSpeed * dt;
+                                let newY = enemy.y + dyTarget * moveSpeed * dt;
+                                
+                                let tempPos = { x: newX, y: newY };
+                                
+                                for(let i=0; i<2; i++) {
+                                    for (const wall of wallsRef.current) {
+                                        const resolved = resolveCollisionWithWall({ ...tempPos, radius: enemy.radius }, wall);
+                                        if (resolved) tempPos = resolved;
                                     }
+                                    for (const door of doorsRef.current) {
+                                        const resolved = resolveCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                        if (resolved) {
+                                                tempPos = resolved;
+                                        } else {
+                                                // Check if trying to move through a closed door
+                                            const doorIsBlocking = checkCollisionWithDoor({ ...tempPos, radius: enemy.radius }, door);
+                                            if (doorIsBlocking) {
+                                                const isClosed = Math.abs(door.currentAngle - door.closedAngle) < 0.1;
+                                                if (isClosed && !door.locked && !isPlayerCampingDoor(door, enemy)) {
+                                                    door.targetAngle = door.closedAngle + door.maxOpenAngle * door.swingDirection;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                enemy.x = tempPos.x;
+                                enemy.y = tempPos.y;
+
+                            } else {
+                                // Reached target or is suppressed
+                                if (targetDist <= enemy.radius * 1.5) {
+                                    enemy.targetX = undefined;
+                                    enemy.targetY = undefined;
+                                    if (enemy.isReturningToPost) {
+                                        enemy.isReturningToPost = false;
+                                        enemy.direction = enemy.patrolStartDirection ?? enemy.direction;
+                                    } else {
+                                        enemy.searchTimer = 3; 
+                                    }
+                                    enemy.isInvestigating = false;
+                                }
+                            }
+                        } else {
+                            // --- IDLE STATE ---
+                            for (const wave of soundWavesRef.current) {
+                                if (!enemy.isInvestigating && Math.hypot(enemy.x - wave.x, enemy.y - wave.y) < wave.radius) {
+                                    enemy.isInvestigating = true;
+                                    enemy.targetX = wave.x;
+                                    enemy.targetY = wave.y;
+                                    enemy.isReturningToPost = false;
+                                    enemy.searchTimer = 0;
+                                    break;
                                 }
                             }
                         }
@@ -2723,7 +3258,10 @@ doorsRef.current.forEach(door => {
           if (enemy.health <= 0) return;
           const brightness = getBrightnessByDistance(enemy.x, enemy.y, visionRadius);
 
-          const bodyColor = enemy.isAlert ? `rgba(238, 238, 238, ${brightness})` : `rgba(153, 153, 153, ${brightness})`;
+          const isHit = enemy.hitTimer && enemy.hitTimer > 0;
+          const bodyColor = isHit ? `rgba(239, 68, 68, ${brightness})` // red-500
+                          : enemy.isAlert ? `rgba(238, 238, 238, ${brightness})` 
+                          : `rgba(153, 153, 153, ${brightness})`;
           context.fillStyle = bodyColor;
           context.shadowColor = bodyColor;
           context.shadowBlur = 15 * scale;
@@ -2835,14 +3373,30 @@ doorsRef.current.forEach(door => {
           context.fill();
           context.shadowBlur = 0;
 
+          if (player.burnTimer && player.burnTimer > 0) {
+              context.globalCompositeOperation = 'lighter';
+              const flicker = Math.sin(performance.now() / 60) * 0.5 + 0.5;
+              const radius = player.radius * (1.5 + flicker * 0.4);
+              const grad = context.createRadialGradient(player.x, player.y, 0, player.x, player.y, radius);
+              grad.addColorStop(0, `rgba(255, 200, 0, ${0.8 * flicker})`);
+              grad.addColorStop(0.7, `rgba(255, 100, 0, ${0.5 * flicker})`);
+              grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
+              context.fillStyle = grad;
+              context.beginPath();
+              context.arc(player.x, player.y, radius, 0, Math.PI * 2);
+              context.fill();
+              context.globalCompositeOperation = 'source-over';
+          }
+
           const shield = player.weapons[player.currentWeaponIndex];
           if (shield && shield.name === 'Riot Shield' && shield.durability && shield.durability > 0) {
               context.save();
               context.translate(player.x, player.y);
               context.rotate(playerDirection);
 
-              const shieldWidth = 25 * scale;
-              const shieldHeight = 45 * scale;
+              const cameraScale = cameraScaleRef.current;
+              const shieldWidth = 25 * scale / cameraScale;
+              const shieldHeight = 45 * scale / cameraScale;
               
               context.fillStyle = '#404040';
               context.strokeStyle = '#a3a3a3';
@@ -3104,6 +3658,29 @@ doorsRef.current.forEach(door => {
               context.fill();
           }
       });
+      firePatchesRef.current.forEach(patch => {
+        if (!pointInPoly(patch.x, patch.y, viewPoly)) return;
+        const life_p = patch.lifetime / patch.maxLifetime;
+        const numFlames = 10;
+        for (let i = 0; i < numFlames; i++) {
+            const angle = i * (Math.PI * 2 / numFlames) + (now / 300) + (i % 2 * Math.PI);
+            const dist = patch.radius * (0.2 + (i/numFlames) * 0.7) * (Math.sin( (now / 200 + i * 0.7) ) * 0.1 + 0.95);
+            const flicker = Math.sin(now / 80 + i * 2) * 0.5 + 0.5;
+            const flameRadius = patch.radius * 0.4 * flicker * life_p;
+            const px = patch.x + Math.cos(angle) * dist;
+            const py = patch.y + Math.sin(angle) * dist;
+            
+            const grad = context.createRadialGradient(px, py, 0, px, py, flameRadius);
+            grad.addColorStop(0, `rgba(255, 220, 150, ${0.6 * life_p * flicker})`);
+            grad.addColorStop(0.5, `rgba(255, 120, 0, ${0.4 * life_p * flicker})`);
+            grad.addColorStop(1, `rgba(200, 0, 0, 0)`);
+            context.fillStyle = grad;
+
+            context.beginPath();
+            context.arc(px, py, flameRadius, 0, Math.PI * 2);
+            context.fill();
+        }
+    });
       context.globalCompositeOperation = 'source-over';
 
 
@@ -3316,6 +3893,18 @@ doorsRef.current.forEach(door => {
         context.shadowBlur = 0;
       }
 
+      // Show enemy count range hint at start of mission (non-specific, do not show exact number)
+      if (enemyRangeDisplayTimerRef.current > 0) {
+          enemyRangeDisplayTimerRef.current -= dt;
+          const rangeInfo = level.enemyCountRange ? `${level.enemyCountRange.min} - ${level.enemyCountRange.max}` : (level.enemyCount ? `${level.enemyCount}` : `${level.enemies.length}`);
+          context.save();
+          context.font = `bold ${18 * scale}px mono`;
+          context.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          context.textAlign = 'center';
+          context.fillText(`Enemy density: ${rangeInfo}`, canvas.width / 2, 40 * scale);
+          context.restore();
+      }
+
       if (player.hitTimer > 0) {
           const life = player.hitTimer / 0.17; // 1 down to 0
           const cx_vignette = canvas.width / 2;
@@ -3348,14 +3937,15 @@ doorsRef.current.forEach(door => {
       
       const shield = player.weapons.find(w => w.name === 'Riot Shield');
       if (shield && shield.maxDurability) {
+          const shieldBarHeight = 10 * scale; 
           const shieldPercentage = Math.max(0, shield.durability || 0) / shield.maxDurability;
           context.font = `${14 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'left';
           context.fillText('SHIELD', margin, uiY - (5 * scale));
-          context.strokeStyle = 'rgba(255, 255, 255, 0.5)'; context.lineWidth = 2 * scale; context.strokeRect(margin, uiY, barWidth, barHeight);
-          context.fillStyle = 'rgba(255, 255, 255, 0.1)'; context.fillRect(margin, uiY, barWidth, barHeight);
+          context.strokeStyle = 'rgba(255, 255, 255, 0.5)'; context.lineWidth = 2 * scale; context.strokeRect(margin, uiY, barWidth, shieldBarHeight);
+          context.fillStyle = 'rgba(255, 255, 255, 0.1)'; context.fillRect(margin, uiY, barWidth, shieldBarHeight);
           context.fillStyle = '#60a5fa'; // Blue color for shield
-          context.fillRect(margin, uiY, barWidth * shieldPercentage, barHeight);
-          uiY -= (barHeight + 10 * scale);
+          context.fillRect(margin, uiY, barWidth * shieldPercentage, shieldBarHeight);
+          uiY -= (shieldBarHeight + 20 * scale);
       }
 
       const healthPercentage = Math.max(0, player.health) / player.maxHealth;
@@ -3391,12 +3981,16 @@ doorsRef.current.forEach(door => {
         context.fillStyle = isReady ? 'white' : '#999999';
         context.fillText(isReady ? `READY` : `COOLDOWN: ${(player.shootCooldown).toFixed(1)}s`, margin, weaponTextY);
       } else {
-        const weaponKey = player.currentWeaponIndex === 0 ? '[1]' : '[2]';
+        let weaponKey = '';
+        if (player.currentWeaponIndex === 0) weaponKey = '[1]';
+        else if (player.currentWeaponIndex === 1) weaponKey = '[2]';
+        else if (player.currentWeaponIndex === 3) weaponKey = '[4]';
+
         const fireModeText = `[${currentWeapon.currentFireMode.toUpperCase()}]`;
         context.fillText(`${currentWeapon.name.toUpperCase()} ${weaponKey} ${fireModeText}`, margin, weaponTextY - (20 * scale));
         context.font = `${14 * scale}px mono`;
         context.fillStyle = '#a3a3a3';
-        context.fillText(`[G] Switch Mode / [Q] Melee`, margin, weaponTextY - (5 * scale));
+        context.fillText(`[G] Mode / [Q] Melee / [4] Special`, margin, weaponTextY - (5 * scale));
 
         context.font = `bold ${18 * scale}px mono`;
         let ammoText = '';
@@ -3453,7 +4047,7 @@ doorsRef.current.forEach(door => {
                 context.fillText('[E] TAKEDOWN', enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
                 context.shadowBlur = 0;
             }
-          } else if (interactionHintDoorIdRef.current) {
+          } else if (interactionHintDoorIdRef.current !== null) {
             const door = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
             if (door) {
               const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
@@ -3508,15 +4102,52 @@ doorsRef.current.forEach(door => {
               context.fillStyle = 'white';
               context.fillText(`Mission Time: ${missionTimeRef.current.toFixed(2)}s`, cx, cy + 20 * scale);
 
+              // Show run score and global high score
+              context.font = `${20 * scale}px mono`;
+              context.fillText(`Run Score: ${runScore}`, cx, cy + 50 * scale);
+              context.font = `${16 * scale}px mono`;
+              const globalHigh = typeof highScore !== 'undefined' ? highScore : 0;
+              context.fillText(`High Score: ${globalHigh}`, cx, cy + 74 * scale);
+              if (runScore > (globalHigh)) {
+                  context.fillStyle = '#f59e0b'; // amber for new high
+                  context.font = `bold ${18 * scale}px mono`;
+                  context.fillText('NEW HIGH SCORE!', cx, cy + 100 * scale);
+                  context.fillStyle = 'white';
+              }
+
               context.font = `${24 * scale}px mono`;
-              context.fillText('Tap or press any key to continue', cx, cy + 80 * scale);
+              context.fillText('Tap or press any key to continue', cx, cy + 140 * scale);
           }
       }
+      
+      const buttonRadius = 25 * scale;
+      pauseButtonCircleRef.current = { x: canvas.width - buttonRadius - margin, y: buttonRadius + margin, r: buttonRadius };
+
 
       // --- Draw touch controls on top of everything ---
       if (hasUsedTouchRef.current && !isEnded) {
           context.save();
+          
+          // Draw Pause Button
+          const pauseCircle = pauseButtonCircleRef.current;
+          context.globalAlpha = 0.5;
+          context.fillStyle = 'rgba(31, 41, 55, 0.5)';
+          context.strokeStyle = 'rgba(75, 85, 99, 0.5)';
+          context.lineWidth = 2 * scale;
+          context.beginPath();
+          context.arc(pauseCircle.x, pauseCircle.y, pauseCircle.r, 0, Math.PI * 2);
+          context.fill();
+          context.stroke();
+
+          context.fillStyle = '#5eead4';
+          const barWidth = 4 * scale;
+          const barHeight = 16 * scale;
+          const barGap = 4 * scale;
+          context.fillRect(pauseCircle.x - barGap / 2 - barWidth, pauseCircle.y - barHeight / 2, barWidth, barHeight);
+          context.fillRect(pauseCircle.x + barGap / 2, pauseCircle.y - barHeight / 2, barWidth, barHeight);
+
           context.globalAlpha = customControls.opacity;
+
           for (const key in touchButtonRectsRef.current) {
               const { x, y, r } = touchButtonRectsRef.current[key];
               const isActive = (touchStateRef.current as any)[key].id !== null;
@@ -3571,6 +4202,23 @@ doorsRef.current.forEach(door => {
                       context.fillRect(x - r * 0.4, y - r * 0.1, r * 0.8, r * 0.2);
                       break;
                   }
+                  case 'special': { // Star icon
+                        const spikes = 5;
+                        const outerRadius = r * 0.6;
+                        const innerRadius = r * 0.25;
+                        let angle = Math.PI / 2;
+                        const angleStep = Math.PI / spikes;
+  
+                        context.beginPath();
+                        for (let i = 0; i < spikes * 2; i++) {
+                            const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                            context.lineTo(x + radius * Math.sin(angle), y - radius * Math.cos(angle));
+                            angle += angleStep;
+                        }
+                        context.closePath();
+                        context.fill();
+                        break;
+                    }
                   case 'interact': { // Cog icon
                       const spikes = 6;
                       const outerRadius = r * 0.55;
@@ -3667,29 +4315,6 @@ doorsRef.current.forEach(door => {
                       context.fillRect(x - r * 0.3, y + r * 0.25, r * 0.6, r * 0.15);
                       break;
                   }
-                   case 'skill':
-                   case 'ultimate': {
-                        const drawStar = (spikes: number, outerR: number, innerR: number) => {
-                            let rot = Math.PI / 2 * 3;
-                            const step = Math.PI / spikes;
-                            context.beginPath();
-                            context.moveTo(x, y - outerR);
-                            for (let i = 0; i < spikes; i++) {
-                                rot += step;
-                                context.lineTo(x + Math.cos(rot) * innerR, y + Math.sin(rot) * innerR);
-                                rot += step;
-                                context.lineTo(x + Math.cos(rot) * outerR, y + Math.sin(rot) * outerR);
-                            }
-                            context.closePath();
-                            context.fill();
-                        };
-                        if (key === 'skill') {
-                            drawStar(5, r * 0.55, r * 0.25);
-                        } else { // ultimate
-                            drawStar(8, r * 0.6, r * 0.3);
-                        }
-                        break;
-                    }
               }
           }
            // Draw joystick handle
@@ -3734,6 +4359,8 @@ doorsRef.current.forEach(door => {
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      // Clear end auto-close timer if component unmounts
+      if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
     };
   }, [level, difficulty, loadout, customControls, aimSensitivity, agentSkinColor, isMultiplayer]);
 
@@ -3804,7 +4431,15 @@ doorsRef.current.forEach(door => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isGameOverRef.current || isMissionCompleteRef.current) { onMissionEnd(); return; }
+      // Only allow skipping the end screen with Space key; otherwise ignore
+      if (isGameOverRef.current || isMissionCompleteRef.current) {
+        if (e.code === 'Space' || e.key === ' ') {
+          // Clear auto-close timer if any
+          if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
+          onMissionEnd();
+        }
+        return;
+      }
       if (e.key.toLowerCase() === 'p') { setIsPaused(p => !p); setShowInGameSettings(false); return; }
       if (isPausedRef.current) return;
       keysPressedRef.current.add(e.key.toLowerCase());
@@ -3835,11 +4470,19 @@ doorsRef.current.forEach(door => {
         case '1': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 0; } break;
         case '2': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 1; } break;
         case '3': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 2; } break;
+        case '4': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 3; } break;
         case 'f':
              if (isAimingThrowableRef.current) break; // Prevent re-triggering while holding key
              isAimingThrowableRef.current = true;
              const type = player.throwableTypes[player.currentThrowableIndex];
              if (type) cookingThrowableRef.current = { type, timer: THROWABLES[type].fuse, maxTimer: THROWABLES[type].fuse };
+             break;
+        case 'r':
+             // Start charging Kunai on R key down as alternative to right mouse
+             if (!isChargingKunaiRef.current) {
+                 isChargingKunaiRef.current = true;
+                 kunaiChargeStartRef.current = performance.now() / 1000;
+             }
              break;
         case 'q': 
             if (player.isReloading) break;
@@ -3856,6 +4499,8 @@ doorsRef.current.forEach(door => {
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      // When in end screen, ignore keyup events (only Space keydown is handled to skip)
+      if (isGameOverRef.current || isMissionCompleteRef.current) return;
       keysPressedRef.current.delete(e.key.toLowerCase());
       if (e.key.toLowerCase() === 'e') stopDoorInteraction();
       if (e.key.toLowerCase() === 'f') {
@@ -3863,9 +4508,104 @@ doorsRef.current.forEach(door => {
         isAimingThrowableRef.current = false;
         cookingThrowableRef.current = null;
       }
+      if (e.key.toLowerCase() === 'r') {
+        // Release charged Kunai when R released
+        if (isChargingKunaiRef.current) {
+            const nowTime = performance.now() / 1000;
+            const chargeTime = Math.max(0, Math.min(CHARGE_MAX_TIME, nowTime - kunaiChargeStartRef.current));
+            let targetDistanceM = KUNAI_NORMAL_DISTANCE_M;
+            if (chargeTime <= CHARGE_MAP[0].t) targetDistanceM = CHARGE_MAP[0].d;
+            else if (chargeTime >= CHARGE_MAP[2].t) targetDistanceM = CHARGE_MAP[2].d;
+            else {
+                const t0 = CHARGE_MAP[0].t, d0 = CHARGE_MAP[0].d;
+                const t2 = CHARGE_MAP[2].t, d2 = CHARGE_MAP[2].d;
+                const frac = (chargeTime - t0) / (t2 - t0);
+                targetDistanceM = d0 + frac * (d2 - d0);
+            }
+
+            // Fire Kunai (reuse mouse release logic)
+            const player = playerRef.current;
+            const ang = playerDirectionRef.current;
+            const ux = Math.cos(ang), uy = Math.sin(ang);
+            const px = player.x + ux * (player.radius + 2 * scaleRef.current);
+            const py = player.y + uy * (player.radius + 2 * scaleRef.current);
+            const distancePx = targetDistanceM * METERS_TO_PIXELS;
+            const speedPxPerSec = KUNAI_NORMAL_SPEED_MPS * METERS_TO_PIXELS;
+
+            bulletsRef.current.push({
+                x: px,
+                y: py,
+                dx: ux,
+                dy: uy,
+                radius: 3 * scaleRef.current,
+                damage: 0,
+                owner: 'player',
+                weaponName: 'Explosive Kunai',
+                isKunai: true,
+                originX: px,
+                originY: py,
+                maxTravelDistance: distancePx,
+                speed: speedPxPerSec,
+                homingTarget: null,
+                hasHomed: false,
+                hasReachedMax: false,
+                isCharged: true,
+            });
+        }
+        isChargingKunaiRef.current = false;
+      }
     };
     const handleMouseDown = (e: MouseEvent) => { if (e.button === 0) isShootingRef.current = true; };
-    const handleMouseUp = (e: MouseEvent) => { if (e.button === 0) isShootingRef.current = false; };
+    const handleMouseUp = (e: MouseEvent) => { 
+      if (e.button === 0) isShootingRef.current = false; 
+      // Right button release -> handle Kunai charged throw release
+      if (e.button === 2 && isChargingKunaiRef.current) {
+          const nowTime = performance.now() / 1000;
+          const chargeTime = Math.max(0, Math.min(CHARGE_MAX_TIME, nowTime - kunaiChargeStartRef.current));
+          // Map chargeTime to distance (meters) via piecewise interpolation
+          let targetDistanceM = KUNAI_NORMAL_DISTANCE_M;
+          if (chargeTime <= CHARGE_MAP[0].t) targetDistanceM = CHARGE_MAP[0].d;
+          else if (chargeTime >= CHARGE_MAP[2].t) targetDistanceM = CHARGE_MAP[2].d;
+          else {
+              // Linear between (0.3,5) and (2.0,20)
+              const t0 = CHARGE_MAP[0].t, d0 = CHARGE_MAP[0].d;
+              const t2 = CHARGE_MAP[2].t, d2 = CHARGE_MAP[2].d;
+              const frac = (chargeTime - t0) / (t2 - t0);
+              targetDistanceM = d0 + frac * (d2 - d0);
+          }
+
+          // Create a Kunai bullet for charged throw
+          const player = playerRef.current;
+          const ang = playerDirectionRef.current;
+          const ux = Math.cos(ang), uy = Math.sin(ang);
+          const px = player.x + ux * (player.radius + 2 * scaleRef.current);
+          const py = player.y + uy * (player.radius + 2 * scaleRef.current);
+          const distancePx = targetDistanceM * METERS_TO_PIXELS;
+          const speedPxPerSec = KUNAI_NORMAL_SPEED_MPS * METERS_TO_PIXELS;
+
+          bulletsRef.current.push({
+              x: px,
+              y: py,
+              dx: ux,
+              dy: uy,
+              radius: 3 * scaleRef.current,
+              damage: 0,
+              owner: 'player',
+              weaponName: 'Explosive Kunai',
+              isKunai: true,
+              originX: px,
+              originY: py,
+              maxTravelDistance: distancePx,
+              speed: speedPxPerSec,
+              homingTarget: null,
+              hasHomed: false,
+              hasReachedMax: false,
+              isCharged: true,
+          });
+
+          isChargingKunaiRef.current = false;
+      }
+    };
     const handleMouseMove = (e: MouseEvent) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -3909,6 +4649,17 @@ doorsRef.current.forEach(door => {
     };
 
     const processTouchStart = (touch: React.Touch | Touch) => {
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        
+        // Check for new UI buttons first
+        const pauseCircle = pauseButtonCircleRef.current;
+        if (Math.hypot(x - pauseCircle.x, y - pauseCircle.y) < pauseCircle.r) {
+            setIsPaused(true);
+            setShowInGameSettings(false);
+            return; // Stop processing this touch
+        }
+        
         const target = findTouchTarget(touch);
         const controlKey = target.key as keyof typeof touchState;
 
@@ -4018,6 +4769,16 @@ doorsRef.current.forEach(door => {
                     switchFireMode();
                 } else if (controlKey === 'heal') {
                     startHealing();
+                } else if (controlKey === 'special') {
+                    const player = playerRef.current;
+                    if (player.isReloading) break;
+                    // Switch to special weapon if not already equipped, otherwise switch back
+                    if (player.currentWeaponIndex === 3) {
+                        player.currentWeaponIndex = previousWeaponIndexRef.current;
+                    } else {
+                        previousWeaponIndexRef.current = player.currentWeaponIndex;
+                        player.currentWeaponIndex = 3;
+                    }
                 }
                 
                 break; 
@@ -4039,6 +4800,10 @@ doorsRef.current.forEach(door => {
 
   return (
     <div className="relative w-full h-full font-mono">
+        {/* HUD: score display */}
+        <div className="absolute top-4 left-4 z-40 bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300 font-mono">
+            <div className="text-sm">Score: <span className="font-bold">{runScore}</span></div>
+        </div>
         <canvas ref={canvasRef} onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} className="w-full h-full" />
         {isPortrait && (
              <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-center p-4">
@@ -4078,43 +4843,47 @@ doorsRef.current.forEach(door => {
                                 onClick={() => setShowInGameSettings(false)}
                                 className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
                                 >
-                                BACK TO PAUSE MENU
+                                BACK
                             </button>
                         </>
                     ) : (
-                         <>
-                            <button onClick={() => { setIsPaused(false); setShowInGameSettings(false); }} className="w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200">
+                        <div className="flex flex-col gap-4">
+                            <button
+                                onClick={() => setIsPaused(false)}
+                                className="w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+                            >
                                 RESUME
                             </button>
-                             <button onClick={() => setShowInGameSettings(true)} className="mt-4 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200">
+                            <button
+                                onClick={() => setShowInGameSettings(true)}
+                                className="w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+                            >
                                 SETTINGS
                             </button>
-                            <button onClick={onMissionEnd} className="mt-8 w-full px-6 py-3 bg-red-800 text-white font-bold text-lg tracking-widest rounded-md border-2 border-red-600 hover:bg-red-700 hover:border-red-500 transition-colors duration-200">
-                                END MISSION
+                            <button
+                                onClick={onMissionEnd}
+                                className="mt-8 w-full px-6 py-3 bg-red-800 text-white font-bold text-lg tracking-widest rounded-md border-2 border-red-600 hover:bg-red-700 hover:border-red-500 transition-colors duration-200"
+                            >
+                                QUIT MISSION
                             </button>
-                         </>
+                        </div>
                     )}
                  </div>
             </div>
         )}
         {isCustomizingInGame && (
-             <ControlCustomizer
+            <ControlCustomizer
                 initialLayout={customControls}
                 defaultLayout={defaultControlsLayout}
                 onSave={(newLayout) => {
                     onCustomControlsChange(newLayout);
                     setIsCustomizingInGame(false);
-                    setShowInGameSettings(true); // Go back to settings menu
                 }}
-                onClose={() => {
-                    setIsCustomizingInGame(false);
-                    setShowInGameSettings(true); // Go back to settings menu
-                }}
+                onClose={() => setIsCustomizingInGame(false)}
             />
         )}
     </div>
   );
 };
 
-// FIX: Export GameCanvas as the default export of this module. This resolves the import error in App.tsx and the associated "must return a value" error, which was a symptom of the compiler failing to parse the file as a component module correctly.
 export default GameCanvas;

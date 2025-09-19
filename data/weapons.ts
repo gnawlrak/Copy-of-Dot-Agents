@@ -1,5 +1,4 @@
 
-
 import { ThrowableType } from "./definitions";
 
 // 接口定义保持不变
@@ -9,7 +8,6 @@ export interface AttachmentModifier {
     bulletRadius?: number; // additive (becomes "Impact" for hitscan)
     pellets?: number; // additive
     spread?: number; // multiplier
-    // FIX: Add magSize property to be used in game logic for attachments.
     magSize?: number; // multiplier
     soundRadius?: number; // multiplier
     muzzleFlash?: number; // multiplier
@@ -29,7 +27,7 @@ export type FireMode = 'semi' | 'burst' | 'auto';
 export interface WeaponDefinition {
     name:string;
     description: string;
-    category: 'primary' | 'secondary' | 'melee';
+    category: 'primary' | 'secondary' | 'melee' | 'special';
     type: 'projectile' | 'hitscan';
     damage: number;
     fireRate: number;
@@ -47,6 +45,9 @@ export interface WeaponDefinition {
     soundRadius: number;
     durability?: number;
     attachmentSlots?: {[slotName: string]: Attachment[];};
+    equipTime?: number;
+    unequipTime?: number;
+    weaponClass?: 'charge';
 }
 
 // ===================================================================
@@ -211,7 +212,6 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
             ],
             'Magazine': [
                 { name: '快拔弹匣', description: '标准改装，显著提升换弹速度。', modifiers: { reloadTime: 0.75 } },
-                // FIX: Added magSize modifier to match description.
                 { name: '加长弹匣', description: '牺牲换弹速度以换取更多载弹量。', modifiers: { reloadTime: 1.15, magSize: 1.5 } }, // Note: magSize mods need code support
                 { name: '配重弹匣', description: '弹匣底部的配重块让你能更稳定地射击，精度提升。', modifiers: { spread: 0.8 } },
             ],
@@ -279,7 +279,6 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         reserveAmmo: -1,
         reloadTime: 0,
         soundRadius: 50,
-        // No attachments for now
     },
     'Riot Shield': {
         name: 'Riot Shield',
@@ -299,11 +298,52 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         reserveAmmo: -1,
         reloadTime: 0,
         soundRadius: 60,
-        durability: 600,
+        durability: 900,
+    },
+    // --- Special Weapons ---
+    'Rocket Launcher': {
+        name: 'Rocket Launcher',
+        description: 'Fires a high-explosive rocket. Long equip time and a narrow, zoomed field of view when active.',
+        category: 'special',
+        type: 'projectile',
+        damage: 300, // Explosion damage
+        fireRate: 0.5,
+        bulletSpeed: 1800,
+        bulletRadius: 8,
+        pellets: 1,
+        spread: 0,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: 1,
+        ammoInMag: 1,
+        reserveAmmo: 3,
+        reloadTime: 3.5,
+        soundRadius: 900,
+        equipTime: 1.2,
+        unequipTime: 0.8,
+    },
+    'Explosive Kunai': {
+        name: 'Explosive Kunai',
+        description: 'A throwable blade that can be charged for higher velocity. Detonates after a delay, releasing a cloud of damaging shrapnel.',
+        category: 'special',
+        type: 'projectile',
+        weaponClass: 'charge',
+        damage: 120, // Direct hit damage
+        fireRate: 1.0,
+        bulletSpeed: 2000, // Max speed
+        bulletRadius: 4,
+        pellets: 1,
+        spread: 0,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: 3,
+        ammoInMag: 3,
+        reserveAmmo: 0,
+        reloadTime: 4.0, // Reloads all 3
+        soundRadius: 80,
     },
 };
 
-// FIX: Export THROWABLES constant for use in the loadout menu.
 export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: string; description: string; fuse: number; } } = {
     grenade: {
         type: 'grenade',
@@ -322,14 +362,20 @@ export const THROWABLES: { [key in ThrowableType]: { type: ThrowableType; name: 
         name: 'Smoke Grenade',
         description: 'Creates a dense cloud of smoke to block vision.',
         fuse: 3.0,
-    }
+    },
+    molotov: {
+        type: 'molotov',
+        name: 'Molotov',
+        description: 'Creates a pool of fire that denies an area and burns targets.',
+        fuse: 2.5,
+    },
 };
 
-// FIX: Export WEAPON_TYPES constant and populate it from the WEAPONS object.
-export const WEAPON_TYPES: { primary: string[], secondary: string[], melee: string[] } = {
+export const WEAPON_TYPES: { primary: string[], secondary: string[], melee: string[], special: string[] } = {
     primary: [],
     secondary: [],
     melee: [],
+    special: [],
 };
 
 Object.keys(WEAPONS).forEach(weaponName => {
@@ -340,5 +386,7 @@ Object.keys(WEAPONS).forEach(weaponName => {
         WEAPON_TYPES.secondary.push(weaponName);
     } else if (weapon.category === 'melee') {
         WEAPON_TYPES.melee.push(weaponName);
+    } else if (weapon.category === 'special') {
+        WEAPON_TYPES.special.push(weaponName);
     }
 });

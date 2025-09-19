@@ -19,7 +19,7 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
     ];
 
     return (
-    <div className="w-full max-w-4xl text-center flex flex-col h-full justify-center">
+    <div className="w-full max-w-6xl text-center flex flex-col h-full justify-center">
       <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-8 animate-pulse">MULTIPLAYER LOBBY</h1>
       
       <div className="space-y-4 mb-8 max-h-[60vh] overflow-y-auto pr-4 bg-black/20 p-4 rounded-lg border-2 border-gray-800">
