@@ -25,6 +25,7 @@ export interface LevelEnemy {
   radius?: number; // Added for editor compatibility, optional in game
   type?: 'standard' | 'advanced';
   isDummy?: boolean;
+  hasScored?: boolean; // Added for scoring tracking
 }
 
 export interface LevelDefinition {
@@ -38,6 +39,7 @@ export interface LevelDefinition {
   enemyCount?: number;
   extractionZone?: LevelWall;
   cameraScale?: number;
+  isTrainingGround?: boolean; // If true, this map doesn't count towards scoring
 }
 
 // --- Official Missions ---
@@ -46,6 +48,7 @@ const TRAINING_GROUND: LevelDefinition = {
   name: 'TRAINING GROUND',
   description: 'Hone your skills. Practice movement, shooting, door manipulation, and throwable usage. Targets are non-hostile.',
   playerStart: { x: 0.1, y: 0.5 },
+  isTrainingGround: true,
   walls: [
     // Door Practice House (Top) - Outer walls
     { x: 0.3, y: 0.1, width: 0.4, height: 0.015 }, // Top wall
@@ -80,12 +83,12 @@ const TRAINING_GROUND: LevelDefinition = {
   ],
   enemies: [
     // Static targets in a "shooting range" on the far right
-    { x: 0.9, y: 0.2, direction: Math.PI, isDummy: true },
-    { x: 0.9, y: 0.4, direction: Math.PI, isDummy: true },
-    { x: 0.9, y: 0.6, direction: Math.PI, isDummy: true },
-    { x: 0.9, y: 0.8, direction: Math.PI, isDummy: true },
+    { x: 0.9, y: 0.2, direction: Math.PI, isDummy: true, hasScored: false },
+    { x: 0.9, y: 0.4, direction: Math.PI, isDummy: true, hasScored: false },
+    { x: 0.9, y: 0.6, direction: Math.PI, isDummy: true, hasScored: false },
+    { x: 0.9, y: 0.8, direction: Math.PI, isDummy: true, hasScored: false },
     // A target in one of the rooms
-    { x: 0.4, y: 0.2, direction: -Math.PI/2, isDummy: true },
+    { x: 0.4, y: 0.2, direction: -Math.PI/2, isDummy: true, hasScored: false },
   ],
   enemyCount: 5,
 };
@@ -162,24 +165,24 @@ const THE_FACTORY: LevelDefinition = {
   enemies: [
     // --- Spawn Pool ---
     // Room 1 (2 AI Crossfire)
-    { x: 0.13, y: 0.15, direction: 5 * Math.PI / 4, type: 'standard' },
-    { x: 0.22, y: 0.35, direction: Math.PI / 4, type: 'standard' },
+    { x: 0.13, y: 0.15, direction: 5 * Math.PI / 4, type: 'standard', hasScored: false },
+    { x: 0.22, y: 0.35, direction: Math.PI / 4, type: 'standard', hasScored: false },
     // Room 2 (2 AI Crossfire)
-    { x: 0.28, y: 0.15, direction: 3 * Math.PI / 2, type: 'advanced' },
-    { x: 0.37, y: 0.35, direction: Math.PI, type: 'standard' },
+    { x: 0.28, y: 0.15, direction: 3 * Math.PI / 2, type: 'advanced', hasScored: false },
+    { x: 0.37, y: 0.35, direction: Math.PI, type: 'standard', hasScored: false },
     // Room 3 (5 AI, defensive positions)
-    { x: 0.35, y: 0.7, direction: 0, type: 'advanced' }, // Behind new L-cover
-    { x: 0.55, y: 0.6, direction: Math.PI, type: 'standard' },
-    { x: 0.47, y: 0.3, direction: Math.PI / 2, type: 'advanced' },
-    { x: 0.57, y: 0.25, direction: Math.PI, type: 'standard' },
-    { x: 0.45, y: 0.8, direction: -Math.PI / 2, type: 'advanced' },
+    { x: 0.35, y: 0.7, direction: 0, type: 'advanced', hasScored: false }, // Behind new L-cover
+    { x: 0.55, y: 0.6, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.47, y: 0.3, direction: Math.PI / 2, type: 'advanced', hasScored: false },
+    { x: 0.57, y: 0.25, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.45, y: 0.8, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
     // Room 4 (2 AI Crossfire)
-    { x: 0.75, y: 0.15, direction: Math.PI, type: 'standard' },
-    { x: 0.85, y: 0.3, direction: 3 * Math.PI / 2, type: 'advanced' },
+    { x: 0.75, y: 0.15, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.85, y: 0.3, direction: 3 * Math.PI / 2, type: 'advanced', hasScored: false },
     // Room 5 (3 AI, trickier)
-    { x: 0.75, y: 0.45, direction: Math.PI, type: 'standard' }, // Behind rotated shelf
-    { x: 0.85, y: 0.6, direction: 0, type: 'advanced' },
-    { x: 0.68, y: 0.75, direction: -Math.PI / 2, type: 'standard' },
+    { x: 0.75, y: 0.45, direction: Math.PI, type: 'standard', hasScored: false }, // Behind rotated shelf
+    { x: 0.85, y: 0.6, direction: 0, type: 'advanced', hasScored: false },
+    { x: 0.68, y: 0.75, direction: -Math.PI / 2, type: 'standard', hasScored: false },
   ],
 };
 

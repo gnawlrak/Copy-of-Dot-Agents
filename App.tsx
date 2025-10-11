@@ -207,8 +207,14 @@ const App: React.FC = () => {
     networkClientRef.current?.disconnect();
     const previousState = isMultiplayer ? 'multiplayer-lobby' : 'level-select';
     setIsMultiplayer(false);
+    
     // When mission ends, accumulate run score into total and update high score
+    // Skip scoring accumulation for training ground maps
+    const isTrainingGround = selectedLevel?.isTrainingGround || false;
     const run = runScoreRef.current || 0;
+    console.log(`[App] Mission end - isTrainingGround=${isTrainingGround}, run=${run}, selectedLevel=${selectedLevel?.name}`);
+    
+    if (!isTrainingGround) {
     const prevTotal = totalScore || 0;
     const prevHigh = highScore || 0;
     const nextTotal = prevTotal + run;
@@ -238,6 +244,13 @@ const App: React.FC = () => {
         console.error('Failed to save score on mission end', err);
         setGameState(previousState);
     });
+    } else {
+        console.log('[Score] Training ground mission end. run=', run, ' (not accumulated)');
+        // Just return to menu without saving scores
+        const targetState = isMultiplayer ? previousState : 'main-menu';
+        setGameState(targetState);
+    }
+    
     // Reset run score reference
     runScoreRef.current = 0;
   };
@@ -339,6 +352,7 @@ const App: React.FC = () => {
                     networkClient={networkClientRef.current}
                     initialRunScore={0}
                     onScoreChange={(newRunScore: number) => {
+                        console.log(`[App] onScoreChange called with: ${newRunScore}`);
                         runScoreRef.current = newRunScore;
                     }}
                     totalScore={totalScore}

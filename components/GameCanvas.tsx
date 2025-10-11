@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
@@ -94,6 +93,7 @@ type Enemy = {
   bleedLayers?: number; // 0..2
   bleedTimer?: number; // seconds remaining for bleed (shared timer for layers)
   hitTimer?: number;
+  hasScored?: boolean;
 };
 type Player = {
     x: number;
@@ -250,6 +250,9 @@ interface GameCanvasProps {
 
 const BASE_LOGICAL_HEIGHT = 720; // Design resolution
 const BASE_AIM_SENSITIVITY = 0.0025; // Base sensitivity for mouse and touch aiming
+
+// Minimum time (ms) to show the end screen before allowing immediate exit/back
+const END_SCREEN_MIN_DELAY = 1500;
 
 // Scoring constants
 const SCORE_PER_KILL = 100;
@@ -500,16 +503,30 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       medkits: 0, isHealing: false, healTimer: 0, burnTimer: 0, burnDamage: 0,
   });
   const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
+    const runScoreRef = useRef<number>(initialRunScore || 0);
 
   // Helper to increment score and notify parent (applies difficulty multiplier)
   const addScore = (amount: number) => {
       const mult = DIFFICULTY_MULTIPLIERS[difficulty] ?? 1.0;
       const applied = Math.round(amount * mult);
-      setRunScore(prev => {
-          const next = prev + applied;
+
+      console.log(`[addScore] amount=${amount}, mult=${mult}, applied=${applied}, isTrainingGround=${level.isTrainingGround}`);
+
+      // Update runScore state and ref so canvas draw can read the latest value synchronously
+      const prev = runScoreRef.current;
+      const next = prev + applied;
+      console.log(`[addScore] prev=${prev}, next=${next}`);
+    runScoreRef.current = next;
+    try { setRunScore(next); } catch {}
+    try { console.log('[addScore] runScoreRef now=', runScoreRef.current); } catch {}
+
+      // Only notify parent (for accumulation) if not training ground
+      if (!level.isTrainingGround) {
+          console.log(`[addScore] Notifying parent with score: ${next}`);
           try { if (onScoreChange) onScoreChange(next); } catch {}
-          return next;
-      });
+      } else {
+          console.log(`[addScore] Training ground - not notifying parent`);
+      }
   };
   const previousWeaponIndexRef = useRef<number>(0);
   const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
@@ -837,15 +854,15 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
 
             tracersRef.current.push({ x1: muzzleX, y1: muzzleY, x2: hitX, y2: hitY, ttl: 0.07, life: 0.07 });
             
-            if (hitEnemy) {
-                const healthBefore = hitEnemy.health;
-                hitEnemy.health -= weapon.damage;
-                if (hitEnemy.health <= 0 && healthBefore > 0) {
-                  hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
-                  try { addScore(SCORE_PER_KILL); } catch {}
-                }
-                impact(hitEnemy.x, hitEnemy.y);
-            } else {
+                                if (hitEnemy) {
+                                const healthBefore = hitEnemy.health;
+                                hitEnemy.health -= weapon.damage;
+                                if (hitEnemy.health <= 0 && healthBefore > 0) {
+                                    hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
+                                    try { addScore(SCORE_PER_KILL); } catch {}
+                                }
+                                impact(hitEnemy.x, hitEnemy.y);
+                        } else {
                 lightsRef.current.push({ x: hitX, y: hitY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
                 impact(hitX, hitY);
                 soundWavesRef.current.push({ x: hitX, y: hitY, radius: 0, maxRadius: 200 * scaleRef.current, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
@@ -1324,6 +1341,7 @@ const startHealing = () => {
                 searchTimer: 0,
                 isReturningToPost: false,
                 moveSoundTimer: 0,
+                hasScored: false,
             };
 
             if (difficulty === 'normal') {
@@ -1563,8 +1581,8 @@ const startHealing = () => {
       const scale = scaleRef.current;
       const cameraScale = cameraScaleRef.current;
       const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
-      if (isEnded && missionEndTimeRef.current === null) {
-        missionEndTimeRef.current = now;
+            if (isEnded && missionEndTimeRef.current === null) {
+                missionEndTimeRef.current = now;
         // Start auto-close timer (60s)
         if (!endAutoCloseTimerRef.current) {
             endAutoCloseTimerRef.current = window.setTimeout(() => {
@@ -1739,10 +1757,10 @@ const startHealing = () => {
                     const enemy = unit as Enemy;
                     const healthBefore = enemy.health;
                     enemy.health -= damage;
-                    if (enemy.health <= 0 && healthBefore > 0) {
-                      hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                      try { addScore(SCORE_PER_KILL); } catch {}
-                    }
+                                        if (enemy.health <= 0 && healthBefore > 0) {
+                                            hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                            try { addScore(SCORE_PER_KILL); } catch {}
+                                        }
                 }
             } else { // flashbang
                 if (isPlayer) {
@@ -2484,6 +2502,7 @@ doorsRef.current.forEach(door => {
                                 }
                                 if (enemy.health <= 0 && healthBefore > 0) {
                                     hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                    try { addScore(SCORE_PER_KILL); } catch {}
                                 }
                                 impact(impactX, impactY);
                                 soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
@@ -2638,6 +2657,7 @@ doorsRef.current.forEach(door => {
               slashHitThisSwingRef.current.add(enemy);
               hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
               shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+                            try { addScore(SCORE_PER_KILL); } catch {}
             }
         }
 
@@ -4080,43 +4100,115 @@ doorsRef.current.forEach(door => {
           }
       }
 
-      // Game Over / Mission Complete Text
+      // Game Over / Mission Complete Panel (redesigned)
       if (isEnded) {
-          const endDelay = 1500; // ms
+          const endDelay = END_SCREEN_MIN_DELAY; // ms
           if (now - (missionEndTimeRef.current ?? 0) > endDelay) {
-              context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+              // DEBUG: log end-screen values to help debug missing score
+              try { console.log('[EndScreen] runScore=', runScoreRef.current, ' totalScore=', totalScore, ' initialEnemies=', initialEnemyCountRef.current, ' level.isTrainingGround=', level.isTrainingGround); } catch {}
+              // Dim background
+              context.fillStyle = 'rgba(0, 0, 0, 0.75)';
               context.fillRect(0, 0, canvas.width, canvas.height);
-              context.font = `bold ${48 * scale}px mono`;
+
+              // Compute stats
+              const aliveEnemies = enemiesRef.current.filter(e => !e.isDummy && e.health > 0).length;
+              const totalEnemies = initialEnemyCountRef.current || 0;
+              const kills = Math.max(0, totalEnemies - aliveEnemies);
+
+              // Panel dimensions
+              const panelW = Math.min(900, canvas.width * 0.8);
+              const panelH = Math.min(360 * scale, canvas.height * 0.6);
+              const px = cx - panelW / 2;
+              const py = cy - panelH / 2;
+              const radius = 12 * scale;
+
+              // Draw panel background (rounded)
+              context.beginPath();
+              context.moveTo(px + radius, py);
+              context.lineTo(px + panelW - radius, py);
+              context.quadraticCurveTo(px + panelW, py, px + panelW, py + radius);
+              context.lineTo(px + panelW, py + panelH - radius);
+              context.quadraticCurveTo(px + panelW, py + panelH, px + panelW - radius, py + panelH);
+              context.lineTo(px + radius, py + panelH);
+              context.quadraticCurveTo(px, py + panelH, px, py + panelH - radius);
+              context.lineTo(px, py + radius);
+              context.quadraticCurveTo(px, py, px + radius, py);
+              context.closePath();
+              context.fillStyle = 'rgba(6, 10, 16, 0.95)';
+              context.fill();
+              context.lineWidth = 2;
+              context.strokeStyle = 'rgba(255,255,255,0.06)';
+              context.stroke();
+
+              // Title
               context.textAlign = 'center';
               context.shadowColor = 'black';
-              context.shadowBlur = 10 * scale;
+              context.shadowBlur = 8 * scale;
+              context.font = `bold ${36 * scale}px mono`;
               if (isMissionCompleteRef.current) {
                   context.fillStyle = '#10b981';
-                  context.fillText('MISSION COMPLETE', cx, cy - 30 * scale);
+                  context.fillText('MISSION COMPLETE', cx, py + 52 * scale);
               } else {
                   context.fillStyle = '#ef4444';
-                  context.fillText('MISSION FAILED', cx, cy - 30 * scale);
+                  context.fillText('MISSION FAILED', cx, py + 52 * scale);
               }
               context.shadowBlur = 0;
+
+              // Left column: stats
+              const leftX = px + panelW * 0.25;
+              const rightX = px + panelW * 0.75;
+              let rowY = py + 100 * scale;
+              const rowGap = 34 * scale;
+
+              context.textAlign = 'left';
+              context.font = `bold ${18 * scale}px mono`;
+              context.fillStyle = '#cbd5e1';
+              context.fillText('Mission Time:', leftX, rowY);
               context.font = `${18 * scale}px mono`;
               context.fillStyle = 'white';
-              context.fillText(`Mission Time: ${missionTimeRef.current.toFixed(2)}s`, cx, cy + 20 * scale);
+              context.fillText(`${missionTimeRef.current.toFixed(2)}s`, leftX + 160 * scale, rowY);
 
-              // Show run score and global high score
-              context.font = `${20 * scale}px mono`;
-              context.fillText(`Run Score: ${runScore}`, cx, cy + 50 * scale);
+              rowY += rowGap;
+              context.font = `bold ${18 * scale}px mono`;
+              context.fillStyle = '#cbd5e1';
+              context.fillText('Kills:', leftX, rowY);
+              context.font = `${18 * scale}px mono`;
+              context.fillStyle = 'white';
+              context.fillText(`${kills} / ${totalEnemies}`, leftX + 160 * scale, rowY);
+
+              // Right column: scores
+              rowY = py + 100 * scale;
+              context.textAlign = 'left';
+              context.font = `bold ${18 * scale}px mono`;
+              context.fillStyle = '#cbd5e1';
+              context.fillText('Run Score:', rightX - 80 * scale, rowY);
+              context.font = `bold ${22 * scale}px mono`;
+              context.fillStyle = '#34d399';
+              context.fillText(`${runScoreRef.current}`, rightX + 40 * scale, rowY);
+
+              rowY += rowGap;
+              context.font = `bold ${16 * scale}px mono`;
+              context.fillStyle = '#94a3b8';
+              const projectedTotal = (typeof totalScore === 'number' ? totalScore : 0) + (level.isTrainingGround ? 0 : runScoreRef.current);
+              context.fillText('Projected Total:', rightX - 80 * scale, rowY);
               context.font = `${16 * scale}px mono`;
-              const globalHigh = typeof highScore !== 'undefined' ? highScore : 0;
-              context.fillText(`High Score: ${globalHigh}`, cx, cy + 74 * scale);
-              if (runScore > (globalHigh)) {
-                  context.fillStyle = '#f59e0b'; // amber for new high
-                  context.font = `bold ${18 * scale}px mono`;
-                  context.fillText('NEW HIGH SCORE!', cx, cy + 100 * scale);
-                  context.fillStyle = 'white';
-              }
+              context.fillStyle = 'white';
+              context.fillText(`${projectedTotal}`, rightX + 40 * scale, rowY);
 
-              context.font = `${24 * scale}px mono`;
-              context.fillText('Tap or press any key to continue', cx, cy + 140 * scale);
+              rowY += rowGap;
+              context.font = `bold ${16 * scale}px mono`;
+              context.fillStyle = '#94a3b8';
+              const globalHigh = typeof highScore !== 'undefined' ? highScore : 0;
+              context.fillText('High Score:', rightX - 80 * scale, rowY);
+              context.font = `${16 * scale}px mono`;
+              context.fillStyle = (runScore > globalHigh) ? '#f59e0b' : 'white';
+              context.fillText(`${globalHigh}`, rightX + 40 * scale, rowY);
+
+              // Footer: instruction
+              context.textAlign = 'center';
+              context.font = `${18 * scale}px mono`;
+              context.fillStyle = '#94a3b8';
+              context.fillText('Tap or press Space to continue', cx, py + panelH - 32 * scale);
           }
       }
       
@@ -4430,16 +4522,19 @@ doorsRef.current.forEach(door => {
   }, [networkClient, isMultiplayer, agentSkinColor]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only allow skipping the end screen with Space key; otherwise ignore
-      if (isGameOverRef.current || isMissionCompleteRef.current) {
-        if (e.code === 'Space' || e.key === ' ') {
-          // Clear auto-close timer if any
-          if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
-          onMissionEnd();
-        }
-        return;
-      }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Only allow skipping the end screen with Space key after the minimal show delay; otherwise ignore
+            if (isGameOverRef.current || isMissionCompleteRef.current) {
+                if (e.code === 'Space' || e.key === ' ') {
+                    // Only trigger onMissionEnd if end screen has been visible long enough
+                    if (missionEndTimeRef.current && performance.now() - missionEndTimeRef.current > END_SCREEN_MIN_DELAY) {
+                        // Clear auto-close timer if any
+                        if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
+                        onMissionEnd();
+                    }
+                }
+                return;
+            }
       if (e.key.toLowerCase() === 'p') { setIsPaused(p => !p); setShowInGameSettings(false); return; }
       if (isPausedRef.current) return;
       keysPressedRef.current.add(e.key.toLowerCase());
@@ -4626,10 +4721,15 @@ doorsRef.current.forEach(door => {
     };
   }, [onMissionEnd, startDoorInteraction, stopDoorInteraction]);
 
-  const handleTouch = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
-    if (isEnded) { onMissionEnd(); return; }
+    const handleTouch = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        const isEnded = isGameOverRef.current || isMissionCompleteRef.current;
+        if (isEnded) {
+            if (missionEndTimeRef.current && performance.now() - missionEndTimeRef.current > END_SCREEN_MIN_DELAY) {
+                onMissionEnd();
+            }
+            return;
+        }
     hasUsedTouchRef.current = true;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -4802,7 +4902,9 @@ doorsRef.current.forEach(door => {
     <div className="relative w-full h-full font-mono">
         {/* HUD: score display */}
         <div className="absolute top-4 left-4 z-40 bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300 font-mono">
-            <div className="text-sm">Score: <span className="font-bold">{runScore}</span></div>
+            <div className="text-sm">
+                {level.isTrainingGround ? 'Practice Score' : 'Score'}: <span className="font-bold">{runScore}</span>
+            </div>
         </div>
         <canvas ref={canvasRef} onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} className="w-full h-full" />
         {isPortrait && (
