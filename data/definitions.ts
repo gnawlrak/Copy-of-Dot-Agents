@@ -56,4 +56,3 @@ export const AGENT_SKINS: AgentSkin[] = [
     { name: 'Desert Ops', color: '#fb923c' }, // tailwind orange-400
     { name: 'Urban Shadow', color: '#60a5fa' }, // tailwind blue-400
     { name: 'Crimson Strike', color: '#f87171' }, // tailwind red-400
-];

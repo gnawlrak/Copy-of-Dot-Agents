@@ -203,41 +203,48 @@ const App: React.FC = () => {
   };
 
   const handleMissionEnd = () => {
+    const wasTraining = selectedLevel?.name === 'TRAINING GROUND';
     setSelectedLevel(null);
     networkClientRef.current?.disconnect();
     const previousState = isMultiplayer ? 'multiplayer-lobby' : 'level-select';
     setIsMultiplayer(false);
-    // When mission ends, accumulate run score into total and update high score
-    const run = runScoreRef.current || 0;
-    const prevTotal = totalScore || 0;
-    const prevHigh = highScore || 0;
-    const nextTotal = prevTotal + run;
-    const nextHigh = Math.max(prevHigh, run);
-    console.log('[Score] Mission end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
-    setTotalScore(nextTotal);
-    setHighScore(nextHigh);
-    // Persist immediately so main menu shows updated values
-    const gameData: GameData = {
-        version: 1,
-        operatorClassId,
-        aimSensitivity,
-        agentSkin,
-        playerLoadout,
-        customControls,
-        customLevels,
-        totalScore: nextTotal,
-        highScore: nextHigh,
-    };
-    // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
-    const targetState = isMultiplayer ? previousState : 'main-menu';
-    SaveSystem.saveGameData(gameData).then(() => {
-        setSyncStatus('synced');
-        setTimeout(() => setSyncStatus('idle'), 1500);
+
+    if (wasTraining) {
+        const targetState = isMultiplayer ? previousState : 'main-menu';
         setGameState(targetState);
-    }).catch(err => {
-        console.error('Failed to save score on mission end', err);
-        setGameState(previousState);
-    });
+    } else {
+        // When mission ends, accumulate run score into total and update high score
+        const run = runScoreRef.current || 0;
+        const prevTotal = totalScore || 0;
+        const prevHigh = highScore || 0;
+        const nextTotal = prevTotal + run;
+        const nextHigh = Math.max(prevHigh, run);
+        console.log('[Score] Mission end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
+        setTotalScore(nextTotal);
+        setHighScore(nextHigh);
+        // Persist immediately so main menu shows updated values
+        const gameData: GameData = {
+            version: 1,
+            operatorClassId,
+            aimSensitivity,
+            agentSkin,
+            playerLoadout,
+            customControls,
+            customLevels,
+            totalScore: nextTotal,
+            highScore: nextHigh,
+        };
+        // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
+        const targetState = isMultiplayer ? previousState : 'main-menu';
+        SaveSystem.saveGameData(gameData).then(() => {
+            setSyncStatus('synced');
+            setTimeout(() => setSyncStatus('idle'), 1500);
+            setGameState(targetState);
+        }).catch(err => {
+            console.error('Failed to save score on mission end', err);
+            setGameState(previousState);
+        });
+    }
     // Reset run score reference
     runScoreRef.current = 0;
   };

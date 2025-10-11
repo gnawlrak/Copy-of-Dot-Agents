@@ -2656,31 +2656,7 @@ doorsRef.current.forEach(door => {
       slashArcsRef.current.forEach(a => a.ttl -= dt);
       slashArcsRef.current = slashArcsRef.current.filter(a => a.ttl > 0);
 
-      explosionsRef.current.forEach(exp => {
-        exp.lifetime -= dt;
-        let isDispersingSmoke = false;
-
-        // Check for smoke clouds to disperse (手雷炸散烟雾相克系统)
-        if (exp.type === 'grenade') {
-          smokeCloudsRef.current = smokeCloudsRef.current.filter(cloud => {
-            const dx = exp.x - cloud.x;
-            const dy = exp.y - cloud.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            const combinedRadius = exp.radius + cloud.radius;
-
-            if (distance < combinedRadius) {
-              // 爆炸范围内的烟雾云被炸散
-              const disperseRatio = 1 - (distance / combinedRadius);
-              const disperseRate = disperseRatio * 3.0; // 每秒减少3倍的生命值
-              cloud.lifetime -= disperseRate * dt;
-              isDispersingSmoke = true;
-              return cloud.lifetime > 0; // 如果生命值仍大于0，保留；否则移除
-            }
-            return true; // 不在爆炸范围内的烟雾云保持不变
-          });
-        }
-        (exp as any).isDispersingSmoke = isDispersingSmoke;
-      });
+      explosionsRef.current.forEach(exp => exp.lifetime -= dt);
       explosionsRef.current = explosionsRef.current.filter(exp => exp.lifetime > 0);
       shockwavesRef.current.forEach(sw => sw.lifetime -= dt);
       shockwavesRef.current = shockwavesRef.current.filter(sw => sw.lifetime > 0);
@@ -2722,24 +2698,6 @@ doorsRef.current.forEach(door => {
             cloud.radius += cloud.maxRadius * expansionRate * dt;
             if (cloud.radius > cloud.maxRadius) cloud.radius = cloud.maxRadius;
         }
-
-        // Check for fire patches to extinguish (烟雾灭火相克系统)
-        let isExtinguishingFire = false;
-        firePatchesRef.current.forEach(patch => {
-          const dx = cloud.x - patch.x;
-          const dy = cloud.y - patch.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          const combinedRadius = cloud.radius + patch.radius;
-
-          if (distance < combinedRadius) {
-            // 烟雾覆盖火块，加速火的熄灭
-            const overlapRatio = 1 - (distance / combinedRadius);
-            const extinguishRate = overlapRatio * 2.0; // 每秒减少2倍的生命值
-            patch.lifetime -= extinguishRate * dt;
-            isExtinguishingFire = true;
-          }
-        });
-        (cloud as any).isExtinguishingFire = isExtinguishingFire;
       });
       smokeCloudsRef.current = smokeCloudsRef.current.filter(c => c.lifetime > 0);
 
@@ -3699,23 +3657,6 @@ doorsRef.current.forEach(door => {
               context.arc(px, py, p_rad * 0.6, 0, Math.PI * 2);
               context.fill();
           }
-
-          // Add extinguishing effect visualization (灭火效果可视化)
-          const isExtinguishingFire = (cloud as any).isExtinguishingFire;
-          if (isExtinguishingFire) {
-            const numExtinguishParticles = 8;
-            for (let i = 0; i < numExtinguishParticles; i++) {
-              const angle = i * (Math.PI * 2 / numExtinguishParticles) + (now / 300);
-              const dist = cloud.radius * 0.3 * (Math.sin(now / 150 + i * 0.5) * 0.3 + 0.7);
-              const px = cloud.x + Math.cos(angle) * dist;
-              const py = cloud.y + Math.sin(angle) * dist;
-              const particleAlpha = life_p * 0.3 * (Math.sin(now / 200 + i) * 0.3 + 0.7);
-              context.fillStyle = `rgba(100, 150, 255, ${particleAlpha})`; // 蓝色粒子表示灭火效果
-              context.beginPath();
-              context.arc(px, py, 2 * scale, 0, Math.PI * 2);
-              context.fill();
-            }
-          }
       });
       firePatchesRef.current.forEach(patch => {
         if (!pointInPoly(patch.x, patch.y, viewPoly)) return;
@@ -3891,7 +3832,7 @@ doorsRef.current.forEach(door => {
         const lifePercentage = 1 - (exp.lifetime / exp.maxLifetime);
         exp.radius = exp.maxRadius * Math.sin(lifePercentage * Math.PI / 2);
         const brightness = getBrightnessByDistance(exp.x, exp.y, visionRadius);
-
+        
         let grad;
         if (exp.type === 'grenade') {
             grad = context.createRadialGradient(exp.x, exp.y, 0, exp.x, exp.y, exp.radius);
@@ -3906,23 +3847,6 @@ doorsRef.current.forEach(door => {
         }
         context.fillStyle = grad;
         context.beginPath(); context.arc(exp.x, exp.y, exp.radius, 0, Math.PI * 2); context.fill();
-
-        // Add dispersing smoke effect visualization (炸散烟雾效果可视化)
-        const isDispersingSmoke = (exp as any).isDispersingSmoke;
-        if (isDispersingSmoke && exp.type === 'grenade') {
-          const numDisperseParticles = 12;
-          for (let i = 0; i < numDisperseParticles; i++) {
-            const angle = i * (Math.PI * 2 / numDisperseParticles) + (now / 200);
-            const dist = exp.radius * 0.5 * (Math.sin(now / 100 + i * 0.8) * 0.4 + 0.6);
-            const px = exp.x + Math.cos(angle) * dist;
-            const py = exp.y + Math.sin(angle) * dist;
-            const particleAlpha = lifePercentage * 0.4 * (Math.sin(now / 150 + i) * 0.3 + 0.7);
-            context.fillStyle = `rgba(255, 200, 100, ${particleAlpha})`; // 黄色粒子表示炸散效果
-            context.beginPath();
-            context.arc(px, py, 3 * scale, 0, Math.PI * 2);
-            context.fill();
-          }
-        }
       });
 
       hitEffectsRef.current.forEach(effect => {
