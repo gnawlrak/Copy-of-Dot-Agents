@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Rooms Data</title>
+</head>
+<body>
+    <h1>Rooms Data in localStorage</h1>
+    <div id="output"></div>
+
+    <script>
+        function displayRoomsData() {
+            try {
+                const roomsData = localStorage.getItem('dot_agents_mock_rooms_v2');
+                const output = document.getElementById('output');
+                
+                if (roomsData && roomsData !== 'null') {
+                    try {
+                        const rooms = JSON.parse(roomsData);
+                        output.innerHTML = '<pre>' + JSON.stringify(rooms, null, 2) + '</pre>';
+                    } catch (parseError) {
+                        output.innerHTML = '<p>Parse Error: ' + parseError.message + '</p>';
+                        output.innerHTML += '<p>Raw Data: ' + roomsData + '</p>';
+                    }
+                } else {
+                    output.innerHTML = '<p>No rooms data found in localStorage</p>';
+                }
+            } catch (error) {
+                document.getElementById('output').innerHTML = '<p>Error: ' + error.message + '</p>';
+            }
+        }
+
+        // 页面加载完成后显示数据
+        window.addEventListener('load', displayRoomsData);
+    </script>
+</body>
+</html>

@@ -224,6 +224,13 @@ type StuckKunai = {
     owner: 'player' | 'enemy';
 }
 
+type WeaponDrop = {
+    id: string;
+    weaponName: string;
+    x: number;
+    y: number;
+};
+
 
 interface GameCanvasProps {
     level: LevelDefinition;
@@ -489,6 +496,9 @@ const weaponShakeFunctions: { [key: string]: (shaker: any, scale: number, ux: nu
   },
 };
 
+import 'react/jsx-runtime';
+import { JSX } from 'react';
+
 const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient, onScoreChange, initialRunScore, totalScore, highScore }: GameCanvasProps): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
@@ -496,14 +506,458 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const cameraScaleRef = useRef(1.0);
   const lastTimeRef = useRef(performance.now());
   const playerDirectionRef = useRef<number>(0);
+  
+  // 多人游戏状态
+  const [remotePlayers, setRemotePlayers] = useState<RemotePlayer[]>([]);
+  const remotePlayersRef = useRef<RemotePlayer[]>([]);
+  const [gameRoom, setGameRoom] = useState<any>(null);
+  const gameRoomRef = useRef<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [playerTeam, setPlayerTeam] = useState<'red' | 'blue'>('red');
+  const playerTeamRef = useRef<'red' | 'blue'>('red');
+  
+  // 本地玩家状态
   const playerRef = useRef<Player>({
       x: 100, y: 100, radius: 10, speed: 240, health: 100, maxHealth: 100, hitTimer: 0,
       weapons: [], currentWeaponIndex: 0, shootCooldown: 0, isReloading: false, reloadTimer: 0,
       throwables: {}, throwableTypes: [], currentThrowableIndex: 0, flashTimer: 0, 
       medkits: 0, isHealing: false, healTimer: 0, burnTimer: 0, burnDamage: 0,
+      // 多人游戏扩展属性
+      team: 'red',
+      playerId: 'local',
+      isReady: false,
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      score: 0
   });
+  // If a transient start position was set by App (on start-round), apply it once
+  try {
+      const spRaw = localStorage.getItem('dot_agents_start_pos');
+      if (spRaw) {
+          const sp = JSON.parse(spRaw);
+          if (sp && typeof sp.x === 'number' && typeof sp.y === 'number') {
+              playerRef.current.x = sp.x;
+              playerRef.current.y = sp.y;
+          }
+          try { localStorage.removeItem('dot_agents_start_pos'); } catch {}
+      }
+  } catch (e) {}
+  
+  // 多人游戏网络事件处理
+  useEffect(() => {
+    if (!networkClient || !isMultiplayer) return;
+    
+    // 连接状态监听
+    const handleConnect = () => {
+      setIsConnected(true);
+      console.log('Connected to multiplayer server');
+    };
+    
+    const handleDisconnect = () => {
+      setIsConnected(false);
+      console.log('Disconnected from multiplayer server');
+    };
+    
+    // 房间状态监听
+    const handleRoomUpdate = (room: any) => {
+      setGameRoom(room);
+      gameRoomRef.current = room;
+      
+      // 更新玩家队伍
+      if (room && room.players) {
+        const localPlayer = room.players[networkClient.ownId];
+        if (localPlayer && localPlayer.team) {
+          setPlayerTeam(localPlayer.team);
+          playerTeamRef.current = localPlayer.team;
+          playerRef.current.team = localPlayer.team;
+        }
+      }
+    };
+    
+    // 远程玩家状态更新
+    const handlePlayerUpdate = (payload: any) => {
+      if (payload.source === networkClient.ownId) return; // 忽略自己的更新
+      
+      const updatedPlayers = [...remotePlayersRef.current];
+      const existingIndex = updatedPlayers.findIndex(p => p.playerId === payload.source);
+      
+      if (existingIndex >= 0) {
+        // 更新现有玩家
+        updatedPlayers[existingIndex] = {
+          ...updatedPlayers[existingIndex],
+          ...payload,
+          lastUpdate: Date.now()
+        };
+      } else {
+        // 添加新玩家
+        updatedPlayers.push({
+          playerId: payload.source,
+          ...payload,
+          lastUpdate: Date.now()
+        });
+      }
+      
+      setRemotePlayers(updatedPlayers);
+      remotePlayersRef.current = updatedPlayers;
+    };
+    
+    // 玩家离开房间
+    const handlePlayerLeft = (payload: { playerId: string }) => {
+      const updatedPlayers = remotePlayersRef.current.filter(p => p.playerId !== payload.playerId);
+      setRemotePlayers(updatedPlayers);
+      remotePlayersRef.current = updatedPlayers;
+    };
+    
+    // 网络事件监听
+    networkClient.on('connect', handleConnect);
+    networkClient.on('disconnect', handleDisconnect);
+    networkClient.on('room-updated', handleRoomUpdate);
+    networkClient.on('player-update', handlePlayerUpdate);
+    networkClient.on('player-left', handlePlayerLeft);
+    
+    // 初始化连接
+    if (!networkClient.connected) {
+      networkClient.connect();
+    }
+    
+    return () => {
+      // 清理事件监听器
+      networkClient.off('connect', handleConnect);
+      networkClient.off('disconnect', handleDisconnect);
+      networkClient.off('room-updated', handleRoomUpdate);
+      networkClient.off('player-update', handlePlayerUpdate);
+      networkClient.off('player-left', handlePlayerLeft);
+    };
+  }, [networkClient, isMultiplayer]);
+  
+  // 玩家状态同步到网络
+  const syncPlayerState = useCallback(() => {
+    if (!networkClient || !isMultiplayer || !isConnected) return;
+    
+    const player = playerRef.current;
+    const playerState: PlayerState = {
+      id: networkClient?.ownId || 'local',
+      x: player.x,
+      y: player.y,
+      health: player.health,
+      direction: player.direction || 0,
+      team: player.team,
+      isReady: player.isReady,
+      kills: player.kills,
+      deaths: player.deaths,
+      // 由于 “assists” 不在类型 “PlayerState” 中，移除该属性
+      // assists: player.assists,
+      score: player.score,
+      // 由于 PlayerState 类型中不包含 timestamp 属性，暂时移除该属性
+      // timestamp: Date.now()
+    };
+    
+    networkClient.send('player-update', playerState);
+  }, [networkClient, isMultiplayer, isConnected]);
+  
+  // 发送玩家动作事件
+  const sendPlayerAction = useCallback((action: string, payload: any) => {
+    if (!networkClient || !isMultiplayer || !isConnected) return;
+    
+    const actionPayload = {
+      action,
+      payload,
+      playerId: networkClient.ownId,
+      timestamp: Date.now()
+    };
+    
+    networkClient.send('player-action', actionPayload);
+  }, [networkClient, isMultiplayer, isConnected]);
+  
+  // 处理网络命中事件
+  const handleNetworkHit = useCallback((payload: any) => {
+    if (!isMultiplayer) return;
+    
+    const { source, target, damage, weapon, position } = payload;
+    
+    // 如果是本地玩家被击中
+    if (target === networkClient?.ownId) {
+      playerRef.current.health = Math.max(0, playerRef.current.health - damage);
+      playerRef.current.hitTimer = 0.3; // 击中效果
+      
+      // 触发视觉反馈
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          // 添加击中效果
+          const hitEffect: HitEffect = {
+            x: position.x,
+            y: position.y,
+            radius: 5,
+            maxRadius: 20,
+            lifetime: 0.2,
+            maxLifetime: 0.2
+          };
+          // 这里可以添加到效果列表中
+        }
+      }
+    }
+    
+    // 如果是远程玩家被击中
+    const remotePlayer = remotePlayersRef.current.find(p => p.playerId === target);
+    if (remotePlayer) {
+      // 更新远程玩家状态
+      const updatedPlayers = remotePlayersRef.current.map(p => 
+        p.playerId === target ? { ...p, health: Math.max(0, p.health - damage) } : p
+      );
+      setRemotePlayers(updatedPlayers);
+      remotePlayersRef.current = updatedPlayers;
+    }
+  }, [isMultiplayer, networkClient]);
+  
+  // 网络事件监听器 - 命中事件
+  useEffect(() => {
+    if (!networkClient || !isMultiplayer) return;
+    
+    const handlePlayerHit = (payload: any) => {
+      handleNetworkHit(payload);
+    };
+    
+    networkClient.on('player-hit', handlePlayerHit);
+    
+    return () => {
+      networkClient.off('player-hit', handlePlayerHit);
+    };
+  }, [networkClient, isMultiplayer, handleNetworkHit]);
+  
+  // 绘制远程玩家
+  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
+    if (!isMultiplayer) return;
+    
+    const now = Date.now();
+    const players = remotePlayersRef.current.filter(p => now - p.lastUpdate < 5000); // 只显示最近5秒内有更新的玩家
+    
+    players.forEach(player => {
+      const { x, y, health, maxHealth, team, isReady } = player;
+      
+      // 绘制玩家身体
+      ctx.fillStyle = team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)';
+      ctx.beginPath();
+      ctx.arc(x * scale, y * scale, 10 * scale * cameraScale, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 绘制玩家轮廓
+      ctx.strokeStyle = team === 'red' ? 'rgba(255, 50, 50, 0.9)' : 'rgba(50, 50, 255, 0.9)';
+      ctx.lineWidth = 2 * scale * cameraScale;
+      ctx.stroke();
+      
+      // 绘制血条
+      const healthPercent = health / maxHealth;
+      const barWidth = 20 * scale * cameraScale;
+      const barHeight = 3 * scale * cameraScale;
+      const barX = x * scale - barWidth / 2;
+      const barY = y * scale - 15 * scale * cameraScale;
+      
+      // 背景
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      
+      // 血量
+      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' : 
+                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' : 
+                     'rgba(255, 100, 100, 0.9)';
+      ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+      
+      // 绘制准备状态
+      if (isReady) {
+        ctx.fillStyle = 'rgba(100, 255, 100, 0.8)';
+        ctx.beginPath();
+        ctx.arc(x * scale, y * scale - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // 绘制玩家ID
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.font = `${10 * scale * cameraScale}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.fillText(player.playerId.substring(0, 8), x * scale, y * scale + 20 * scale * cameraScale);
+    });
+  }, [isMultiplayer]);
+  
+  // 绘制团队信息
+  const drawTeamInfo = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
+    if (!isMultiplayer || !gameRoomRef.current) return;
+    
+    const room = gameRoomRef.current;
+    const redPlayers = Object.values(room.players).filter((p: any) => p.team === 'red');
+    const bluePlayers = Object.values(room.players).filter((p: any) => p.team === 'blue');
+    
+    // 绘制团队信息面板
+    const panelWidth = 200 * scale * cameraScale;
+    const panelHeight = 100 * scale * cameraScale;
+    const panelX = 10 * scale * cameraScale;
+    const panelY = 10 * scale * cameraScale;
+    
+    // 背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+    
+    // 边框
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 2 * scale * cameraScale;
+    ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
+    
+    // 团队信息
+    ctx.fillStyle = 'rgba(255, 100, 100, 0.9)';
+    ctx.font = `${12 * scale * cameraScale}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`红队: ${redPlayers.length} 玩家`, panelX + 10 * scale * cameraScale, panelY + 20 * scale * cameraScale);
+    
+    ctx.fillStyle = 'rgba(100, 100, 255, 0.9)';
+    ctx.fillText(`蓝队: ${bluePlayers.length} 玩家`, panelX + 10 * scale * cameraScale, panelY + 40 * scale * cameraScale);
+    
+    // 房间状态
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fillText(`房间: ${room.name || '未命名'}`, panelX + 10 * scale * cameraScale, panelY + 60 * scale * cameraScale);
+    ctx.fillText(`状态: ${room.status}`, panelX + 10 * scale * cameraScale, panelY + 80 * scale * cameraScale);
+  }, [isMultiplayer]);
   const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
     const runScoreRef = useRef<number>(initialRunScore || 0);
+
+    // Round currency (1 score = 2 money)
+    const [roundMoney, setRoundMoney] = useState<number>(Math.floor((initialRunScore || 0) * 2));
+    const roundMoneyRef = useRef<number>(Math.floor((initialRunScore || 0) * 2));
+
+    // Weapon drops on the ground (manual pickup)
+    const weaponDropsRef = useRef<WeaponDrop[]>([]);
+
+        // Round and shop state
+        const [isRoundActive, setIsRoundActive] = useState<boolean>(false);
+        const isRoundActiveRef = useRef<boolean>(false);
+        const [showShop, setShowShop] = useState<boolean>(false);
+
+        const createWeaponFromDef = (weaponName: string): Weapon | null => {
+                const def = WEAPONS[weaponName];
+                if (!def) return null;
+                const scale = scaleRef.current;
+                const cameraScale = cameraScaleRef.current || 1;
+                const w: any = { ...def };
+                w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
+                w.bulletRadius = def.bulletRadius * scale / cameraScale;
+                w.ammoInMag = def.magSize;
+                w.reserveAmmo = def.reserveAmmo;
+                w.allowedFireModes = [...def.allowedFireModes];
+                w.currentFireMode = def.defaultFireMode;
+                w.shake = (ux: number, uy: number) => {};
+                return w as Weapon;
+        };
+
+        // Create a full Weapon instance applying attachments (attachments: { slotName: attachmentName })
+        const createWeaponWithAttachments = (weaponName: string, attachments: { [slot: string]: string }): Weapon | null => {
+            const def = WEAPONS[weaponName];
+            if (!def) return null;
+            const scale = scaleRef.current;
+            const cameraScale = cameraScaleRef.current || 1;
+            const w: any = { ...def };
+            w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
+            w.bulletRadius = def.bulletRadius * scale / cameraScale;
+            w.ammoInMag = def.magSize;
+            w.reserveAmmo = def.reserveAmmo;
+            w.allowedFireModes = [...def.allowedFireModes];
+            w.currentFireMode = def.defaultFireMode;
+            w.shake = (ux: number, uy: number) => {};
+
+            // Apply attachment modifiers if definitions exist
+            if (def.attachmentSlots && attachments) {
+                for (const slotName in attachments) {
+                    const attName = attachments[slotName];
+                    if (!attName) continue;
+                    const slotList = def.attachmentSlots[slotName];
+                    if (!slotList) continue;
+                    const att = slotList.find(a => a.name === attName);
+                    if (!att) continue;
+                    const mod = att.modifiers;
+                    if (mod.damage) w.damage = (w.damage || def.damage) * mod.damage;
+                    if (mod.soundRadius) w.soundRadius = (w.soundRadius || def.soundRadius) * mod.soundRadius;
+                    if (mod.fireRate) w.fireRate = (w.fireRate || def.fireRate) * mod.fireRate;
+                    if (mod.reloadTime) w.reloadTime = (w.reloadTime || def.reloadTime) * mod.reloadTime;
+                    if (mod.bulletRadius) w.bulletRadius = (w.bulletRadius || def.bulletRadius) + mod.bulletRadius * scale / cameraScale;
+                    if (mod.pellets) w.pellets = (w.pellets || def.pellets) + mod.pellets;
+                    if (mod.magSize) {
+                        w.magSize = Math.round((w.magSize || def.magSize) * mod.magSize);
+                        w.ammoInMag = w.magSize;
+                    }
+                    if (mod.spread) w.spread = (w.spread || def.spread) * mod.spread;
+                    if (mod.addFireModes) {
+                        mod.addFireModes.forEach((m: any) => { if (!w.allowedFireModes.includes(m)) w.allowedFireModes.push(m); });
+                    }
+                    if (mod.specialEffect) w.specialEffect = mod.specialEffect;
+                }
+            }
+            return w as Weapon;
+        };
+
+        // Shop state includes a 15s pre-round customization window
+        const [shopTimer, setShopTimer] = useState<number | null>(null);
+        const selectedAttachmentsRef = useRef<{ [weaponName: string]: { [slot: string]: string } }>({});
+    const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
+        const openShopForRound = () => {
+            setShowShop(true);
+            // Start a 15s timer to auto-close shop
+            setShopTimer(15);
+        };
+
+        const startRound = () => {
+            setIsRoundActive(true);
+            isRoundActiveRef.current = true;
+            setShowShop(false);
+            setShopTimer(null);
+        };
+
+        // Shop timer countdown effect
+        useEffect(() => {
+            if (shopTimer == null) return;
+            if (shopTimer <= 0) {
+                startRound();
+                return;
+            }
+            const id = setInterval(() => {
+                setShopTimer(t => (t !== null ? t - 1 : null));
+            }, 1000);
+            return () => clearInterval(id);
+        }, [shopTimer]);
+
+        const buyWeapon = (weaponName: string, targetSlot: 'primary'|'secondary'|'melee'|'special'|'auto' = 'auto') => {
+            const def = WEAPONS[weaponName];
+            if (!def) return;
+            const cost = (def as any).cost || 0;
+            if (roundMoneyRef.current < cost) return; // not enough
+            const player = playerRef.current;
+            // Deduct money
+            const nextMoney = roundMoneyRef.current - cost;
+            roundMoneyRef.current = nextMoney;
+            setRoundMoney(nextMoney);
+            // Decide which slot to put the purchased weapon into based on weapon.category or explicit targetSlot
+            let slotIndex = player.currentWeaponIndex;
+            if (targetSlot !== 'auto') {
+                if (targetSlot === 'primary') slotIndex = 0;
+                else if (targetSlot === 'secondary') slotIndex = 1;
+                else if (targetSlot === 'melee') slotIndex = 2;
+                else if (targetSlot === 'special') slotIndex = 3;
+            } else {
+                switch (def.category) {
+                    case 'primary': slotIndex = 0; break;
+                    case 'secondary': slotIndex = 1; break;
+                    case 'melee': slotIndex = 2; break;
+                    case 'special': slotIndex = 3; break;
+                    default: slotIndex = player.currentWeaponIndex; break;
+                }
+            }
+            // Create weapon instance with attachments applied if present
+            const attachments = selectedAttachmentsRef.current[weaponName] || {};
+            const inst = createWeaponWithAttachments(weaponName, attachments) || createWeaponFromDef(weaponName);
+            if (inst) {
+                player.weapons[slotIndex] = inst;
+            }
+            // Broadcast buy
+            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName, cost, attachments }); } catch {}
+        };
 
   // Helper to increment score and notify parent (applies difficulty multiplier)
   const addScore = (amount: number) => {
@@ -529,7 +983,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       }
   };
   const previousWeaponIndexRef = useRef<number>(0);
-  const remotePlayersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const playerMoveSoundTimerRef = useRef<number>(0);
   const keysPressedRef = useRef<Set<string>>(new Set());
   const wallsRef = useRef<Array<Wall>>([]);
@@ -782,18 +1235,21 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     
     const currentWeapon = player.weapons[player.currentWeaponIndex];
     if (currentWeapon.category === 'melee') return; // Melee has its own function
-    if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND' && !isMultiplayer) {
+    // If no ammo, block firing (except in TRAINING GROUND)
+    if (currentWeapon.ammoInMag === 0 && level.name !== 'TRAINING GROUND') {
         return;
     }
 
-    if (currentWeapon.magSize !== -1 && level.name !== 'TRAINING GROUND' && !isMultiplayer) {
+    // Consume ammo when appropriate (magSize === -1 means infinite)
+    if (currentWeapon.magSize !== -1 && level.name !== 'TRAINING GROUND') {
         currentWeapon.ammoInMag--;
+        if (currentWeapon.ammoInMag < 0) currentWeapon.ammoInMag = 0;
     }
 
     const baseAngle = playerDirectionRef.current;
     
     if (isMultiplayer && networkClient) {
-        networkClient.send('fire-weapon', {
+        (networkClient as any).send('fire-weapon', {
             ownerId: networkClient.ownId,
             weaponName: currentWeapon.name,
             baseAngle: baseAngle,
@@ -860,9 +1316,16 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                                 if (hitEnemy.health <= 0 && healthBefore > 0) {
                                     hitEffectsRef.current.push({ x: hitEnemy.x, y: hitEnemy.y, radius: 0, maxRadius: 40 * scaleRef.current, lifetime: 0.33, maxLifetime: 0.33 });
                                     try { addScore(SCORE_PER_KILL); } catch {}
+                                    try {
+                                        const dropCandidates = Object.keys(WEAPONS);
+                                        const pick = dropCandidates[Math.floor(Math.random() * dropCandidates.length)];
+                                        const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: pick, x: hitEnemy.x, y: hitEnemy.y };
+                                        weaponDropsRef.current.push(drop);
+                                        try { networkClient && (networkClient as any).send('drop-weapon', { id: drop.id, playerId: networkClient.ownId, weaponName: pick, x: drop.x, y: drop.y }); } catch {}
+                                    } catch (e) {}
                                 }
                                 impact(hitEnemy.x, hitEnemy.y);
-                        } else {
+                            } else {
                 lightsRef.current.push({ x: hitX, y: hitY, ttl: 0.13, life: 0.13, power: 1.35, type: 'impact' });
                 impact(hitX, hitY);
                 soundWavesRef.current.push({ x: hitX, y: hitY, radius: 0, maxRadius: 200 * scaleRef.current, lifetime: 0.3, maxLifetime: 0.3, type: 'impact' });
@@ -871,6 +1334,31 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                     const sparkAngle = Math.atan2(-finalUy, -finalUx) + (Math.random() - 0.5) * 1.1;
                     const speed = (270 + Math.random() * 360); // pixels/sec
                     sparksRef.current.push({ x: hitX, y: hitY, vx: Math.cos(sparkAngle) * speed, vy: Math.sin(sparkAngle) * speed, ttl: 0.28, life: 0.28 });
+                }
+            }
+            // Check remote players in multiplayer for hitscan weapons (send player-hit instead of applying local damage)
+            if (ownerType === 'player' && isMultiplayer && networkClient) {
+                for (const rpRaw of Array.from(remotePlayersRef.current.values())) {
+                    const rp = rpRaw as RemotePlayer;
+                    try {
+                        const dx = rp.x - ownerX, dy = rp.y - ownerY;
+                        const t = dx * finalUx + dy * finalUy;
+                        if (t > 0 && t < nearestEnemyT) {
+                            const ex = ownerX + t * finalUx;
+                            const ey = ownerY + t * finalUy;
+                            const distToRay = Math.hypot(ex - rp.x, ey - rp.y);
+                            if (distToRay < playerRef.current.radius) {
+                                // Hit remote player: request server/remote to apply damage
+                                try { 
+                                    console.debug('[Net] send player-hit', { targetId: rp.id, damage: weapon.damage, attackerId: networkClient.ownId });
+                                    (networkClient as any).send('player-hit', { targetId: rp.id, damage: weapon.damage, attackerId: networkClient.ownId, impact: { x: ex, y: ey }, sourceDir: { x: finalUx, y: finalUy } });
+                                } catch (e) {}
+                                tracersRef.current.push({ x1: muzzleX, y1: muzzleY, x2: ex, y2: ey, ttl: 0.07, life: 0.07 });
+                                impact(ex, ey);
+                                break;
+                            }
+                        }
+                    } catch (e) {}
                 }
             }
         }
@@ -977,6 +1465,13 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                     if (enemy.health <= 0 && healthBefore > 0) {
                         hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                         try { addScore(SCORE_PER_KILL); } catch {}
+                        try {
+                            const pickList = Object.keys(WEAPONS);
+                            const pick = pickList[Math.floor(Math.random() * pickList.length)];
+                            const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: pick, x: enemy.x, y: enemy.y };
+                            weaponDropsRef.current.push(drop);
+                            try { networkClient && networkClient.send('drop-weapon', { id: drop.id, playerId: networkClient.ownId, weaponName: pick, x: drop.x, y: drop.y }); } catch {}
+                        } catch (e) {}
                     }
                 }
             }
@@ -1463,14 +1958,30 @@ const startHealing = () => {
           return weapon;
       }
       
-      player.weapons = [
-          createWeaponInstance(loadout.primary, loadout.primaryAttachments),
-          createWeaponInstance(loadout.secondary, loadout.secondaryAttachments),
-          createWeaponInstance(loadout.melee, {}),
-          createWeaponInstance(loadout.special, loadout.specialAttachments)
-      ];
-
-      player.currentWeaponIndex = 0;
+      // For custom rooms/pvp prototype: start player with only a basic pistol (no attachments) in secondary slot
+      // Use a simplified pistol-only loadout for multiplayer prototype, but keep full loadout for singleplayer
+      try {
+          if (isMultiplayer) {
+              const empty = { name: '__EMPTY__' } as unknown as Weapon;
+              const basicPistol = createWeaponInstance('Pistol', {});
+              player.weapons = [ empty, basicPistol, createWeaponInstance(loadout.melee, {}), createWeaponInstance(loadout.special, loadout.specialAttachments) ];
+              // Default to secondary (index 1) so player holds the pistol in multiplayer
+              player.currentWeaponIndex = 1;
+          } else {
+              player.weapons = [
+                  createWeaponInstance(loadout.primary, loadout.primaryAttachments),
+                  createWeaponInstance(loadout.secondary, loadout.secondaryAttachments),
+                  createWeaponInstance(loadout.melee, {}),
+                  createWeaponInstance(loadout.special, loadout.specialAttachments)
+              ];
+              // Default to primary in singleplayer
+              player.currentWeaponIndex = 0;
+          }
+      } catch (e) {
+          // fallback safe state
+          try { player.weapons = [ createWeaponInstance(loadout.primary, loadout.primaryAttachments) ]; } catch {}
+          player.currentWeaponIndex = 0;
+      }
       previousWeaponIndexRef.current = 0;
       player.shootCooldown = 0;
       player.isReloading = false;
@@ -1493,7 +2004,7 @@ const startHealing = () => {
       initialDummyEnemiesRef.current = [];
       respawningDummiesRef.current = [];
       stuckKunaisRef.current = [];
-      remotePlayersRef.current.clear();
+      remotePlayersRef.current = [];
       const parent = canvas.parentElement;
       if (parent) {
           canvas.width = parent.clientWidth;
@@ -1933,6 +2444,9 @@ const startHealing = () => {
                 id: nextThrowableId++, type: cookState.type,
                 x: player.x, y: player.y, vx: 0, vy: 0, timer: 0, radius: 0,
             };
+            // Detonate once and consume one throwable. Guard against double-detonation by clearing cook state first.
+            cookingThrowableRef.current = null;
+            isAimingThrowableRef.current = false;
             detonate(selfDetonation);
             if ((player.throwables[cookState.type] ?? 0) > 0 && level.name !== 'TRAINING GROUND') { player.throwables[cookState.type]! -= 1; }
             isAimingThrowableRef.current = false;
@@ -2445,6 +2959,7 @@ doorsRef.current.forEach(door => {
                 let hitUnitType: 'enemy' | 'player' | null = null;
                 
                 if (bullet.owner === 'player') {
+                    // Hit enemies
                     for (const enemy of enemiesRef.current) {
                         if (enemy.health <= 0) continue;
                         const enemyHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, enemy.x, enemy.y, bullet.radius + enemy.radius);
@@ -2454,7 +2969,22 @@ doorsRef.current.forEach(door => {
                             hitUnitType = 'enemy';
                         }
                     }
+                    // Hit remote players in multiplayer
+                    if (isMultiplayer) {
+                        remotePlayersRef.current.forEach(rp => {
+                            try {
+                                // Remote players do not have a local Player object; approximate with rp.x/rp.y and assume radius similar to player
+                                const playerHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, rp.x, rp.y, bullet.radius + (player.radius || 10));
+                                if (playerHit && playerHit.t < closestT) {
+                                    closestT = playerHit.t;
+                                    hitUnit = rp as any as Player; // treat as generic unit for handling (we will branch on hitUnitType)
+                                    hitUnitType = 'player';
+                                }
+                            } catch (e) {}
+                        });
+                    }
                 } else { 
+                    // bullets from enemies should still be able to hit the local player
                     if (!isEnded) {
                         const playerHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, player.x, player.y, bullet.radius + player.radius);
                         if (playerHit && playerHit.t < closestT) {
@@ -2465,7 +2995,7 @@ doorsRef.current.forEach(door => {
                     }
                 }
                 
-                if (closestT < 1.0) {
+                    if (closestT < 1.0) {
                     removed = true;
                     const impactX = bullet.x + (nextX - bullet.x) * closestT;
                     const impactY = bullet.y + (nextY - bullet.y) * closestT;
@@ -2483,9 +3013,30 @@ doorsRef.current.forEach(door => {
                                 if (healthBefore > 0) {
                                     hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                                     try { addScore(SCORE_PER_KILL); } catch {}
+                                    try {
+                                        const pickList = Object.keys(WEAPONS);
+                                        const pick = pickList[Math.floor(Math.random() * pickList.length)];
+                                        const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: pick, x: enemy.x, y: enemy.y };
+                                        weaponDropsRef.current.push(drop);
+                                        try { networkClient && (networkClient as any).send('drop-weapon', { id: drop.id, playerId: networkClient.ownId, weaponName: pick, x: drop.x, y: drop.y }); } catch {}
+                                    } catch (e) {}
                                 }
                             } else {
-                                applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                                // If hitUnit is a remote player object (approx), request remote damage via network instead
+                                try {
+                                    if (hitUnit && (hitUnit as any).id && networkClient) {
+                                        const targetId = (hitUnit as any).id as string;
+                                        // Send player-hit for authoritative application on the target client
+                                        try { 
+                                            console.debug('[Net] send player-hit', { targetId, damage: bullet.damage, attackerId: networkClient.ownId });
+                                            (networkClient as any).send('player-hit', { targetId, damage: bullet.damage, attackerId: networkClient.ownId, impact: { x: impactX, y: impactY }, sourceDir: { x: bullet.dx, y: bullet.dy } });
+                                        } catch (e) {}
+                                    } else {
+                                        applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                                    }
+                                } catch (e) {
+                                    applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                                }
                             }
                         }
                     } else { // Standard projectile logic
@@ -2503,18 +3054,37 @@ doorsRef.current.forEach(door => {
                                 if (enemy.health <= 0 && healthBefore > 0) {
                                     hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
                                     try { addScore(SCORE_PER_KILL); } catch {}
+                                    try {
+                                        const pickList = Object.keys(WEAPONS);
+                                        const pick = pickList[Math.floor(Math.random() * pickList.length)];
+                                        const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: pick, x: enemy.x, y: enemy.y };
+                                        weaponDropsRef.current.push(drop);
+                                        try { networkClient && (networkClient as any).send('drop-weapon', { playerId: networkClient.ownId, weaponName: pick, x: drop.x, y: drop.y }); } catch {}
+                                    } catch (e) {}
                                 }
                                 impact(impactX, impactY);
                                 soundWavesRef.current.push({ x: impactX, y: impactY, radius: 0, maxRadius: 50 * scale / cameraScale, lifetime: 0.2, maxLifetime: 0.2, type: 'impact' });
-                            } else { // Player hit
-                                const healthBefore = player.health;
-                                applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
-                                if (bullet.isIncendiary) {
-                                    player.burnTimer = (player.burnTimer || 0) + 3.0;
-                                    player.burnDamage = 20;
-                                }
-                                if (player.health < healthBefore) {
-                                    shakerRef.current.addImpulse({ amp: 15 * scale, rotAmp: 0.03, freq: 40, decay: 25, dirx: bullet.dx, diry: bullet.dy });
+                            } else { // Player hit (could be local or remote)
+                                // If this hit corresponds to a remote player object (has an id) and we're in multiplayer,
+                                // request the network/server to apply damage to that target. Only apply locally if the
+                                // target is this client (ownId) or if no network is available.
+                                const maybeId = (hitUnit as any).id as string | undefined;
+                                const isRemotePlayer = !!maybeId && isMultiplayer && networkClient && maybeId !== (networkClient && networkClient.ownId);
+                                if (isRemotePlayer) {
+                                    try {
+                                        console.debug('[Net] send player-hit (proj)', { targetId: maybeId, damage: bullet.damage, attackerId: networkClient.ownId });
+                                        (networkClient as any) && (networkClient as any).send('player-hit', { targetId: maybeId, damage: bullet.damage, attackerId: networkClient.ownId, impact: { x: impactX, y: impactY }, sourceDir: { x: bullet.dx, y: bullet.dy } });
+                                    } catch (e) {}
+                                } else {
+                                    const healthBefore = player.health;
+                                    applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
+                                    if (bullet.isIncendiary) {
+                                        player.burnTimer = (player.burnTimer || 0) + 3.0;
+                                        player.burnDamage = 20;
+                                    }
+                                    if (player.health < healthBefore) {
+                                        shakerRef.current.addImpulse({ amp: 15 * scale, rotAmp: 0.03, freq: 40, decay: 25, dirx: bullet.dx, diry: bullet.dy });
+                                    }
                                 }
                             }
                         } else { // Wall hit
@@ -2653,12 +3223,19 @@ doorsRef.current.forEach(door => {
 
             const healthBefore = enemy.health;
             enemy.health = 0; // Slash is an instant kill
-            if (healthBefore > 0) {
-              slashHitThisSwingRef.current.add(enemy);
-              hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-              shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
-                            try { addScore(SCORE_PER_KILL); } catch {}
-            }
+                            if (healthBefore > 0) {
+                            slashHitThisSwingRef.current.add(enemy);
+                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                            shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+                                                        try { addScore(SCORE_PER_KILL); } catch {}
+                                                        try {
+                                                                const pickList = Object.keys(WEAPONS);
+                                                                const pick = pickList[Math.floor(Math.random() * pickList.length)];
+                                                                const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: pick, x: enemy.x, y: enemy.y };
+                                                                weaponDropsRef.current.push(drop);
+                                                                try { networkClient && (networkClient as any).send('drop-weapon', { playerId: networkClient.ownId, weaponName: pick, x: drop.x, y: drop.y }); } catch {}
+                                                        } catch (e) {}
+                        }
         }
 
         if (castDist < slash.range - 0.5){
@@ -3474,6 +4051,12 @@ doorsRef.current.forEach(door => {
               });
           }
         }
+
+        // Draw multiplayer elements
+        if (isMultiplayer) {
+            drawRemotePlayers(context, scale, cameraScaleRef.current || 1);
+            drawTeamInfo(context, scale, cameraScaleRef.current || 1);
+        }
       }
 
       // Render Start
@@ -3916,7 +4499,7 @@ doorsRef.current.forEach(door => {
       // Show enemy count range hint at start of mission (non-specific, do not show exact number)
       if (enemyRangeDisplayTimerRef.current > 0) {
           enemyRangeDisplayTimerRef.current -= dt;
-          const rangeInfo = level.enemyCountRange ? `${level.enemyCountRange.min} - ${level.enemyCountRange.max}` : (level.enemyCount ? `${level.enemyCount}` : `${level.enemies.length}`);
+          const rangeInfo = (level as any).enemyCountRange ? `${(level as any).enemyCountRange.min} - ${(level as any).enemyCountRange.max}` : (level.enemyCount ? `${level.enemyCount}` : `${level.enemies.length}`);
           context.save();
           context.font = `bold ${18 * scale}px mono`;
           context.fillStyle = 'rgba(255, 255, 255, 0.95)';
@@ -3994,20 +4577,21 @@ doorsRef.current.forEach(door => {
       const weaponTextY = canvas.height - barHeight - margin - (30 * scale);
       context.font = `bold ${18 * scale}px mono`; context.fillStyle = 'white'; context.textAlign = 'left';
 
-      if (currentWeapon.category === 'melee') {
-        const weaponKey = '[3]';
-        const isReady = player.shootCooldown <= 0;
-        context.fillText(`${currentWeapon.name.toUpperCase()} ${weaponKey}`, margin, weaponTextY - (20 * scale));
-        context.fillStyle = isReady ? 'white' : '#999999';
-        context.fillText(isReady ? `READY` : `COOLDOWN: ${(player.shootCooldown).toFixed(1)}s`, margin, weaponTextY);
-      } else {
+            if (currentWeapon && currentWeapon.category === 'melee') {
+                const weaponKey = '[3]';
+                const isReady = player.shootCooldown <= 0;
+                const wname = currentWeapon.name ? String(currentWeapon.name).toUpperCase() : 'NO WEAPON';
+                context.fillText(`${wname} ${weaponKey}`, margin, weaponTextY - (20 * scale));
+                context.fillStyle = isReady ? 'white' : '#999999';
+                context.fillText(isReady ? `READY` : `COOLDOWN: ${(player.shootCooldown).toFixed(1)}s`, margin, weaponTextY);
+            } else {
         let weaponKey = '';
         if (player.currentWeaponIndex === 0) weaponKey = '[1]';
         else if (player.currentWeaponIndex === 1) weaponKey = '[2]';
         else if (player.currentWeaponIndex === 3) weaponKey = '[4]';
-
-        const fireModeText = `[${currentWeapon.currentFireMode.toUpperCase()}]`;
-        context.fillText(`${currentWeapon.name.toUpperCase()} ${weaponKey} ${fireModeText}`, margin, weaponTextY - (20 * scale));
+                const fireModeText = currentWeapon && currentWeapon.currentFireMode ? `[${String(currentWeapon.currentFireMode).toUpperCase()}]` : '';
+                const wname = currentWeapon && currentWeapon.name ? String(currentWeapon.name).toUpperCase() : 'NO WEAPON';
+                context.fillText(`${wname} ${weaponKey} ${fireModeText}`, margin, weaponTextY - (20 * scale));
         context.font = `${14 * scale}px mono`;
         context.fillStyle = '#a3a3a3';
         context.fillText(`[G] Mode / [Q] Melee / [4] Special`, margin, weaponTextY - (5 * scale));
@@ -4460,9 +5044,17 @@ doorsRef.current.forEach(door => {
     if (!networkClient || !isMultiplayer) return;
 
     const handleConnect = (payload: { id: string }) => console.log('Connected to mock server with ID:', payload.id);
-    const handlePlayerJoined = (payload: PlayerState) => remotePlayersRef.current.set(payload.id, { ...payload, targetX: payload.x, targetY: payload.y, lastUpdateTime: performance.now(), isShooting: false });
-    const handlePlayerLeft = (payload: { id: string }) => remotePlayersRef.current.delete(payload.id);
+    const handlePlayerJoined = (payload: PlayerState) => {
+        // Ignore our own player as a "remote" entry to avoid echo-caused duplicates
+        try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) {}
+        remotePlayersRef.current.set(payload.id, { ...payload, targetX: payload.x, targetY: payload.y, lastUpdateTime: performance.now(), isShooting: false });
+    };
+    const handlePlayerLeft = (payload: { id: string }) => {
+        try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) {}
+        remotePlayersRef.current.delete(payload.id);
+    };
     const handlePlayerUpdate = (payload: PlayerState & { isShooting: boolean }) => {
+        try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) {}
         const p = remotePlayersRef.current.get(payload.id);
         if (p) {
             p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
@@ -4471,6 +5063,8 @@ doorsRef.current.forEach(door => {
         }
     };
     const handleFireWeapon = (payload: FireEventPayload) => {
+        // Ignore fire events that originated from ourselves (they may be echoed back by the server)
+        try { if (networkClient && payload.ownerId === networkClient.ownId) return; } catch (e) {}
         const p = remotePlayersRef.current.get(payload.ownerId);
         const weaponDef = WEAPONS[payload.weaponName];
         if (p && weaponDef) {
@@ -4496,18 +5090,87 @@ doorsRef.current.forEach(door => {
             createFireEffects(p.x, p.y, playerRef.current.radius, payload.baseAngle, remoteWeapon, 'enemy', dynamicSegments);
         }
     };
+    const handleDropWeapon = (payload: { id?: string; playerId: string; weaponName: string; x: number; y: number }) => {
+        try {
+            // Use provided id when available so clients share the same drop id
+            const id = payload.id || `drop_net_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+            // Avoid inserting duplicate drop ids
+            const exists = weaponDropsRef.current.find(d => d.id === id);
+            if (!exists) {
+                const drop: WeaponDrop = { id, weaponName: payload.weaponName, x: payload.x, y: payload.y };
+                weaponDropsRef.current.push(drop);
+            }
+        } catch (e) {}
+    };
+    const handlePickupWeapon = (payload: { playerId: string; weaponName: string; id?: string }) => {
+        try {
+            // If a drop id is provided, remove that drop so all clients stay in sync (first-come-first-serve)
+            if (payload.id) {
+                const idx = weaponDropsRef.current.findIndex(d => d.id === payload.id);
+                if (idx >= 0) {
+                    weaponDropsRef.current.splice(idx, 1);
+                }
+            }
+            console.log('[Network] pickup-weapon', payload);
+        } catch (e) {}
+    };
+    const handleStartRound = (payload: { roundId: string }) => {
+        // Only open shop on THE_FACTORY
+        if (level.name === 'THE FACTORY') {
+            // Convert current runScore to money for the round (already done in addScore), show shop
+            openShopForRound();
+        }
+    };
+    const handleBuyWeapon = (payload: { playerId: string; weaponName: string; cost: number; attachments?: any }) => {
+        // Could display notifications; if payload.playerId === ownId we already processed purchase locally
+        console.log('[Network] buy-weapon', payload);
+        try {
+            const { playerId, weaponName, attachments } = payload;
+            if (playerId !== (networkClient && networkClient.ownId)) {
+                // Find remote player and apply purchased weapon instance
+                const rp = remotePlayersRef.current.get(playerId);
+                const created = createWeaponWithAttachments(weaponName, attachments || {});
+                if (rp) {
+                    rp['weapons'] = rp['weapons'] || [];
+                    rp['weapons'].push(created || { name: weaponName });
+                }
+                // show small on-screen message
+                setPurchaseMessage(`${playerId} bought ${weaponName}`);
+                setTimeout(() => setPurchaseMessage(null), 2000);
+            }
+        } catch (e) { console.error(e); }
+    };
 
     networkClient.on('connect', handleConnect);
     networkClient.on('player-joined', handlePlayerJoined);
     networkClient.on('player-left', handlePlayerLeft);
     networkClient.on('player-update', handlePlayerUpdate);
     networkClient.on('fire-weapon', handleFireWeapon);
+    networkClient.on('drop-weapon', handleDropWeapon as any);
+    networkClient.on('pickup-weapon', handlePickupWeapon as any);
+    networkClient.on('start-round', handleStartRound as any);
+    networkClient.on('buy-weapon', handleBuyWeapon as any);
+    const handlePlayerHit = (payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } }) => {
+        try {
+            if (!networkClient) return;
+            const own = networkClient.ownId;
+            console.debug('[Net] recv player-hit', { payload, own });
+            if (!own) return;
+            if (payload.targetId === own) {
+                // Apply damage locally
+                applyDamageToPlayer(payload.damage, payload.sourceDir || { x: 0, y: 0 }, payload.impact || { x: playerRef.current.x, y: playerRef.current.y });
+            } else {
+                // Not for us; ignore (the remote client's UI will update its player state)
+            }
+        } catch (e) {}
+    };
+    networkClient.on('player-hit' as any, handlePlayerHit as any);
     networkClient.connect({ x: playerRef.current.x, y: playerRef.current.y, skinColor: agentSkinColor });
     const intervalId = setInterval(() => {
-        if (networkClient.connected) {
+            if (networkClient.connected) {
             const player = playerRef.current;
             const isShooting = isShootingRef.current || touchStateRef.current.fire.id !== null || touchStateRef.current.fixedFire.id !== null;
-            networkClient.send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
+            (networkClient as any).send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
         }
     }, 100);
 
@@ -4517,6 +5180,10 @@ doorsRef.current.forEach(door => {
         networkClient.off('player-left', handlePlayerLeft);
         networkClient.off('player-update', handlePlayerUpdate);
         networkClient.off('fire-weapon', handleFireWeapon);
+        networkClient.off('drop-weapon', handleDropWeapon);
+        networkClient.off('pickup-weapon', handlePickupWeapon);
+        networkClient.off('start-round', handleStartRound);
+        networkClient.off('buy-weapon', handleBuyWeapon);
         clearInterval(intervalId);
     };
   }, [networkClient, isMultiplayer, agentSkinColor]);
@@ -4561,16 +5228,79 @@ doorsRef.current.forEach(door => {
                 lastEKeyPressTimeRef.current = now;
                 lastInteractedDoorIdRef.current = interactionHintDoorIdRef.current;
             }
+            // Manual pickup: check nearby weapon drops
+            try {
+                const px = player.x, py = player.y;
+                const drops = weaponDropsRef.current;
+                let pickedIndex = -1;
+                for (let i = 0; i < drops.length; i++) {
+                    const d = drops[i];
+                    const dist = Math.hypot(d.x - px, d.y - py);
+                    if (dist < 40) { pickedIndex = i; break; }
+                }
+                if (pickedIndex >= 0) {
+                    const drop = drops[pickedIndex];
+                    // Determine the proper slot for this weapon based on its category
+                    const def = WEAPONS[drop.weaponName];
+                    let targetSlotIndex = player.currentWeaponIndex;
+                    if (def) {
+                        switch (def.category) {
+                            case 'primary': targetSlotIndex = 0; break;
+                            case 'secondary': targetSlotIndex = 1; break;
+                            case 'melee': targetSlotIndex = 2; break;
+                            case 'special': targetSlotIndex = 3; break;
+                            default: break;
+                        }
+                    }
+                    // First-come-first-serve: remove the drop locally and broadcast pickup with id
+                    try {
+                        // Remove local drop immediately
+                        drops.splice(pickedIndex, 1);
+                        try { weaponDropsRef.current = drops; } catch {}
+                        // Create a weapon instance applying any selected attachments
+                        let newInstance: Weapon | null = null;
+                        try {
+                            newInstance = createWeaponWithAttachments(drop.weaponName, selectedAttachmentsRef.current[drop.weaponName] || {});
+                        } catch (e) {
+                            // fallback: make a simple copy
+                            const d = WEAPONS[drop.weaponName];
+                            if (d) {
+                                const temp: any = { ...d };
+                                temp.ammoInMag = d.magSize;
+                                temp.reserveAmmo = d.reserveAmmo;
+                                temp.allowedFireModes = [...d.allowedFireModes];
+                                temp.currentFireMode = d.defaultFireMode;
+                                temp.shake = (ux: number, uy: number) => {};
+                                newInstance = temp as Weapon;
+                            }
+                        }
+                        if (newInstance) {
+                            player.weapons[targetSlotIndex] = newInstance;
+                        }
+                        // Broadcast pickup with id for cross-client removal
+                        try { networkClient && (networkClient as any).send('pickup-weapon', { playerId: networkClient.ownId, weaponName: drop.weaponName, id: drop.id }); } catch {}
+                    } catch (e) {}
+                }
+            } catch (e) {}
+            break;
+        case 'b':
+            // Open shop (local test) only on factory
+            if (level.name === 'THE FACTORY') {
+                openShopForRound();
+            }
             break;
         case '1': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 0; } break;
         case '2': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 1; } break;
         case '3': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 2; } break;
         case '4': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 3; } break;
         case 'f':
-             if (isAimingThrowableRef.current) break; // Prevent re-triggering while holding key
-             isAimingThrowableRef.current = true;
-             const type = player.throwableTypes[player.currentThrowableIndex];
-             if (type) cookingThrowableRef.current = { type, timer: THROWABLES[type].fuse, maxTimer: THROWABLES[type].fuse };
+           if (isAimingThrowableRef.current) break; // Prevent re-triggering while holding key
+               // Only allow starting cook if player actually has that throwable (or in TRAINING GROUND)
+               const type = player.throwableTypes[player.currentThrowableIndex];
+               if (type && ((player.throwables[type] ?? 0) > 0 || level.name === 'TRAINING GROUND')) {
+                  isAimingThrowableRef.current = true;
+                  cookingThrowableRef.current = { type, timer: THROWABLES[type].fuse, maxTimer: THROWABLES[type].fuse };
+               }
              break;
         case 'r':
              // Start charging Kunai on R key down as alternative to right mouse
@@ -4581,12 +5311,25 @@ doorsRef.current.forEach(door => {
              break;
         case 'q': 
             if (player.isReloading) break;
-            if (player.currentWeaponIndex === 2) { // If melee is out, switch back
-                player.currentWeaponIndex = previousWeaponIndexRef.current;
-            } else { // If gun is out, switch to melee
-                previousWeaponIndexRef.current = player.currentWeaponIndex;
-                player.currentWeaponIndex = 2;
-            }
+            try {
+                const curIdx = player.currentWeaponIndex;
+                const curWeapon = player.weapons[curIdx];
+                // sentinel empty marker
+                const isEmpty = curWeapon && (curWeapon.name === '__EMPTY__' || !curWeapon.name);
+                if (isEmpty) {
+                    // fallback to previous behavior: switch to melee or previous
+                    if (curIdx === 2) { player.currentWeaponIndex = previousWeaponIndexRef.current; }
+                    else { previousWeaponIndexRef.current = curIdx; player.currentWeaponIndex = 2; }
+                } else {
+                    // Drop current weapon: spawn drop at player position and mark slot empty
+                    const dropName = curWeapon.name;
+                    const drop: WeaponDrop = { id: `drop_${Date.now()}_${Math.floor(Math.random()*10000)}`, weaponName: dropName, x: player.x, y: player.y };
+                    weaponDropsRef.current.push(drop);
+                    try { networkClient && (networkClient as any).send('drop-weapon', { id: drop.id, playerId: networkClient.ownId, weaponName: dropName, x: drop.x, y: drop.y }); } catch {}
+                    // Replace slot with sentinel empty weapon
+                    try { player.weapons[curIdx] = { name: '__EMPTY__' } as unknown as Weapon; } catch {}
+                }
+            } catch (e) {}
             break;
         case 'g': switchFireMode(); break;
         case 't': switchThrowable(); break;
@@ -4971,6 +5714,73 @@ doorsRef.current.forEach(door => {
                         </div>
                     )}
                  </div>
+            </div>
+        )}
+        {showShop && level.name === 'THE FACTORY' && (
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+                <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-3xl shadow-lg text-white">
+                    <h2 className="text-3xl font-bold text-teal-300 mb-4">ROUND SHOP</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <p className="text-sm text-gray-300">Round Money: <span className="font-mono text-teal-300">{roundMoney}</span></p>
+                        <p className="text-sm text-gray-300">Shop timer: <span className="font-mono text-teal-300">{shopTimer ?? 0}s</span></p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto">
+                        {Object.keys(WEAPONS).map((wName) => {
+                            const def = WEAPONS[wName];
+                            const cost = (def as any).cost || 0;
+                            // Only show weapons that are not training-only and that map to a valid slot
+                            return (
+                                <div key={wName} className="p-3 bg-gray-800 rounded-md border border-gray-700">
+                                    <div className="font-bold text-lg">{def.name} <span className="text-sm text-gray-400 ml-2">({def.category})</span></div>
+                                    <div className="text-sm text-gray-400">{def.description}</div>
+                                    {/* Attachment selectors */}
+                                    {def.attachmentSlots && Object.keys(def.attachmentSlots).length > 0 && (
+                                        <div className="mt-2">
+                                            {Object.keys(def.attachmentSlots).map(slotName => (
+                                                <div key={slotName} className="text-sm text-gray-300 mt-1">
+                                                    <label className="mr-2">{slotName}:</label>
+                                                    <select className="bg-gray-700 text-white p-1 rounded" value={(selectedAttachmentsRef.current[wName] && selectedAttachmentsRef.current[wName][slotName]) || ''} onChange={(e) => {
+                                                        const cur = selectedAttachmentsRef.current[wName] || {};
+                                                        const next = { ...cur, [slotName]: e.target.value };
+                                                        selectedAttachmentsRef.current = { ...selectedAttachmentsRef.current, [wName]: next };
+                                                        // force update UI by toggling a state
+                                                        setRoundMoney(r => r);
+                                                    }}>
+                                                        <option value="">--</option>
+                                                        {def.attachmentSlots[slotName].map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
+                                                    </select>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="mt-2 flex items-center justify-between">
+                                        <div className="text-teal-300 font-mono">{cost}</div>
+                                        <button onClick={() => {
+                                            const attachments = selectedAttachmentsRef.current[wName] || {};
+                                            // Attempt purchase: check funds
+                                            if (roundMoneyRef.current < cost) {
+                                                setPurchaseMessage('Not enough money');
+                                                setTimeout(() => setPurchaseMessage(null), 2000);
+                                                return;
+                                            }
+                                            // Apply purchase locally
+                                            buyWeapon(wName);
+                                            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName: wName, cost, attachments }); } catch {}
+                                            setPurchaseMessage('Purchased ' + def.name);
+                                            setTimeout(() => setPurchaseMessage(null), 2000);
+                                        }} className="px-3 py-1 bg-teal-600 text-black rounded-md font-bold">BUY</button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    <div className="mt-6 flex justify-end">
+                        <div className="flex items-center gap-4">
+                            {purchaseMessage && <div className="text-sm text-teal-300">{purchaseMessage}</div>}
+                            <button onClick={() => { setShowShop(false); startRound(); }} className="px-6 py-3 bg-teal-600 text-black font-bold rounded-md">START ROUND</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         )}
         {isCustomizingInGame && (

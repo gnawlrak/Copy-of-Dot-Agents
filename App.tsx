@@ -13,7 +13,7 @@ import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 import { OperatorClassID, OPERATORS } from './data/operators';
 import MultiplayerLobby from './components/MultiplayerLobby';
-import { MockNetworkClient } from './network';
+import { MockNetworkClient, setClearRoomsOnInit } from './network';
 import { SaveSystem, GameData } from './data/services/save-system';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
@@ -82,6 +82,27 @@ const App: React.FC = () => {
   // Scoring state
   const [totalScore, setTotalScore] = useState<number>(0);
   const [highScore, setHighScore] = useState<number>(0);
+
+  // 初始化时检查是否需要清空所有房间
+  useEffect(() => {
+    // 检查URL参数或localStorage设置
+    const urlParams = new URLSearchParams(window.location.search);
+    const clearRoomsParam = urlParams.get('clearRooms');
+    const clearRoomsStorage = localStorage.getItem('clear_rooms_on_init');
+    
+    // 如果URL参数或localStorage设置为true，则启用清空房间功能
+    const shouldClearRooms = clearRoomsParam === 'true' || clearRoomsStorage === 'true';
+    
+    if (shouldClearRooms) {
+      console.log('启用初始化时清空所有房间功能');
+      setClearRoomsOnInit(true);
+      
+      // 清除localStorage中的设置，避免下次启动时再次清空
+      if (clearRoomsStorage === 'true') {
+        localStorage.removeItem('clear_rooms_on_init');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!networkClientRef.current) {
@@ -182,6 +203,10 @@ const App: React.FC = () => {
   };
 
   const handleGoToMultiplayer = () => {
+    // Ensure network client is connected before entering multiplayer lobby
+    if (networkClientRef.current && !networkClientRef.current.connected) {
+      networkClientRef.current.connect();
+    }
     setGameState('multiplayer-lobby');
   };
 
@@ -196,11 +221,11 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = (level: LevelDefinition) => {
+  const handleJoinMultiplayerGame = useCallback((level: LevelDefinition) => {
     setSelectedLevel(level);
     setIsMultiplayer(true);
     setGameState('in-game');
-  };
+  }, []); // 这个函数不依赖任何外部状态，所以依赖数组为空是安全的
 
   const handleMissionEnd = () => {
     setSelectedLevel(null);
@@ -414,6 +439,7 @@ const App: React.FC = () => {
         return <MultiplayerLobby 
             onJoinGame={handleJoinMultiplayerGame}
             missions={MISSIONS}
+            networkClient={networkClientRef.current}
         />;
       case 'main-menu':
       default:

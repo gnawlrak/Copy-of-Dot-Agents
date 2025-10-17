@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>检查房间数据</title>
+</head>
+<body>
+    <h1>房间数据检查</h1>
+    <button onclick="checkRooms()">检查房间数据</button>
+    <div id="output"></div>
+
+    <script>
+        function checkRooms() {
+            try {
+                const roomsData = localStorage.getItem('dot_agents_mock_rooms_v2');
+                if (roomsData) {
+                    const rooms = JSON.parse(roomsData);
+                    document.getElementById('output').innerHTML = '<pre>' + JSON.stringify(rooms, null, 2) + '</pre>';
+                } else {
+                    document.getElementById('output').innerHTML = '<p>没有找到房间数据</p>';
+                }
+            } catch (e) {
+                document.getElementById('output').innerHTML = '<p>解析房间数据时出错: ' + e.message + '</p>';
+            }
+        }
+    </script>
+</body>
+</html>
