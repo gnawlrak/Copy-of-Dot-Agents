@@ -495,7 +495,6 @@ const weaponShakeFunctions: { [key: string]: (shaker: any, scale: number, ux: nu
       shaker.addImpulse({ amp: 2 * scale, rotAmp: 0.007, freq: 150, decay: 32, dirx: (Math.random()*2-1), diry: (Math.random()*2-1) });
   },
 };
-
 import 'react/jsx-runtime';
 import { JSX } from 'react';
 
@@ -646,7 +645,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       isReady: player.isReady,
       kills: player.kills,
       deaths: player.deaths,
-      // 由于 “assists” 不在类型 “PlayerState” 中，移除该属性
+      // 由于 "assists" 不在类型 "PlayerState" 中，移除该属性
       // assists: player.assists,
       score: player.score,
       // 由于 PlayerState 类型中不包含 timestamp 属性，暂时移除该属性
@@ -1073,7 +1072,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         interact: { id: null as number | null },
         switchWeapon: { id: null as number | null },
         melee: { id: null as number | null },
-        throwableSelect:{ id: null as number | null },
+        throwableSelect:{ id: null as number | null, startX: 0, startY: 0, currentX: 0, currentY: 0 }, // 新增投掷滑动起点和当前位置
         switchThrowable:{ id: null as number | null },
         fireModeSwitch: { id: null as number | null },
         heal:           { id: null as number | null },
@@ -1122,7 +1121,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const distanceSquared = (distanceX * distanceX) + (distanceY * distanceY);
     return distanceSquared < (circle.radius * circle.radius);
   };
-  
   // New robust wall collision solver
   const resolveCollisionWithWall = (circle: { x: number; y: number; radius: number }, rect: Wall): Point | null => {
       const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width));
@@ -1260,7 +1258,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     
     player.shootCooldown = currentWeapon.fireRate;
   };
-
   const createFireEffects = (ownerX: number, ownerY: number, ownerRadius: number, baseAngle: number, weapon: Weapon, ownerType: 'player' | 'enemy', dynamicSegments: Segment[]) => {
     const ux = Math.cos(baseAngle), uy = Math.sin(baseAngle);
     weapon.shake(ux, uy);
@@ -1524,7 +1521,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   };
 
 
-  const throwThrowable = () => {
+  const throwThrowable = (customLaunchPower?: number) => {
     const player = playerRef.current;
     if (player.isHealing) return;
     const cookState = cookingThrowableRef.current;
@@ -1545,7 +1542,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     if (hasUsedTouchRef.current) {
         // For touch controls, throw in the direction the player is facing with a fixed power.
         angle = playerDirectionRef.current;
-        launchPower = 12 * scale; 
+        launchPower = customLaunchPower !== undefined ? customLaunchPower : 12 * scale; 
     } else {
         // For KBM, use mouse position to determine direction and power.
         const mouse = mousePosRef.current;
@@ -1615,7 +1612,6 @@ const startHealing = () => {
     player.healTimer = HEAL_DURATION;
     player.medkits--;
 };
-
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -2079,7 +2075,6 @@ const startHealing = () => {
       }
       ctx.closePath();
     };
-
     const gameLoop = () => {
       if (isPausedRef.current) {
           animationFrameId = requestAnimationFrame(gameLoop);
@@ -2301,7 +2296,7 @@ const startHealing = () => {
                 } else { // is enemy
                     if (isObstructed) return;
                     const enemy = unit as Enemy;
-                    const angleToFlash = Math.atan2(n.y - enemy.y, n.x - enemy.y);
+                    const angleToFlash = Math.atan2(n.y - enemy.y, n.x - enemy.x);
                     
                     let angleDiff = Math.abs(enemy.direction - angleToFlash);
                     if (angleDiff > Math.PI) {
@@ -2398,7 +2393,6 @@ const startHealing = () => {
             }
         });
     };
-
       const raycast = (px: number, py: number, ang: number, maxDist: number) => {
           const dx = Math.cos(ang), dy = Math.sin(ang); let best = maxDist;
           for(const s of dynamicSegments){ const hit=intersectRaySegment(px,py,dx,dy,s); if(hit) best=Math.min(best, hit.t); }
@@ -3182,7 +3176,6 @@ doorsRef.current.forEach(door => {
           }
       }
       throwablesRef.current = activeThrowables;
-
       if (slashStateRef.current.cdLeft > 0) slashStateRef.current.cdLeft -= dt;
       const slash = slashStateRef.current;
       if (slash.active) {
@@ -3275,7 +3268,6 @@ doorsRef.current.forEach(door => {
         const lifePercentage = 1 - (effect.lifetime / effect.maxLifetime);
         effect.radius = effect.maxRadius * Math.sin(lifePercentage * (Math.PI / 2));
       });
-
       lightsRef.current.forEach(light => light.ttl -= dt);
       lightsRef.current = lightsRef.current.filter(light => light.ttl > 0);
       
@@ -3786,7 +3778,6 @@ doorsRef.current.forEach(door => {
             }
         }
       }
-      
       const viewPoly = getVisionPolygon(playerRef.current, dynamicSegments, {width: canvas.width, height: canvas.height});
 
       const renderSceneContent = () => {
@@ -4407,7 +4398,23 @@ doorsRef.current.forEach(door => {
     
             if (hasUsedTouchRef.current) {
                 angle = playerDirectionRef.current;
-                launchPower = 12 * scale;
+                // 触屏模式下，实时计算滑动距离对应的力度
+                const touchState = touchStateRef.current;
+                if (touchState.throwableSelect.id !== null) {
+                    // 正在滑动中，使用实时更新的当前位置
+                    const startX = touchState.throwableSelect.startX;
+                    const startY = touchState.throwableSelect.startY;
+                    const currentX = touchState.throwableSelect.currentX;
+                    const currentY = touchState.throwableSelect.currentY;
+                    const dist = Math.hypot(currentX - startX, currentY - startY);
+                    
+                    // 使用与processTouchEnd相同的映射公式
+                    const minPower = 3 * scale;
+                    const maxPower = 18 * scale;
+                    launchPower = Math.max(minPower, Math.min(maxPower, minPower + (dist / 5) * scale));
+                } else {
+                    launchPower = 12 * scale; // 默认力度
+                }
             } else {
                 const mouse = mousePosRef.current;
                 const dx = mouse.x - player.x, dy = mouse.y - player.y;
@@ -4631,7 +4638,6 @@ doorsRef.current.forEach(door => {
       context.fillText(`[T] Switch / [F] Hold`, canvas.width - margin, weaponTextY + (20 * scale));
     }
   }
-
       if (touchState.joystick.id === null) {
           const hintTextPos = { x: player.x, y: player.y - player.radius - (20 * scale) };
           // Display only one context hint at a time, with priority.
@@ -5342,7 +5348,17 @@ doorsRef.current.forEach(door => {
       keysPressedRef.current.delete(e.key.toLowerCase());
       if (e.key.toLowerCase() === 'e') stopDoorInteraction();
       if (e.key.toLowerCase() === 'f') {
-        if (isAimingThrowableRef.current && cookingThrowableRef.current) throwThrowable();
+        if (isAimingThrowableRef.current && cookingThrowableRef.current) {
+          // 键盘F键也使用鼠标距离计算力度
+          const player = playerRef.current;
+          const mouse = mousePosRef.current;
+          const dx = mouse.x - player.x;
+          const dy = mouse.y - player.y;
+          const dist = Math.hypot(dx, dy);
+          const scale = scaleRef.current;
+          const launchPower = Math.min(dist / (20 * scale), 15 * scale);
+          throwThrowable(launchPower);
+        }
         isAimingThrowableRef.current = false;
         cookingThrowableRef.current = null;
       }
@@ -5532,6 +5548,11 @@ doorsRef.current.forEach(door => {
                  const type = playerRef.current.throwableTypes[playerRef.current.currentThrowableIndex];
                  if (type) {
                      cookingThrowableRef.current = { type, timer: THROWABLES[type].fuse, maxTimer: THROWABLES[type].fuse };
+                     // 记录起点和当前位置
+                     touchState.throwableSelect.startX = x;
+                     touchState.throwableSelect.startY = y;
+                     touchState.throwableSelect.currentX = x;
+                     touchState.throwableSelect.currentY = y;
                  }
             }
         }
@@ -5557,6 +5578,21 @@ doorsRef.current.forEach(door => {
             } else {
                 touchState.fire.lastX = touch.clientX;
             }
+        } else if (touch.identifier === touchState.throwableSelect.id) {
+            // 更新投掷物滑动的当前位置
+            const canvas = canvasRef.current;
+            let rect = {left: 0, top: 0};
+            if (canvas) rect = canvas.getBoundingClientRect();
+            touchState.throwableSelect.currentX = touch.clientX - rect.left;
+            touchState.throwableSelect.currentY = touch.clientY - rect.top;
+            // 调试：输出触摸点
+            console.log('[throwable touchMove]', {
+                id: touch.identifier,
+                startX: touchState.throwableSelect.startX,
+                startY: touchState.throwableSelect.startY,
+                currentX: touchState.throwableSelect.currentX,
+                currentY: touchState.throwableSelect.currentY
+            });
         }
     };
 
@@ -5603,7 +5639,25 @@ doorsRef.current.forEach(door => {
                         player.currentWeaponIndex = 2;
                     }
                 } else if (controlKey === 'throwableSelect') { // This is the throw button
-                    if (isAimingThrowableRef.current && cookingThrowableRef.current) throwThrowable();
+                    if (isAimingThrowableRef.current && cookingThrowableRef.current) {
+                        // --- 滑动距离计算投掷力度 ---
+                        const canvas = canvasRef.current;
+                        let rect = {left: 0, top: 0};
+                        if (canvas) rect = canvas.getBoundingClientRect();
+                        const startX = touchState.throwableSelect.startX;
+                        const startY = touchState.throwableSelect.startY;
+                        const endX = touch.clientX - rect.left;
+                        const endY = touch.clientY - rect.top;
+                        const dist = Math.hypot(endX-startX, endY-startY);
+                        // 映射手势距离到力度，更敏感的映射：20px=最小力度，100px=最大力度
+                        const scale = scaleRef.current;
+                        const minPower = 3 * scale;  // 降低最小力度
+                        const maxPower = 18 * scale; // 提高最大力度
+                        const launchPower = Math.max(minPower, Math.min(maxPower, minPower + (dist / 5) * scale));
+                        // --- debug输出 ---
+                        console.log('[THROW TOUCH]', {startX, startY, endX, endY, dist, launchPower});
+                        throwThrowable(launchPower);
+                    }
                     isAimingThrowableRef.current = false;
                     cookingThrowableRef.current = null;
                 } else if (controlKey === 'switchThrowable') {
@@ -5797,5 +5851,4 @@ doorsRef.current.forEach(door => {
     </div>
   );
 };
-
 export default GameCanvas;
