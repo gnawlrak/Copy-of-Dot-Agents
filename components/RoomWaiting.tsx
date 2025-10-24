@@ -223,14 +223,18 @@ const RoomWaiting: React.FC<RoomWaitingProps> = ({ room: initialRoom, networkCli
                   <span className="text-xs text-gray-400">{player.role}</span>
                 </div>
                 <div className="flex gap-2">
-                  {isOwner && player.id !== networkClient.ownId && (
-                    <button 
-                      onClick={() => handleKickPlayer(player.id)}
-                      className="text-xs bg-red-600 px-2 py-1 rounded hover:bg-red-500"
-                    >
-                      踢出
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => handleKickPlayer(player.id)}
+                    className={`text-xs px-2 py-1 rounded transition-colors ${
+                      isOwner && player.id !== networkClient.ownId
+                        ? 'bg-red-600 hover:bg-red-500' 
+                        : 'bg-gray-600 cursor-not-allowed'
+                    }`}
+                    disabled={!isOwner || player.id === networkClient.ownId}
+                    title={!isOwner ? '只有房主可以踢出玩家' : player.id === networkClient.ownId ? '不能踢出自己' : '踢出玩家'}
+                  >
+                    踢出
+                  </button>
                   <button 
                     onClick={() => handleSwitchTeam(player.id)}
                     className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-500"
@@ -260,32 +264,39 @@ const RoomWaiting: React.FC<RoomWaitingProps> = ({ room: initialRoom, networkCli
               {playerReady ? '取消准备' : '准备'}
             </button>
 
-            {/* 房主控制 */}
-            {isOwner && (
-              <>
-                <div>
-                  <label className="block text-gray-300 mb-2">选择地图</label>
-                  <select
-                    value={selectedMap}
-                    onChange={(e) => setSelectedMap(e.target.value)}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
-                  >
-                    <option value="default">默认地图</option>
-                    <option value="factory">工厂</option>
-                    <option value="training">训练场</option>
-                    <option value="expansion">扩展地图</option>
-                  </select>
-                </div>
+            {/* 地图选择 - 所有玩家都能看到，但只有房主能操作 */}
+            <div>
+              <label className="block text-gray-300 mb-2">选择地图</label>
+              <select
+                value={selectedMap}
+                onChange={(e) => isOwner ? setSelectedMap(e.target.value) : null}
+                className={`w-full p-2 border border-gray-600 rounded text-white ${
+                  isOwner ? 'bg-gray-800' : 'bg-gray-900 cursor-not-allowed'
+                }`}
+                disabled={!isOwner}
+              >
+                <option value="default">默认地图</option>
+                <option value="factory">工厂</option>
+                <option value="training">训练场</option>
+                <option value="expansion">扩展地图</option>
+              </select>
+              {!isOwner && (
+                <div className="text-xs text-gray-500 mt-1">只有房主可以更改地图</div>
+              )}
+            </div>
 
-                <button
-                  onClick={handleStartGame}
-                  className="w-full py-3 bg-teal-600 text-white font-bold rounded hover:bg-teal-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={!isOwner || !Object.values(currentRoom.players).every((player) => player && player.isReady === true)}
-                >
-                  开始游戏
-                </button>
-              </>
-            )}
+            {/* 开始游戏按钮 - 所有玩家都能看到，但只有房主能操作 */}
+            <button
+              onClick={handleStartGame}
+              className={`w-full py-3 font-bold rounded transition-colors ${
+                isOwner 
+                  ? 'bg-teal-600 hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed' 
+                  : 'bg-gray-700 cursor-not-allowed'
+              }`}
+              disabled={!isOwner || !Object.values(currentRoom.players).every((player) => player && player.isReady === true)}
+            >
+              {isOwner ? '开始游戏' : '等待房主开始游戏'}
+            </button>
 
             {/* 离开房间按钮 */}
             <button
@@ -311,14 +322,18 @@ const RoomWaiting: React.FC<RoomWaitingProps> = ({ room: initialRoom, networkCli
                   <span className="text-xs text-gray-400">{player.role}</span>
                 </div>
                 <div className="flex gap-2">
-                  {isOwner && player.id !== networkClient.ownId && (
-                    <button 
-                      onClick={() => handleKickPlayer(player.id)}
-                      className="text-xs bg-red-600 px-2 py-1 rounded hover:bg-red-500"
-                    >
-                      踢出
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => handleKickPlayer(player.id)}
+                    className={`text-xs px-2 py-1 rounded transition-colors ${
+                      isOwner && player.id !== networkClient.ownId
+                        ? 'bg-red-600 hover:bg-red-500' 
+                        : 'bg-gray-600 cursor-not-allowed'
+                    }`}
+                    disabled={!isOwner || player.id === networkClient.ownId}
+                    title={!isOwner ? '只有房主可以踢出玩家' : player.id === networkClient.ownId ? '不能踢出自己' : '踢出玩家'}
+                  >
+                    踢出
+                  </button>
                   <button 
                     onClick={() => handleSwitchTeam(player.id)}
                     className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-500"
