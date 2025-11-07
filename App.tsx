@@ -13,6 +13,7 @@ import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 import { OperatorClassID, OPERATORS } from './data/operators';
 import MultiplayerLobby from './components/MultiplayerLobby';
+import Login from './components/Login';
 import { MockNetworkClient, setClearRoomsOnInit } from './network';
 import { SaveSystem, GameData } from './data/services/save-system';
 
@@ -69,6 +70,10 @@ const App: React.FC = () => {
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const networkClientRef = useRef<MockNetworkClient | null>(null);
   const runScoreRef = useRef<number>(0);
+  // Authentication state
+  const [user, setUser] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   
   // State for saved data
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -109,6 +114,45 @@ const App: React.FC = () => {
         networkClientRef.current = new MockNetworkClient();
     }
   }, []);
+
+  // Validate token on mount
+  useEffect(() => {
+    const check = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+      try {
+        const res = await fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (res.ok) {
+          const j = await res.json();
+          setUser(j.username);
+          setAuthToken(token);
+        } else {
+          localStorage.removeItem('auth_token');
+        }
+      } catch (e) {
+        console.warn('Failed to validate auth token', e);
+      }
+    };
+    check();
+  }, []);
+
+  const handleLoginSuccess = (token: string, username: string) => {
+    localStorage.setItem('auth_token', token);
+    setAuthToken(token);
+    setUser(username);
+    setShowLoginModal(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}` } });
+    } catch (e) {
+      // ignore
+    }
+    localStorage.removeItem('auth_token');
+    setAuthToken(null);
+    setUser(null);
+  };
   
   // Data Loading Effect
   useEffect(() => {
@@ -480,12 +524,26 @@ const App: React.FC = () => {
     </button>
   );
 
+  const AuthButton = () => (
+    <div className="absolute top-4 right-20 z-50 flex items-center gap-2">
+      {user ? (
+        <div className="flex items-center gap-2 bg-gray-800/60 p-2 rounded border border-gray-700">
+          <span className="text-sm text-gray-300">{user}</span>
+          <button onClick={handleLogout} className="px-2 py-1 bg-red-600 text-white rounded text-sm">登出</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowLoginModal(true)} className="px-3 py-2 bg-teal-600 text-black font-bold rounded">登录</button>
+      )}
+    </div>
+  );
+
   const shouldShowGlobalUI = gameState !== 'in-game' && gameState !== 'map-editor' && !isCustomizingControls && !showSettings;
 
   return (
     <main className="bg-black text-white w-screen h-screen flex flex-col items-center justify-center font-mono overflow-hidden relative">
       {shouldShowGlobalUI && gameState !== 'main-menu' && <BackButton />}
       {shouldShowGlobalUI && <SettingsButton />}
+  {shouldShowGlobalUI && <AuthButton />}
       
       {renderContent()}
 
@@ -540,6 +598,9 @@ const App: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+      {showLoginModal && (
+        <Login onSuccess={handleLoginSuccess} onClose={() => setShowLoginModal(false)} />
       )}
       {isCustomizingControls && (
         <ControlCustomizer
