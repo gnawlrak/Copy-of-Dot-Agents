@@ -12,12 +12,10 @@ import { WEAPON_TYPES } from './data/weapons';
 import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 import { OperatorClassID, OPERATORS } from './data/operators';
-import MultiplayerLobby from './components/MultiplayerLobby';
-import Login from './components/Login';
-import { MockNetworkClient, setClearRoomsOnInit } from './network';
+
 import { SaveSystem, GameData } from './data/services/save-system';
 
-type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
+type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
 export type Difficulty = 'simple' | 'normal' | 'hard';
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
@@ -67,13 +65,8 @@ const App: React.FC = () => {
   const [weaponToModify, setWeaponToModify] = useState<'primary' | 'secondary' | 'special' | null>(null);
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('simple');
-  const [isMultiplayer, setIsMultiplayer] = useState(false);
-  const networkClientRef = useRef<MockNetworkClient | null>(null);
+
   const runScoreRef = useRef<number>(0);
-  // Authentication state
-  const [user, setUser] = useState<string | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [showLoginModal, setShowLoginModal] = useState(false);
   
   // State for saved data
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -88,71 +81,7 @@ const App: React.FC = () => {
   const [totalScore, setTotalScore] = useState<number>(0);
   const [highScore, setHighScore] = useState<number>(0);
 
-  // 初始化时检查是否需要清空所有房间
-  useEffect(() => {
-    // 检查URL参数或localStorage设置
-    const urlParams = new URLSearchParams(window.location.search);
-    const clearRoomsParam = urlParams.get('clearRooms');
-    const clearRoomsStorage = localStorage.getItem('clear_rooms_on_init');
-    
-    // 如果URL参数或localStorage设置为true，则启用清空房间功能
-    const shouldClearRooms = clearRoomsParam === 'true' || clearRoomsStorage === 'true';
-    
-    if (shouldClearRooms) {
-      console.log('启用初始化时清空所有房间功能');
-      setClearRoomsOnInit(true);
-      
-      // 清除localStorage中的设置，避免下次启动时再次清空
-      if (clearRoomsStorage === 'true') {
-        localStorage.removeItem('clear_rooms_on_init');
-      }
-    }
-  }, []);
 
-  useEffect(() => {
-    if (!networkClientRef.current) {
-        networkClientRef.current = new MockNetworkClient();
-    }
-  }, []);
-
-  // Validate token on mount
-  useEffect(() => {
-    const check = async () => {
-      const token = localStorage.getItem('auth_token');
-      if (!token) return;
-      try {
-        const res = await fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } });
-        if (res.ok) {
-          const j = await res.json();
-          setUser(j.username);
-          setAuthToken(token);
-        } else {
-          localStorage.removeItem('auth_token');
-        }
-      } catch (e) {
-        console.warn('Failed to validate auth token', e);
-      }
-    };
-    check();
-  }, []);
-
-  const handleLoginSuccess = (token: string, username: string) => {
-    localStorage.setItem('auth_token', token);
-    setAuthToken(token);
-    setUser(username);
-    setShowLoginModal(false);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}` } });
-    } catch (e) {
-      // ignore
-    }
-    localStorage.removeItem('auth_token');
-    setAuthToken(null);
-    setUser(null);
-  };
   
   // Data Loading Effect
   useEffect(() => {
@@ -246,13 +175,7 @@ const App: React.FC = () => {
     setGameState('loadout');
   };
 
-  const handleGoToMultiplayer = () => {
-    // Ensure network client is connected before entering multiplayer lobby
-    if (networkClientRef.current && !networkClientRef.current.connected) {
-      networkClientRef.current.connect();
-    }
-    setGameState('multiplayer-lobby');
-  };
+
 
   const handleGoToEditor = (level: LevelDefinition | null) => {
     setLevelToEdit(level);
@@ -265,16 +188,11 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = useCallback((level: LevelDefinition) => {
-    setSelectedLevel(level);
-    setIsMultiplayer(true);
-    setGameState('in-game');
-  }, []); // 这个函数不依赖任何外部状态，所以依赖数组为空是安全的
+
 
   const handleMissionEnd = () => {
     setSelectedLevel(null);
-    networkClientRef.current?.disconnect();
-    const previousState = isMultiplayer ? 'multiplayer-lobby' : 'level-select';
+    const previousState = 'level-select';
     setIsMultiplayer(false);
     
     // When mission ends, accumulate run score into total and update high score
@@ -417,8 +335,7 @@ const App: React.FC = () => {
                     onCustomControlsChange={setCustomControls}
                     defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
                     difficulty={difficulty}
-                    isMultiplayer={isMultiplayer}
-                    networkClient={networkClientRef.current}
+
                     initialRunScore={0}
                     onScoreChange={(newRunScore: number) => {
                         console.log(`[App] onScoreChange called with: ${newRunScore}`);
@@ -479,19 +396,14 @@ const App: React.FC = () => {
             />
           );
       }
-      case 'multiplayer-lobby':
-        return <MultiplayerLobby 
-            onJoinGame={handleJoinMultiplayerGame}
-            missions={MISSIONS}
-            networkClient={networkClientRef.current}
-        />;
+
       case 'main-menu':
       default:
         return <MainMenu 
             onStart={handleStartMission} 
             onGoToLoadout={handleGoToLoadout} 
             onGoToEditor={() => handleGoToEditor(null)} 
-            onGoToMultiplayer={handleGoToMultiplayer}
+
             syncStatus={syncStatus}
             totalScore={totalScore}
             highScore={highScore}
@@ -524,26 +436,12 @@ const App: React.FC = () => {
     </button>
   );
 
-  const AuthButton = () => (
-    <div className="absolute top-4 right-20 z-50 flex items-center gap-2">
-      {user ? (
-        <div className="flex items-center gap-2 bg-gray-800/60 p-2 rounded border border-gray-700">
-          <span className="text-sm text-gray-300">{user}</span>
-          <button onClick={handleLogout} className="px-2 py-1 bg-red-600 text-white rounded text-sm">登出</button>
-        </div>
-      ) : (
-        <button onClick={() => setShowLoginModal(true)} className="px-3 py-2 bg-teal-600 text-black font-bold rounded">登录</button>
-      )}
-    </div>
-  );
-
   const shouldShowGlobalUI = gameState !== 'in-game' && gameState !== 'map-editor' && !isCustomizingControls && !showSettings;
 
   return (
     <main className="bg-black text-white w-screen h-screen flex flex-col items-center justify-center font-mono overflow-hidden relative">
       {shouldShowGlobalUI && gameState !== 'main-menu' && <BackButton />}
       {shouldShowGlobalUI && <SettingsButton />}
-  {shouldShowGlobalUI && <AuthButton />}
       
       {renderContent()}
 
@@ -598,9 +496,6 @@ const App: React.FC = () => {
             </button>
           </div>
         </div>
-      )}
-      {showLoginModal && (
-        <Login onSuccess={handleLoginSuccess} onClose={() => setShowLoginModal(false)} />
       )}
       {isCustomizingControls && (
         <ControlCustomizer

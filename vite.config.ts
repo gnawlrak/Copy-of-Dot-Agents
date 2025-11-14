@@ -8,19 +8,6 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
-        proxy: {
-          '/api': {
-            target: 'http://localhost:3002',
-            changeOrigin: true,
-            secure: false,
-            ws: true,
-            configure: (proxy, options) => {
-              proxy.on('error', (err, req, res) => {
-                console.error('代理错误:', err);
-              });
-            }
-          }
-        },
       },
       plugins: [react()],
       define: {
