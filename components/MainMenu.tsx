@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { SaveSystem } from '../data/services/save-system';
 
@@ -6,18 +5,17 @@ interface MainMenuProps {
   onStart: () => void;
   onGoToLoadout: () => void;
   onGoToEditor: () => void;
+  onLogout: () => void;
   syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
   totalScore?: number;
   highScore?: number;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, syncStatus, totalScore, highScore }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onLogout, syncStatus, totalScore, highScore }) => {
   const [displayTotal, setDisplayTotal] = useState<number>(totalScore ?? 0);
   const [displayHigh, setDisplayHigh] = useState<number>(highScore ?? 0);
 
   useEffect(() => {
-    // Always try to load the latest persisted scores and then merge with props
-    // so returning to the menu shows the most up-to-date values.
     let mounted = true;
     const load = async () => {
       try {
@@ -26,7 +24,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         const persistedTotal = (data && typeof data.totalScore === 'number') ? data.totalScore : 0;
         const persistedHigh = (data && typeof data.highScore === 'number') ? data.highScore : 0;
 
-        // Prefer prop values when provided; otherwise use persisted values.
         setDisplayTotal(typeof totalScore !== 'undefined' ? totalScore : persistedTotal);
         setDisplayHigh(typeof highScore !== 'undefined' ? highScore : persistedHigh);
       } catch (e) {
@@ -36,15 +33,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
     load();
     return () => { mounted = false; };
   }, [totalScore, highScore]);
+
   const getSyncText = () => {
     switch (syncStatus) {
-        case 'syncing': return 'Syncing...';
-        case 'synced': return 'Saved locally.';
-        case 'error': return 'Save error.';
-        default: return 'INTDGYISGOD + gnaWlraK';
+      case 'syncing': return 'Syncing...';
+      case 'synced': return 'Saved locally.';
+      case 'error': return 'Save error.';
+      default: return '';
     }
   };
-  
+
   return (
     <div className="text-center flex flex-col items-center justify-center w-full h-full">
       <div className="mb-12">
@@ -63,12 +61,12 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
       </div>
       <div className="flex flex-col gap-6">
         <div className="flex justify-center gap-4">
-            <button
-              onClick={onStart}
-              className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
-            >
-              START MISSION
-            </button>
+          <button
+            onClick={onStart}
+            className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
+          >
+            START MISSION
+          </button>
         </div>
         <div className="flex justify-center gap-4">
           <button
@@ -83,9 +81,15 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
           >
             MAP EDITOR
           </button>
+          <button
+            onClick={onLogout}
+            className="px-6 py-3 bg-red-900/50 text-red-300 font-bold text-lg tracking-widest rounded-md border-2 border-red-800 hover:bg-red-900 hover:border-red-500 transition-colors duration-200"
+          >
+            LOGOUT
+          </button>
         </div>
       </div>
-       <p className="text-gray-500 mt-6 h-6">{getSyncText()}</p>
+      <p className="text-gray-500 mt-6 h-6">{getSyncText()}</p>
     </div>
   );
 };

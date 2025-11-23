@@ -17,6 +17,12 @@ export interface GameData {
   highScore?: number; // best single-run score
 }
 
+import { AuthService } from './auth-service';
+
+// ... (imports remain the same)
+
+// ... (GameData interface remains the same)
+
 const LOCAL_STORAGE_KEY = 'dot_agents_save_data';
 
 /**
@@ -25,11 +31,27 @@ const LOCAL_STORAGE_KEY = 'dot_agents_save_data';
  * swapped with a cloud-based implementation in the future.
  */
 class SaveProvider {
+  private authToken: string | null = null;
+
+  setAuthToken(token: string | null) {
+    this.authToken = token;
+  }
+
   /**
    * Loads the entire game data object from persistence.
    * @returns A promise that resolves with the GameData object, or null if not found.
    */
   async loadGameData(): Promise<GameData | null> {
+    // Try remote load first if authenticated
+    if (this.authToken) {
+      const remoteData = await AuthService.loadRemote(this.authToken);
+      if (remoteData) {
+        // Update local cache
+        await this.saveGameData(remoteData, true); // true = skip remote save to avoid loop
+        return remoteData;
+      }
+    }
+
     try {
       const dataJson = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (dataJson) {
@@ -46,12 +68,17 @@ class SaveProvider {
   /**
    * Saves the entire game data object to persistence.
    * @param data The complete game data object to save.
+   * @param skipRemote If true, only save locally (used when syncing down).
    * @returns A promise that resolves when the save is complete.
    */
-  async saveGameData(data: GameData): Promise<void> {
+  async saveGameData(data: GameData, skipRemote = false): Promise<void> {
     try {
       const dataJson = JSON.stringify(data);
       localStorage.setItem(LOCAL_STORAGE_KEY, dataJson);
+
+      if (this.authToken && !skipRemote) {
+        await AuthService.saveRemote(this.authToken, data);
+      }
     } catch (error) {
       console.error("Failed to save game data:", error);
     }
@@ -61,17 +88,17 @@ class SaveProvider {
    * Clears all old individual save data from localStorage as part of a one-time migration.
    */
   async clearOldData(): Promise<void> {
-      try {
-          localStorage.removeItem('dot_agents_operator_class_id');
-          localStorage.removeItem('dot_agents_aim_sensitivity');
-          localStorage.removeItem('dot_agents_agent_skin');
-          localStorage.removeItem('dot_agents_player_loadout');
-          localStorage.removeItem('dot_agents_custom_controls');
-          localStorage.removeItem('dot_agents_custom_levels');
-          console.log("Old localStorage data cleared.");
-      } catch (error) {
-          console.error("Failed to clear old game data:", error);
-      }
+    try {
+      localStorage.removeItem('dot_agents_operator_class_id');
+      localStorage.removeItem('dot_agents_aim_sensitivity');
+      localStorage.removeItem('dot_agents_agent_skin');
+      localStorage.removeItem('dot_agents_player_loadout');
+      localStorage.removeItem('dot_agents_custom_controls');
+      localStorage.removeItem('dot_agents_custom_levels');
+      console.log("Old localStorage data cleared.");
+    } catch (error) {
+      console.error("Failed to clear old game data:", error);
+    }
   }
 }
 
