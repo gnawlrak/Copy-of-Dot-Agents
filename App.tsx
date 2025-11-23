@@ -137,6 +137,7 @@ const App: React.FC = () => {
     loadData();
   }, [isAuthenticated]);
 
+
   // Centralized Data Saving Effect
   useEffect(() => {
     if (!isDataLoaded) {
