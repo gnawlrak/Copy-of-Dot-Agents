@@ -5,13 +5,14 @@ interface MainMenuProps {
   onStart: () => void;
   onGoToLoadout: () => void;
   onGoToEditor: () => void;
+  onGoToMultiplayer: () => void;
   onLogout: () => void;
   syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
   totalScore?: number;
   highScore?: number;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onLogout, syncStatus, totalScore, highScore }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer, onLogout, syncStatus, totalScore, highScore }) => {
   const [displayTotal, setDisplayTotal] = useState<number>(totalScore ?? 0);
   const [displayHigh, setDisplayHigh] = useState<number>(highScore ?? 0);
 
@@ -69,6 +70,12 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
           </button>
         </div>
         <div className="flex justify-center gap-4">
+          <button
+            onClick={onGoToMultiplayer}
+            className="px-6 py-3 bg-teal-900 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-teal-700 hover:bg-teal-800 hover:border-teal-500 transition-colors duration-200"
+          >
+            MULTIPLAYER
+          </button>
           <button
             onClick={onGoToLoadout}
             className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"

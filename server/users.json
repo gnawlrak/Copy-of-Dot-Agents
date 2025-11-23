@@ -12,10 +12,18 @@
         "melee": "Combat Knife",
         "special": "Rocket Launcher",
         "primaryAttachments": {
-          "Trigger": "三连发扳机组",
-          "Muzzle": "枪口制退器"
+          "Trigger": "军规扳机组",
+          "Muzzle": "枪口制退器",
+          "Grip": "突击握把",
+          "Magazine": "快速弹匣",
+          "Ammunition": "高速弹"
         },
-        "secondaryAttachments": {},
+        "secondaryAttachments": {
+          "Muzzle": "喉缩",
+          "Action": "半自动改装",
+          "Tube": "快速装弹器",
+          "Ammunition": "龙息弹"
+        },
         "specialAttachments": {},
         "throwables": {
           "grenade": 2,
@@ -186,7 +194,7 @@
         }
       },
       "customLevels": [],
-      "totalScore": 1650,
+      "totalScore": 2475,
       "highScore": 825
     }
   },

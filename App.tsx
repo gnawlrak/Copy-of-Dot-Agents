@@ -11,11 +11,13 @@ import { WEAPON_TYPES } from './data/weapons';
 import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 import { OperatorClassID, OPERATORS } from './data/operators';
+import MultiplayerLobby from './components/MultiplayerLobby';
+import { NetworkClient, Room, createNetworkClient } from './network';
 
 import { SaveSystem, GameData } from './data/services/save-system';
 import Login from './components/Login';
 
-type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification';
+type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
 export type Difficulty = 'simple' | 'normal' | 'hard';
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
@@ -67,6 +69,8 @@ const App: React.FC = () => {
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('simple');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [networkClient] = useState(() => createNetworkClient());
+  const [currentMultiplayerRoom, setCurrentMultiplayerRoom] = useState<Room | null>(null);
 
   const runScoreRef = useRef<number>(0);
 
@@ -181,7 +185,18 @@ const App: React.FC = () => {
     setGameState('loadout');
   };
 
+  const handleGoToMultiplayer = () => {
+    networkClient.connect();
+    setGameState('multiplayer-lobby');
+  };
 
+  const handleMultiplayerGameStart = (room: Room) => {
+    const mapLevel = MISSIONS.find(m => m.name === room.mapName) || MISSIONS[0];
+    setSelectedLevel(mapLevel);
+    setCurrentMultiplayerRoom(room);
+    setIsMultiplayer(true);
+    setGameState('in-game');
+  };
 
   const handleGoToEditor = (level: LevelDefinition | null) => {
     setLevelToEdit(level);
@@ -341,6 +356,8 @@ const App: React.FC = () => {
                   onCustomControlsChange={setCustomControls}
                   defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
                   difficulty={difficulty}
+                  isMultiplayer={isMultiplayer}
+                  networkClient={networkClient}
 
                   initialRunScore={0}
                   onScoreChange={(newRunScore: number) => {
@@ -402,12 +419,19 @@ const App: React.FC = () => {
           />
         );
       }
+      case 'multiplayer-lobby':
+        return <MultiplayerLobby
+          networkClient={networkClient}
+          onStartGame={handleMultiplayerGameStart}
+          onBack={handleGlobalBack}
+        />;
 
       case 'main-menu':
       default:
         return <MainMenu
           onStart={handleStartMission}
           onGoToLoadout={handleGoToLoadout}
+          onGoToMultiplayer={handleGoToMultiplayer}
           onGoToEditor={() => handleGoToEditor(null)}
           onLogout={() => {
             setIsAuthenticated(false);
