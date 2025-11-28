@@ -1349,7 +1349,7 @@ export default function GameCanvas({
         const vx = Math.cos(angle) * launchPower;
         const vy = Math.sin(angle) * launchPower;
 
-        throwablesRef.current.push({
+        const throwable = {
             id: nextThrowableId++,
             type: throwableType,
             x: player.x,
@@ -1359,7 +1359,24 @@ export default function GameCanvas({
             timer: cookState.timer, // Already in seconds
             radius: 5 * scale,
             hasBounced: false,
-        });
+        };
+        throwablesRef.current.push(throwable);
+
+        // Network sync for throwable
+        try {
+            if (networkClient && isMultiplayer) {
+                (networkClient as any).send('throw-grenade', {
+                    id: throwable.id,
+                    type: throwable.type,
+                    x: throwable.x,
+                    y: throwable.y,
+                    vx: throwable.vx,
+                    vy: throwable.vy,
+                    timer: throwable.timer,
+                    playerId: networkClient.ownId
+                });
+            }
+        } catch (e) { }
     };
 
     const switchThrowable = () => {
@@ -2189,6 +2206,7 @@ export default function GameCanvas({
                 if (isMultiplayer) {
                     remotePlayersMapRef.current.forEach(rp => {
                         try {
+                            if (rp.health <= 0) return;
                             const dist = Math.hypot(rp.x - x, rp.y - y);
                             if (dist > radius) return;
 
@@ -2788,6 +2806,7 @@ export default function GameCanvas({
                         if (isMultiplayer) {
                             remotePlayersMapRef.current.forEach(rp => {
                                 try {
+                                    if (rp.health <= 0) return;
                                     // Remote players do not have a local Player object; approximate with rp.x/rp.y and assume radius similar to player
                                     const playerHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, rp.x, rp.y, bullet.radius + (player.radius || 10));
                                     if (playerHit && playerHit.t < closestT) {
@@ -2959,6 +2978,7 @@ export default function GameCanvas({
                                 enemy.hitTimer = 0.17; // Add red flash
                                 if (enemy.health <= 0 && healthBefore > 0) {
                                     hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                    try { addScore(SCORE_PER_KILL); } catch { }
                                 }
                             }
                         }
@@ -4988,11 +5008,30 @@ export default function GameCanvas({
             } catch (e) { console.error(e); }
         };
 
+        const handleThrowGrenade = (payload: { id: number; type: string; x: number; y: number; vx: number; vy: number; timer: number; playerId: string }) => {
+            try {
+                if (payload.playerId === (networkClient && networkClient.ownId)) return;
+                
+                throwablesRef.current.push({
+                    id: nextThrowableId++, 
+                    type: payload.type as any,
+                    x: payload.x,
+                    y: payload.y,
+                    vx: payload.vx,
+                    vy: payload.vy,
+                    timer: payload.timer,
+                    radius: 5 * scale,
+                    hasBounced: false
+                });
+            } catch (e) { }
+        };
+
         networkClient.on('connect', handleConnect as any);
         networkClient.on('player-joined', handlePlayerJoined as any);
         networkClient.on('player-left', handlePlayerLeft as any);
         networkClient.on('player-update', handlePlayerUpdate as any);
         networkClient.on('fire-weapon', handleFireWeapon as any);
+        networkClient.on('throw-grenade', handleThrowGrenade as any);
         networkClient.on('drop-weapon', handleDropWeapon as any);
         networkClient.on('pickup-weapon', handlePickupWeapon as any);
         networkClient.on('start-round', handleStartRound as any);
