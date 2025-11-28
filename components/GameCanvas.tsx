@@ -3639,53 +3639,56 @@ export default function GameCanvas({
                     context.restore();
                 });
 
-                enemiesRef.current.forEach(enemy => {
-                    if (enemy.health <= 0) return;
-                    const brightness = getBrightnessByDistance(enemy.x, enemy.y, visionRadius);
+                // Don't render enemies when player is dead
+                if (player.health > 0) {
+                    enemiesRef.current.forEach(enemy => {
+                        if (enemy.health <= 0) return;
+                        const brightness = getBrightnessByDistance(enemy.x, enemy.y, visionRadius);
 
-                    const isHit = enemy.hitTimer && enemy.hitTimer > 0;
-                    const bodyColor = isHit ? `rgba(239, 68, 68, ${brightness})` // red-500
-                        : enemy.isAlert ? `rgba(238, 238, 238, ${brightness})`
-                            : `rgba(153, 153, 153, ${brightness})`;
-                    context.fillStyle = bodyColor;
-                    context.shadowColor = bodyColor;
-                    context.shadowBlur = 15 * scale;
-                    context.beginPath();
-                    context.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
-                    context.fill();
-
-                    if (enemy.burnTimer && enemy.burnTimer > 0) {
-                        context.globalCompositeOperation = 'lighter';
-                        const flicker = Math.sin(performance.now() / 60) * 0.5 + 0.5;
-                        const radius = enemy.radius * (1.2 + flicker * 0.3);
-                        const grad = context.createRadialGradient(enemy.x, enemy.y, 0, enemy.x, enemy.y, radius);
-                        grad.addColorStop(0, `rgba(255, 200, 0, ${0.8 * flicker * brightness})`);
-                        grad.addColorStop(0.7, `rgba(255, 100, 0, ${0.5 * flicker * brightness})`);
-                        grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
-                        context.fillStyle = grad;
+                        const isHit = enemy.hitTimer && enemy.hitTimer > 0;
+                        const bodyColor = isHit ? `rgba(239, 68, 68, ${brightness})` // red-500
+                            : enemy.isAlert ? `rgba(238, 238, 238, ${brightness})`
+                                : `rgba(153, 153, 153, ${brightness})`;
+                        context.fillStyle = bodyColor;
+                        context.shadowColor = bodyColor;
+                        context.shadowBlur = 15 * scale;
                         context.beginPath();
-                        context.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+                        context.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
                         context.fill();
-                        context.globalCompositeOperation = 'source-over';
-                    }
 
-                    if (enemy.type === 'advanced' && enemy.axeState === 'windup') {
-                        const chargeProgress = 1 - (enemy.axeTimer! / AXE_WINDUP_DURATION);
-                        context.strokeStyle = `rgba(255, 100, 100, ${brightness * 0.8})`;
-                        context.lineWidth = 3 * scale;
-                        context.beginPath();
-                        context.arc(enemy.x, enemy.y, enemy.radius + 4 * scale, -Math.PI / 2, -Math.PI / 2 + chargeProgress * Math.PI * 2);
-                        context.stroke();
-                    }
-                    if (enemy.stunTimer && enemy.stunTimer > 0) {
-                        context.font = `bold ${16 * scale}px mono`;
-                        context.fillStyle = `rgba(255, 255, 255, ${brightness})`;
-                        context.textAlign = 'center';
-                        context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
-                        context.fillText('???', enemy.x, enemy.y - enemy.radius - (10 * scale));
-                        context.shadowBlur = 0;
-                    }
-                });
+                        if (enemy.burnTimer && enemy.burnTimer > 0) {
+                            context.globalCompositeOperation = 'lighter';
+                            const flicker = Math.sin(performance.now() / 60) * 0.5 + 0.5;
+                            const radius = enemy.radius * (1.2 + flicker * 0.3);
+                            const grad = context.createRadialGradient(enemy.x, enemy.y, 0, enemy.x, enemy.y, radius);
+                            grad.addColorStop(0, `rgba(255, 200, 0, ${0.8 * flicker * brightness})`);
+                            grad.addColorStop(0.7, `rgba(255, 100, 0, ${0.5 * flicker * brightness})`);
+                            grad.addColorStop(1, `rgba(255, 0, 0, 0)`);
+                            context.fillStyle = grad;
+                            context.beginPath();
+                            context.arc(enemy.x, enemy.y, radius, 0, Math.PI * 2);
+                            context.fill();
+                            context.globalCompositeOperation = 'source-over';
+                        }
+
+                        if (enemy.type === 'advanced' && enemy.axeState === 'windup') {
+                            const chargeProgress = 1 - (enemy.axeTimer! / AXE_WINDUP_DURATION);
+                            context.strokeStyle = `rgba(255, 100, 100, ${brightness * 0.8})`;
+                            context.lineWidth = 3 * scale;
+                            context.beginPath();
+                            context.arc(enemy.x, enemy.y, enemy.radius + 4 * scale, -Math.PI / 2, -Math.PI / 2 + chargeProgress * Math.PI * 2);
+                            context.stroke();
+                        }
+                        if (enemy.stunTimer && enemy.stunTimer > 0) {
+                            context.font = `bold ${16 * scale}px mono`;
+                            context.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+                            context.textAlign = 'center';
+                            context.shadowColor = 'black'; context.shadowBlur = 5 * scale;
+                            context.fillText('???', enemy.x, enemy.y - enemy.radius - (10 * scale));
+                            context.shadowBlur = 0;
+                        }
+                    });
+                }
                 context.shadowBlur = 0;
 
                 if (!isEnded && currentWeapon.category !== 'melee' && (hasUsedTouchRef.current || touchStateRef.current.joystick.id === null)) {
@@ -4863,6 +4866,7 @@ export default function GameCanvas({
         };
         const handlePlayerLeft = (payload: { id: string }) => {
             try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) { }
+            console.log('[GameCanvas] Player left:', payload.id, 'Deleting from remote players');
             remotePlayersMapRef.current.delete(payload.id);
         };
         const handlePlayerUpdate = (payload: PlayerState & { isShooting: boolean }) => {

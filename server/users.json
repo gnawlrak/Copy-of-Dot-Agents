@@ -198,6 +198,205 @@
       "highScore": 825
     }
   },
+  "3": {
+    "password": "3",
+    "saveData": {
+      "version": 1,
+      "operatorClassId": "A-Red",
+      "aimSensitivity": 1,
+      "agentSkin": "Standard Issue",
+      "playerLoadout": {
+        "primary": "Assault Rifle",
+        "secondary": "Shotgun",
+        "melee": "Combat Knife",
+        "special": "Rocket Launcher",
+        "primaryAttachments": {
+          "Trigger": "三连发扳机组"
+        },
+        "secondaryAttachments": {},
+        "specialAttachments": {},
+        "throwables": {
+          "grenade": 2,
+          "flashbang": 1,
+          "smoke": 2,
+          "molotov": 0
+        }
+      },
+      "customControls": {
+        "baseScale": 1,
+        "opacity": 0.5,
+        "layout": {
+          "joystick": {
+            "x": 0.078,
+            "y": 0.86,
+            "scale": 1.6
+          },
+          "fire": {
+            "x": 0.92,
+            "y": 0.86,
+            "scale": 1.2
+          },
+          "fixedFire": {
+            "x": 0.078,
+            "y": 0.65,
+            "scale": 1.2
+          },
+          "reload": {
+            "x": 0.92,
+            "y": 0.69,
+            "scale": 0.8
+          },
+          "interact": {
+            "x": 0.85,
+            "y": 0.75,
+            "scale": 0.8
+          },
+          "switchWeapon": {
+            "x": 0.85,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "melee": {
+            "x": 0.78,
+            "y": 0.75,
+            "scale": 0.8
+          },
+          "throwableSelect": {
+            "x": 0.78,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "switchThrowable": {
+            "x": 0.71,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "fireModeSwitch": {
+            "x": 0.78,
+            "y": 0.65,
+            "scale": 0.8
+          },
+          "heal": {
+            "x": 0.85,
+            "y": 0.65,
+            "scale": 0.8
+          },
+          "special": {
+            "x": 0.92,
+            "y": 0.59,
+            "scale": 0.8
+          }
+        }
+      },
+      "customLevels": [],
+      "totalScore": 2475,
+      "highScore": 825
+    }
+  },
+  "4": {
+    "password": "4",
+    "saveData": {
+      "version": 1,
+      "operatorClassId": "A-Red",
+      "aimSensitivity": 1,
+      "agentSkin": "Standard Issue",
+      "playerLoadout": {
+        "primary": "Assault Rifle",
+        "secondary": "Shotgun",
+        "melee": "Combat Knife",
+        "special": "Rocket Launcher",
+        "primaryAttachments": {
+          "Trigger": "军规扳机组",
+          "Muzzle": "枪口制退器",
+          "Grip": "突击握把",
+          "Magazine": "快速弹匣",
+          "Ammunition": "高速弹"
+        },
+        "secondaryAttachments": {
+          "Muzzle": "喉缩",
+          "Action": "半自动改装",
+          "Tube": "快速装弹器",
+          "Ammunition": "龙息弹"
+        },
+        "specialAttachments": {},
+        "throwables": {
+          "grenade": 2,
+          "flashbang": 1,
+          "smoke": 2,
+          "molotov": 0
+        }
+      },
+      "customControls": {
+        "baseScale": 1,
+        "opacity": 0.5,
+        "layout": {
+          "joystick": {
+            "x": 0.078,
+            "y": 0.86,
+            "scale": 1.6
+          },
+          "fire": {
+            "x": 0.92,
+            "y": 0.86,
+            "scale": 1.2
+          },
+          "fixedFire": {
+            "x": 0.078,
+            "y": 0.65,
+            "scale": 1.2
+          },
+          "reload": {
+            "x": 0.92,
+            "y": 0.69,
+            "scale": 0.8
+          },
+          "interact": {
+            "x": 0.85,
+            "y": 0.75,
+            "scale": 0.8
+          },
+          "switchWeapon": {
+            "x": 0.85,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "melee": {
+            "x": 0.78,
+            "y": 0.75,
+            "scale": 0.8
+          },
+          "throwableSelect": {
+            "x": 0.78,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "switchThrowable": {
+            "x": 0.71,
+            "y": 0.86,
+            "scale": 0.8
+          },
+          "fireModeSwitch": {
+            "x": 0.78,
+            "y": 0.65,
+            "scale": 0.8
+          },
+          "heal": {
+            "x": 0.85,
+            "y": 0.65,
+            "scale": 0.8
+          },
+          "special": {
+            "x": 0.92,
+            "y": 0.59,
+            "scale": 0.8
+          }
+        }
+      },
+      "customLevels": [],
+      "totalScore": 0,
+      "highScore": 0
+    }
+  },
   "user_iso_1": {
     "password": "123",
     "saveData": {

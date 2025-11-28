@@ -22,8 +22,14 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             let response;
             if (isRegistering) {
                 // On register, we want to link the current local save to the new account
+                // BUT reset scores to 0 for new users
                 const currentData = await SaveSystem.loadGameData();
-                response = await AuthService.register(username, password, currentData);
+                const initialData = currentData ? {
+                    ...currentData,
+                    totalScore: 0,
+                    highScore: 0
+                } : null;
+                response = await AuthService.register(username, password, initialData);
             } else {
                 response = await AuthService.login(username, password);
             }
