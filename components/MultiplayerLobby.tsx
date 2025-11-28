@@ -26,7 +26,11 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ networkClient, onSt
         };
         const handleRoomJoined = (room: Room) => {
             setCurrentRoom(room);
-            setView('room');
+            if (room.status === 'playing') {
+                onStartGame(room);
+            } else {
+                setView('room');
+            }
         };
         const handleRoomUpdated = (room: Room) => setCurrentRoom(room);
         const handleRoomLeft = () => {
@@ -173,7 +177,7 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ networkClient, onSt
                                 <div
                                     key={room.id}
                                     className="bg-gray-900 border-2 border-gray-700 rounded-lg p-6 hover:border-teal-500 transition-colors cursor-pointer"
-                                    onClick={() => room.status === 'waiting' && handleJoinRoom(room.id)}
+                                    onClick={() => handleJoinRoom(room.id)}
                                 >
                                     <div className="flex justify-between items-start mb-2">
                                         <h3 className="text-xl font-bold">{room.name}</h3>

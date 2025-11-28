@@ -1132,7 +1132,7 @@ export default function GameCanvas({
                 }
                 // Check remote players in multiplayer for hitscan weapons (send player-hit instead of applying local damage)
                 if (ownerType === 'player' && isMultiplayer && networkClient) {
-                    for (const rpRaw of Array.from(remotePlayersRef.current.values())) {
+                    for (const rpRaw of Array.from(remotePlayersMapRef.current.values())) {
                         const rp = rpRaw as RemotePlayer;
                         try {
                             const dx = rp.x - ownerX, dy = rp.y - ownerY;
@@ -2762,7 +2762,7 @@ export default function GameCanvas({
                         }
                         // Hit remote players in multiplayer
                         if (isMultiplayer) {
-                            remotePlayersRef.current.forEach(rp => {
+                            remotePlayersMapRef.current.forEach(rp => {
                                 try {
                                     // Remote players do not have a local Player object; approximate with rp.x/rp.y and assume radius similar to player
                                     const playerHit = intersectSegCircle(bullet.x, bullet.y, nextX, nextY, rp.x, rp.y, bullet.radius + (player.radius || 10));
@@ -3968,7 +3968,8 @@ export default function GameCanvas({
                 if ((light.type === 'grenade' || light.type === 'flashbang') && !pointInPoly(light.x, light.y, viewPoly)) {
                     return;
                 }
-                const f = Math.max(0, light.ttl / light.life);
+                if (!Number.isFinite(light.x) || !Number.isFinite(light.y)) return;
+                const f = (light.life > 0) ? Math.max(0, light.ttl / light.life) : 0;
                 const p = light.power || 1;
                 context.save();
 
@@ -3988,6 +3989,7 @@ export default function GameCanvas({
                 if (light.type === 'flashbang') {
                     // Flashbangs create a very large, bright wash of light, but only in areas the player can see.
                     r1 = 1200 * (0.65 + 0.35 * f) * scale;
+                    if (!Number.isFinite(r1) || r1 <= 0) { context.restore(); return; }
                     gradient = context.createRadialGradient(light.x, light.y, 0, light.x, light.y, r1);
                     gradient.addColorStop(0, `rgba(255, 255, 255, ${0.35 * f * p})`);
                     gradient.addColorStop(0.25, `rgba(220, 220, 220, ${0.20 * f * p})`);
@@ -3995,6 +3997,7 @@ export default function GameCanvas({
                 } else {
                     // Default lighting for other types
                     r1 = (light.type === 'impact' ? 280 : 200) * (0.55 + 0.45 * f) * scale;
+                    if (!Number.isFinite(r1) || r1 <= 0) { context.restore(); return; }
                     gradient = context.createRadialGradient(light.x, light.y, 0, light.x, light.y, r1);
                     gradient.addColorStop(0, `rgba(255, 255, 255, ${0.15 * f * p})`);
                     gradient.addColorStop(0.25, `rgba(220, 220, 220, ${0.10 * f * p})`);

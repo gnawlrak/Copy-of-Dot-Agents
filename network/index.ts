@@ -26,6 +26,12 @@ export interface RemotePlayer extends PlayerState {
     maxHealth: number;
     lastUpdate: number;
     username?: string;
+    // Client-side interpolation fields
+    targetX?: number;
+    targetY?: number;
+    lastUpdateTime?: number;
+    isShooting?: boolean;
+    weapons?: any[]; // For visual representation
 }
 
 /**
@@ -39,6 +45,7 @@ export interface FireEventPayload {
     aimUy: number;
     weaponName: string;
     timestamp: number;
+    baseAngle?: number;
 }
 
 /**
@@ -107,6 +114,10 @@ export interface NetworkEventMap {
     'fire-weapon': (payload: FireEventPayload) => void;
     'game-started': () => void;
     'game-ended': (results: any) => void;
+    'drop-weapon': (payload: any) => void;
+    'pickup-weapon': (payload: any) => void;
+    'start-round': (payload: any) => void;
+    'buy-weapon': (payload: any) => void;
 
     // 错误事件
     error: (error: { message: string }) => void;

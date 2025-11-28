@@ -197,10 +197,11 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (room.status !== 'waiting') {
-            socket.emit('error', { message: 'Game already started' });
-            return;
-        }
+        // Allow joining mid-game
+        // if (room.status !== 'waiting') {
+        //     socket.emit('error', { message: 'Game already started' });
+        //     return;
+        // }
 
         // Add player to room
         room.players[socket.id] = {
@@ -378,15 +379,19 @@ io.on('connection', (socket) => {
         room.currentPlayers--;
 
         // If room is empty, delete it
-        if (room.currentPlayers === 0) {
+        // If room is empty, delete it
+        const remainingPlayers = Object.keys(room.players);
+        if (remainingPlayers.length === 0) {
             rooms.delete(roomId);
             console.log(`[Multiplayer] Room ${roomId} deleted (empty)`);
         } else {
             // If host left, assign new host
             if (room.hostId === socket.id) {
-                const newHostId = Object.keys(room.players)[0];
-                room.hostId = newHostId;
-                room.players[newHostId].isHost = true;
+                const newHostId = remainingPlayers[0];
+                if (newHostId && room.players[newHostId]) {
+                    room.hostId = newHostId;
+                    room.players[newHostId].isHost = true;
+                }
             }
 
             // Notify others
