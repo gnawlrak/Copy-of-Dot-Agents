@@ -525,15 +525,15 @@ export default function GameCanvas({
         if (!isMultiplayer) return;
 
         const now = performance.now();
-        const players = Array.from(remotePlayersMapRef.current.values()).filter(p => now - p.lastUpdateTime < 5000); // 只显示最近5秒内有更新的玩家
+        const players = Array.from(remotePlayersMapRef.current.values()).filter(p => now - (p.lastUpdateTime || 0) < 5000); // 只显示最近5秒内有更新的玩家
 
         players.forEach(player => {
             const { targetX: x, targetY: y, health, maxHealth, team, isReady, id } = player;
 
-            // 绘制玩家身体
+            // 绘制玩家身体 - use world coordinates directly
             ctx.fillStyle = team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)';
             ctx.beginPath();
-            ctx.arc(x * scale, y * scale, 10 * scale * cameraScale, 0, Math.PI * 2);
+            ctx.arc(x, y, 10 * scale * cameraScale, 0, Math.PI * 2);
             ctx.fill();
 
             // 绘制玩家轮廓
@@ -545,8 +545,8 @@ export default function GameCanvas({
             const healthPercent = health / maxHealth;
             const barWidth = 20 * scale * cameraScale;
             const barHeight = 3 * scale * cameraScale;
-            const barX = x * scale - barWidth / 2;
-            const barY = y * scale - 15 * scale * cameraScale;
+            const barX = x - barWidth / 2;
+            const barY = y - 15 * scale * cameraScale;
 
             // 背景
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -562,7 +562,7 @@ export default function GameCanvas({
             if (isReady) {
                 ctx.fillStyle = 'rgba(100, 255, 100, 0.8)';
                 ctx.beginPath();
-                ctx.arc(x * scale, y * scale - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
+                ctx.arc(x, y - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
                 ctx.fill();
             }
 
@@ -570,7 +570,7 @@ export default function GameCanvas({
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
             ctx.font = `${10 * scale * cameraScale}px Arial`;
             ctx.textAlign = 'center';
-            ctx.fillText((id || '').substring(0, 8), x * scale, y * scale + 20 * scale * cameraScale);
+            ctx.fillText((id || '').substring(0, 8), x, y + 20 * scale * cameraScale);
         });
     }, [isMultiplayer]);
 
@@ -4852,7 +4852,13 @@ export default function GameCanvas({
         const handleConnect = (payload: { id: string }) => console.log('Connected to mock server with ID:', payload.id);
         const handlePlayerJoined = (payload: PlayerState) => {
             // Ignore our own player as a "remote" entry to avoid echo-caused duplicates
-            try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) { }
+            try {
+                if (networkClient && payload.id === networkClient.ownId) {
+                    // console.log('[GameCanvas] Ignoring own player join:', payload.id);
+                    return;
+                }
+                console.log('[GameCanvas] Player joined:', payload.id, 'Own ID:', networkClient?.ownId);
+            } catch (e) { }
             remotePlayersMapRef.current.set(payload.id, { ...payload, targetX: payload.x, targetY: payload.y, lastUpdateTime: performance.now(), isShooting: false });
         };
         const handlePlayerLeft = (payload: { id: string }) => {
@@ -4860,7 +4866,10 @@ export default function GameCanvas({
             remotePlayersMapRef.current.delete(payload.id);
         };
         const handlePlayerUpdate = (payload: PlayerState & { isShooting: boolean }) => {
-            try { if (networkClient && payload.id === networkClient.ownId) return; } catch (e) { }
+            try {
+                if (networkClient && payload.id === networkClient.ownId) return;
+                // console.log('[GameCanvas] Remote update:', payload.id, 'Own:', networkClient?.ownId);
+            } catch (e) { }
             const p = remotePlayersMapRef.current.get(payload.id);
             if (p) {
                 p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
