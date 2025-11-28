@@ -767,13 +767,9 @@ export default function GameCanvas({
         try { setRunScore(next); } catch { }
         try { console.log('[addScore] runScoreRef now=', runScoreRef.current); } catch { }
 
-        // Only notify parent (for accumulation) if not training ground
-        if (!level.isTrainingGround) {
-            console.log(`[addScore] Notifying parent with score: ${next}`);
-            try { if (onScoreChange) onScoreChange(next); } catch { }
-        } else {
-            console.log(`[addScore] Training ground - not notifying parent`);
-        }
+        // Notify parent with score regardless of level type
+        console.log(`[addScore] Notifying parent with score: ${next}`);
+        try { if (onScoreChange) onScoreChange(next); } catch { }
     };
     const previousWeaponIndexRef = useRef<number>(0);
     // Remote players map: playerId -> RemotePlayer data
@@ -2189,6 +2185,34 @@ export default function GameCanvas({
                         affectUnit(e, false)
                     }
                 });
+                // Also affect remote players in multiplayer
+                if (isMultiplayer) {
+                    remotePlayersMapRef.current.forEach(rp => {
+                        try {
+                            const dist = Math.hypot(rp.x - x, rp.y - y);
+                            if (dist > radius) return;
+
+                            let isObstructed = false;
+                            for (const segment of dynamicSegments) {
+                                if (intersectSegSeg(x, y, rp.x, rp.y, segment)) {
+                                    isObstructed = true;
+                                    break;
+                                }
+                            }
+                            if (isObstructed) return;
+
+                            const damage = (1 - (dist / radius)) * maxDamage;
+                            if (damage > 0 && networkClient && rp.id) {
+                                try {
+                                    console.debug('[Net] send player-hit (explosion)', { targetId: rp.id, damage, attackerId: networkClient.ownId });
+                                    (networkClient as any).send('player-hit', { targetId: rp.id, damage, attackerId: networkClient.ownId, impact: { x: rp.x, y: rp.y }, sourceDir: { x: 0, y: 0 } });
+                                    // Award score for explosion damage to remote player
+                                    try { addScore(Math.floor(damage / 10)); } catch { }
+                                } catch (e) { }
+                            }
+                        } catch (e) { }
+                    });
+                }
             };
             const raycast = (px: number, py: number, ang: number, maxDist: number) => {
                 const dx = Math.cos(ang), dy = Math.sin(ang); let best = maxDist;
@@ -2821,6 +2845,8 @@ export default function GameCanvas({
                                             try {
                                                 console.debug('[Net] send player-hit', { targetId, damage: bullet.damage, attackerId: networkClient.ownId });
                                                 (networkClient as any).send('player-hit', { targetId, damage: bullet.damage, attackerId: networkClient.ownId, impact: { x: impactX, y: impactY }, sourceDir: { x: bullet.dx, y: bullet.dy } });
+                                                // Award score for hitting remote player (assuming damage lands)
+                                                try { addScore(Math.floor(bullet.damage / 10)); } catch { }
                                             } catch (e) { }
                                         } else {
                                             applyDamageToPlayer(bullet.damage, { x: bullet.dx, y: bullet.dy }, { x: impactX, y: impactY });
@@ -2865,6 +2891,8 @@ export default function GameCanvas({
                                         try {
                                             console.debug('[Net] send player-hit (proj)', { targetId: maybeId, damage: bullet.damage, attackerId: networkClient.ownId });
                                             (networkClient as any) && (networkClient as any).send('player-hit', { targetId: maybeId, damage: bullet.damage, attackerId: networkClient.ownId, impact: { x: impactX, y: impactY }, sourceDir: { x: bullet.dx, y: bullet.dy } });
+                                            // Award score for hitting remote player
+                                            try { addScore(Math.floor(bullet.damage / 10)); } catch { }
                                         } catch (e) { }
                                     } else {
                                         const healthBefore = player.health;

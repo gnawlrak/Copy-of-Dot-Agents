@@ -100,7 +100,9 @@
       },
       "customLevels": [],
       "totalScore": 825,
-      "highScore": 825
+      "highScore": 825,
+      "multiplayerTotalScore": 76,
+      "multiplayerHighScore": 76
     }
   },
   "2": {
@@ -194,8 +196,10 @@
         }
       },
       "customLevels": [],
-      "totalScore": 2475,
-      "highScore": 825
+      "totalScore": 2487,
+      "highScore": 825,
+      "multiplayerTotalScore": 0,
+      "multiplayerHighScore": 0
     }
   },
   "3": {
@@ -394,7 +398,9 @@
       },
       "customLevels": [],
       "totalScore": 0,
-      "highScore": 0
+      "highScore": 0,
+      "multiplayerTotalScore": 0,
+      "multiplayerHighScore": 0
     }
   },
   "user_iso_1": {

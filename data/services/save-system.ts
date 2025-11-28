@@ -13,8 +13,10 @@ export interface GameData {
   customControls: CustomControls;
   customLevels: LevelDefinition[];
   // Persistent scoring
-  totalScore?: number; // lifetime accumulated score
-  highScore?: number; // best single-run score
+  totalScore?: number; // lifetime accumulated score (single-player)
+  highScore?: number; // best single-run score (single-player)
+  multiplayerTotalScore?: number; // lifetime accumulated score (multiplayer)
+  multiplayerHighScore?: number; // best single-run score (multiplayer)
 }
 
 import { AuthService } from './auth-service';

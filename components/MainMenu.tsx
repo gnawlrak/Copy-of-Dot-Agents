@@ -10,11 +10,15 @@ interface MainMenuProps {
   syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
   totalScore?: number;
   highScore?: number;
+  multiplayerTotalScore?: number;
+  multiplayerHighScore?: number;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer, onLogout, syncStatus, totalScore, highScore }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer, onLogout, syncStatus, totalScore, highScore, multiplayerTotalScore, multiplayerHighScore }) => {
   const [displayTotal, setDisplayTotal] = useState<number>(totalScore ?? 0);
   const [displayHigh, setDisplayHigh] = useState<number>(highScore ?? 0);
+  const [displayMpTotal, setDisplayMpTotal] = useState<number>(multiplayerTotalScore ?? 0);
+  const [displayMpHigh, setDisplayMpHigh] = useState<number>(multiplayerHighScore ?? 0);
 
   useEffect(() => {
     let mounted = true;
@@ -24,16 +28,20 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         if (!mounted) return;
         const persistedTotal = (data && typeof data.totalScore === 'number') ? data.totalScore : 0;
         const persistedHigh = (data && typeof data.highScore === 'number') ? data.highScore : 0;
+        const persistedMpTotal = (data && typeof data.multiplayerTotalScore === 'number') ? data.multiplayerTotalScore : 0;
+        const persistedMpHigh = (data && typeof data.multiplayerHighScore === 'number') ? data.multiplayerHighScore : 0;
 
         setDisplayTotal(typeof totalScore !== 'undefined' ? totalScore : persistedTotal);
         setDisplayHigh(typeof highScore !== 'undefined' ? highScore : persistedHigh);
+        setDisplayMpTotal(typeof multiplayerTotalScore !== 'undefined' ? multiplayerTotalScore : persistedMpTotal);
+        setDisplayMpHigh(typeof multiplayerHighScore !== 'undefined' ? multiplayerHighScore : persistedMpHigh);
       } catch (e) {
         // ignore
       }
     };
     load();
     return () => { mounted = false; };
-  }, [totalScore, highScore]);
+  }, [totalScore, highScore, multiplayerTotalScore, multiplayerHighScore]);
 
   const getSyncText = () => {
     switch (syncStatus) {
@@ -50,32 +58,59 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
         <h1 className="text-6xl lg:text-8xl font-bold tracking-widest text-teal-300 animate-pulse">DOT AGENTS</h1>
         <p className="text-gray-400 mt-2 text-lg">Close-Quarters Battle Simulation</p>
       </div>
-      <div className="mb-6 flex gap-4 justify-center">
-        <div className="bg-gray-900/60 border border-gray-700 text-teal-300 px-4 py-2 rounded">
-          <div className="text-xs">Total Score</div>
-          <div className="font-bold text-lg">{displayTotal}</div>
+
+      {/* Score Display Section */}
+      <div className="mb-8 flex gap-8 justify-center">
+        {/* Single-player Scores */}
+        <div className="flex flex-col gap-2">
+          <div className="text-gray-400 text-sm font-bold">单人模式</div>
+          <div className="flex gap-4">
+            <div className="bg-gray-900/60 border border-gray-700 text-teal-300 px-4 py-2 rounded">
+              <div className="text-xs">Total Score</div>
+              <div className="font-bold text-lg">{displayTotal}</div>
+            </div>
+            <div className="bg-gray-900/60 border border-gray-700 text-teal-300 px-4 py-2 rounded">
+              <div className="text-xs">High Score</div>
+              <div className="font-bold text-lg">{displayHigh}</div>
+            </div>
+          </div>
         </div>
-        <div className="bg-gray-900/60 border border-gray-700 text-teal-300 px-4 py-2 rounded">
-          <div className="text-xs">High Score</div>
-          <div className="font-bold text-lg">{displayHigh}</div>
+
+        {/* Multiplayer Scores */}
+        <div className="flex flex-col gap-2">
+          <div className="text-gray-400 text-sm font-bold">多人模式</div>
+          <div className="flex gap-4">
+            <div className="bg-gray-900/60 border border-purple-700 text-purple-300 px-4 py-2 rounded">
+              <div className="text-xs">Total Score</div>
+              <div className="font-bold text-lg">{displayMpTotal}</div>
+            </div>
+            <div className="bg-gray-900/60 border border-purple-700 text-purple-300 px-4 py-2 rounded">
+              <div className="text-xs">High Score</div>
+              <div className="font-bold text-lg">{displayMpHigh}</div>
+            </div>
+          </div>
         </div>
       </div>
+
       <div className="flex flex-col gap-6">
+        {/* Primary Mode Buttons - Side by Side */}
         <div className="flex justify-center gap-4">
           <button
             onClick={onStart}
             className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
           >
-            START MISSION
+            单人模式
           </button>
-        </div>
-        <div className="flex justify-center gap-4">
           <button
             onClick={onGoToMultiplayer}
-            className="px-6 py-3 bg-teal-900 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-teal-700 hover:bg-teal-800 hover:border-teal-500 transition-colors duration-200"
+            className="px-8 py-4 bg-teal-500 text-black font-bold text-2xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/50 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105"
           >
-            MULTIPLAYER
+            多人模式
           </button>
+        </div>
+
+        {/* Secondary Buttons */}
+        <div className="flex justify-center gap-4">
           <button
             onClick={onGoToLoadout}
             className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
