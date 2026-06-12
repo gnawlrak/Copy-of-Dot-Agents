@@ -1,4 +1,6 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { ArrowLeft, Settings } from 'lucide-react';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
 import LevelSelect from './components/LevelSelect';
@@ -12,10 +14,8 @@ import ControlCustomizer from './components/ControlCustomizer';
 import { PlayerLoadout, CustomControls } from './types';
 import { OperatorClassID, OPERATORS } from './data/operators';
 import MultiplayerLobby from './components/MultiplayerLobby';
-import { NetworkClient, Room, createNetworkClient } from './network';
-
+import { MockNetworkClient } from './network';
 import { SaveSystem, GameData } from './data/services/save-system';
-import Login from './components/Login';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
 export type Difficulty = 'simple' | 'normal' | 'hard';
@@ -39,27 +39,26 @@ const DEFAULT_LOADOUT: PlayerLoadout = {
 };
 
 const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
-  baseScale: 1.0,
-  opacity: 0.5,
-  layout: {
-    joystick: { x: 0.078, y: 0.86, scale: 1.6 },
-    fire: { x: 0.92, y: 0.86, scale: 1.2 },
-    fixedFire: { x: 0.078, y: 0.65, scale: 1.2 },
-    reload: { x: 0.92, y: 0.69, scale: 0.8 },
-    interact: { x: 0.85, y: 0.75, scale: 0.8 },
-    switchWeapon: { x: 0.85, y: 0.86, scale: 0.8 },
-    melee: { x: 0.78, y: 0.75, scale: 0.8 },
-    throwableSelect: { x: 0.78, y: 0.86, scale: 0.8 },
-    switchThrowable: { x: 0.71, y: 0.86, scale: 0.8 },
-    fireModeSwitch: { x: 0.78, y: 0.65, scale: 0.8 },
-    heal: { x: 0.85, y: 0.65, scale: 0.8 },
-    special: { x: 0.92, y: 0.59, scale: 0.8 },
-  },
+    baseScale: 1.0,
+    opacity: 0.5,
+    layout: {
+        joystick:       { x: 0.078, y: 0.86, scale: 1.6 },
+        fire:           { x: 0.92,  y: 0.86, scale: 1.2 },
+        fixedFire:      { x: 0.078, y: 0.65, scale: 1.2 },
+        reload:         { x: 0.92,  y: 0.69, scale: 0.8 },
+        interact:       { x: 0.85,  y: 0.75, scale: 0.8 },
+        switchWeapon:   { x: 0.85,  y: 0.86, scale: 0.8 },
+        melee:          { x: 0.78,  y: 0.75, scale: 0.8 },
+        throwableSelect:{ x: 0.78,  y: 0.86, scale: 0.8 },
+        switchThrowable:{ x: 0.71,  y: 0.86, scale: 0.8 },
+        fireModeSwitch: { x: 0.78,  y: 0.65, scale: 0.8 },
+        heal:           { x: 0.85,  y: 0.65, scale: 0.8 },
+        special:        { x: 0.92,  y: 0.59, scale: 0.8 },
+    },
 };
 
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [gameState, setGameState] = useState<GameState>('main-menu');
   const [selectedLevel, setSelectedLevel] = useState<LevelDefinition | null>(null);
   const [levelToEdit, setLevelToEdit] = useState<LevelDefinition | null>(null);
@@ -69,11 +68,9 @@ const App: React.FC = () => {
   const [isCustomizingControls, setIsCustomizingControls] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('simple');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
-  const [networkClient] = useState(() => createNetworkClient());
-  const [currentMultiplayerRoom, setCurrentMultiplayerRoom] = useState<Room | null>(null);
-
+  const networkClientRef = useRef<MockNetworkClient | null>(null);
   const runScoreRef = useRef<number>(0);
-
+  
   // State for saved data
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
@@ -86,122 +83,107 @@ const App: React.FC = () => {
   // Scoring state
   const [totalScore, setTotalScore] = useState<number>(0);
   const [highScore, setHighScore] = useState<number>(0);
-  const [multiplayerTotalScore, setMultiplayerTotalScore] = useState<number>(0);
-  const [multiplayerHighScore, setMultiplayerHighScore] = useState<number>(0);
 
-
+  useEffect(() => {
+    if (!networkClientRef.current) {
+        networkClientRef.current = new MockNetworkClient();
+    }
+  }, []);
+  
   // Data Loading Effect
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const loadData = async () => {
-      console.log(`[App] Loading data for auth user...`);
-      let loadedData = await SaveSystem.loadGameData();
-      console.log(`[App] Loaded data:`, loadedData);
+        let loadedData = await SaveSystem.loadGameData();
 
-      // One-time migration from old format to the new unified save object
-      if (!loadedData && localStorage.getItem('dot_agents_player_loadout')) {
-        console.log("Migrating old data to new save system...");
-        const oldCustomLevels = (() => {
-          try {
-            const levelsJson = localStorage.getItem('dot_agents_custom_levels');
-            return levelsJson ? JSON.parse(levelsJson) : [];
-          } catch { return []; }
-        })();
+        // One-time migration from old format to the new unified save object
+        if (!loadedData && localStorage.getItem('dot_agents_player_loadout')) {
+            console.log("Migrating old data to new save system...");
+            const oldCustomLevels = (() => {
+                try {
+                    const levelsJson = localStorage.getItem('dot_agents_custom_levels');
+                    return levelsJson ? JSON.parse(levelsJson) : [];
+                } catch { return []; }
+            })();
+            
+            const migratedData: GameData = {
+                version: 1,
+                operatorClassId: (localStorage.getItem('dot_agents_operator_class_id') || 'A-Red') as OperatorClassID,
+                aimSensitivity: parseFloat(localStorage.getItem('dot_agents_aim_sensitivity') || '1.0'),
+                agentSkin: localStorage.getItem('dot_agents_agent_skin') || AGENT_SKINS[0].name,
+                playerLoadout: {
+                    ...JSON.parse(localStorage.getItem('dot_agents_player_loadout') || JSON.stringify(DEFAULT_LOADOUT)),
+                    special: 'Rocket Launcher', // Add default special weapon
+                    specialAttachments: {},
+                },
+                customControls: JSON.parse(localStorage.getItem('dot_agents_custom_controls') || JSON.stringify(DEFAULT_CONTROLS_LAYOUT)),
+                customLevels: oldCustomLevels
+            };
+            loadedData = migratedData;
+            await SaveSystem.saveGameData(migratedData);
+            await SaveSystem.clearOldData();
+        }
 
-        const migratedData: GameData = {
-          version: 1,
-          operatorClassId: (localStorage.getItem('dot_agents_operator_class_id') || 'A-Red') as OperatorClassID,
-          aimSensitivity: parseFloat(localStorage.getItem('dot_agents_aim_sensitivity') || '1.0'),
-          agentSkin: localStorage.getItem('dot_agents_agent_skin') || AGENT_SKINS[0].name,
-          playerLoadout: {
-            ...JSON.parse(localStorage.getItem('dot_agents_player_loadout') || JSON.stringify(DEFAULT_LOADOUT)),
-            special: 'Rocket Launcher', // Add default special weapon
-            specialAttachments: {},
-          },
-          customControls: JSON.parse(localStorage.getItem('dot_agents_custom_controls') || JSON.stringify(DEFAULT_CONTROLS_LAYOUT)),
-          customLevels: oldCustomLevels
-        };
-        loadedData = migratedData;
-        await SaveSystem.saveGameData(migratedData);
-        await SaveSystem.clearOldData();
-      }
-
-      if (loadedData) {
-        // Apply loaded data to state
-        setOperatorClassId(loadedData.operatorClassId || 'A-Red');
-        setAimSensitivity(loadedData.aimSensitivity || 1.0);
-        setAgentSkin(loadedData.agentSkin || AGENT_SKINS[0].name);
-        setPlayerLoadout(loadedData.playerLoadout || DEFAULT_LOADOUT);
-        setCustomControls(loadedData.customControls || DEFAULT_CONTROLS_LAYOUT);
-        setCustomLevels(loadedData.customLevels || []);
-        setTotalScore(loadedData.totalScore || 0);
-        setHighScore(loadedData.highScore || 0);
-        setMultiplayerTotalScore(loadedData.multiplayerTotalScore || 0);
-        setMultiplayerHighScore(loadedData.multiplayerHighScore || 0);
-      }
-      setIsDataLoaded(true);
+        if (loadedData) {
+            // Apply loaded data to state
+            setOperatorClassId(loadedData.operatorClassId || 'A-Red');
+            setAimSensitivity(loadedData.aimSensitivity || 1.0);
+            setAgentSkin(loadedData.agentSkin || AGENT_SKINS[0].name);
+            setPlayerLoadout(loadedData.playerLoadout || DEFAULT_LOADOUT);
+            setCustomControls(loadedData.customControls || DEFAULT_CONTROLS_LAYOUT);
+            setCustomLevels(loadedData.customLevels || []);
+            setTotalScore(loadedData.totalScore || 0);
+            setHighScore(loadedData.highScore || 0);
+        }
+        setIsDataLoaded(true);
     };
     loadData();
-  }, [isAuthenticated]);
-
+  }, []);
 
   // Centralized Data Saving Effect
   useEffect(() => {
     if (!isDataLoaded) {
-      return; // Don't save before initial data is loaded, to prevent overwriting save with defaults.
+        return; // Don't save before initial data is loaded, to prevent overwriting save with defaults.
     }
 
     const gameData: GameData = {
-      version: 1,
-      operatorClassId,
-      aimSensitivity,
-      agentSkin,
-      playerLoadout,
-      customControls,
-      customLevels,
-      totalScore,
-      highScore,
-      multiplayerTotalScore,
-      multiplayerHighScore,
+        version: 1,
+        operatorClassId,
+        aimSensitivity,
+        agentSkin,
+        playerLoadout,
+        customControls,
+        customLevels,
+        totalScore,
+        highScore,
     };
-
+    
     setSyncStatus('syncing');
     const handler = setTimeout(() => {
-      SaveSystem.saveGameData(gameData).then(() => {
-        setSyncStatus('synced');
-        setTimeout(() => setSyncStatus('idle'), 1500);
-      }).catch(() => {
-        setSyncStatus('error');
-      });
+        SaveSystem.saveGameData(gameData).then(() => {
+            setSyncStatus('synced');
+            setTimeout(() => setSyncStatus('idle'), 1500);
+        }).catch(() => {
+             setSyncStatus('error');
+        });
     }, 1000); // Debounce saving by 1 second
 
     return () => {
-      clearTimeout(handler);
+        clearTimeout(handler);
     };
 
-  }, [operatorClassId, aimSensitivity, agentSkin, playerLoadout, customControls, customLevels, totalScore, highScore, multiplayerTotalScore, multiplayerHighScore, isDataLoaded]);
+    }, [operatorClassId, aimSensitivity, agentSkin, playerLoadout, customControls, customLevels, totalScore, highScore, isDataLoaded]);
 
-
+  
   const handleStartMission = () => {
     setGameState('level-select');
   };
-
+  
   const handleGoToLoadout = () => {
     setGameState('loadout');
   };
 
   const handleGoToMultiplayer = () => {
-    networkClient.connect();
     setGameState('multiplayer-lobby');
-  };
-
-  const handleMultiplayerGameStart = (room: Room) => {
-    const mapLevel = MISSIONS.find(m => m.name === room.mapName) || MISSIONS[0];
-    setSelectedLevel(mapLevel);
-    setCurrentMultiplayerRoom(room);
-    setIsMultiplayer(true);
-    setGameState('in-game');
   };
 
   const handleGoToEditor = (level: LevelDefinition | null) => {
@@ -215,102 +197,89 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-
+  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => {
+    if (networkClientRef.current) {
+      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name);
+    }
+    setSelectedLevel(level);
+    setIsMultiplayer(true);
+    setGameState('in-game');
+  };
 
   const handleMissionEnd = () => {
     setSelectedLevel(null);
-    const previousState = 'level-select';
-    // IMPORTANT: Don't reset isMultiplayer yet - we need it for score logic below
-    const wasMultiplayer = isMultiplayer;
-
+    networkClientRef.current?.disconnect();
+    const previousState = isMultiplayer ? 'multiplayer-lobby' : 'level-select';
+    setIsMultiplayer(false);
+    
     // When mission ends, accumulate run score into total and update high score
-    // Logic: Accumulate score for both single-player and multiplayer separately
+    // Skip scoring accumulation for training ground maps
+    const isTrainingGround = selectedLevel?.isTrainingGround || false;
     const run = runScoreRef.current || 0;
-    console.log(`[App] Mission end - run=${run}, selectedLevel=${selectedLevel?.name}, wasMultiplayer=${wasMultiplayer}`);
-
-    let newTotalScore = totalScore;
-    let newHighScore = highScore;
-    let newMpTotalScore = multiplayerTotalScore;
-    let newMpHighScore = multiplayerHighScore;
-
-    if (wasMultiplayer) {
-      const prevTotal = multiplayerTotalScore || 0;
-      const prevHigh = multiplayerHighScore || 0;
-      const nextTotal = prevTotal + run;
-      const nextHigh = Math.max(prevHigh, run);
-      console.log('[Score] Multiplayer end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
-      
-      setMultiplayerTotalScore(nextTotal);
-      setMultiplayerHighScore(nextHigh);
-      newMpTotalScore = nextTotal;
-      newMpHighScore = nextHigh;
+    console.log(`[App] Mission end - isTrainingGround=${isTrainingGround}, run=${run}, selectedLevel=${selectedLevel?.name}`);
+    
+    if (!isTrainingGround) {
+        const prevTotal = totalScore || 0;
+        const prevHigh = highScore || 0;
+        const nextTotal = prevTotal + run;
+        const nextHigh = Math.max(prevHigh, run);
+        console.log('[Score] Mission end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
+        setTotalScore(nextTotal);
+        setHighScore(nextHigh);
+        // Persist immediately so main menu shows updated values
+        const gameData: GameData = {
+            version: 1,
+            operatorClassId,
+            aimSensitivity,
+            agentSkin,
+            playerLoadout,
+            customControls,
+            customLevels,
+            totalScore: nextTotal,
+            highScore: nextHigh,
+        };
+        // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
+        const targetState = isMultiplayer ? previousState : 'main-menu';
+        SaveSystem.saveGameData(gameData).then(() => {
+            setSyncStatus('synced');
+            setTimeout(() => setSyncStatus('idle'), 1500);
+            setGameState(targetState);
+        }).catch(err => {
+            console.error('Failed to save score on mission end', err);
+            setGameState(previousState);
+        });
     } else {
-      const prevTotal = totalScore || 0;
-      const prevHigh = highScore || 0;
-      const nextTotal = prevTotal + run;
-      const nextHigh = Math.max(prevHigh, run);
-      console.log('[Score] Singleplayer end. run=', run, 'nextTotal=', nextTotal, 'nextHigh=', nextHigh);
-      
-      setTotalScore(nextTotal);
-      setHighScore(nextHigh);
-      newTotalScore = nextTotal;
-      newHighScore = nextHigh;
+        console.log('[Score] Training ground mission end. run=', run, ' (not accumulated)');
+        // Just return to menu without saving scores
+        const targetState = isMultiplayer ? previousState : 'main-menu';
+        setGameState(targetState);
     }
-
-    // Persist immediately so main menu shows updated values
-    const gameData: GameData = {
-      version: 1,
-      operatorClassId,
-      aimSensitivity,
-      agentSkin,
-      playerLoadout,
-      customControls,
-      customLevels,
-      totalScore: newTotalScore,
-      highScore: newHighScore,
-      multiplayerTotalScore: newMpTotalScore,
-      multiplayerHighScore: newMpHighScore,
-    };
     
-    // Return to appropriate menu
-    const targetState = wasMultiplayer ? 'multiplayer-lobby' : 'main-menu';
-    
-    SaveSystem.saveGameData(gameData).then(() => {
-      setSyncStatus('synced');
-      setTimeout(() => setSyncStatus('idle'), 1500);
-      setIsMultiplayer(false); // Reset after scoring
-      setGameState(targetState);
-    }).catch(err => {
-      console.error('Failed to save score on mission end', err);
-      setIsMultiplayer(false); // Reset even on error
-      setGameState(targetState);
-    });
-
     // Reset run score reference
     runScoreRef.current = 0;
   };
-
+  
   const handleBackToMenu = () => {
     setGameState('main-menu');
   };
-
+  
   const handleSaveCustomLevel = useCallback((level: LevelDefinition) => {
-    setCustomLevels(prevLevels => {
-      const existingIndex = prevLevels.findIndex(l => l.uuid === level.uuid);
-      if (existingIndex > -1) {
-        const newLevels = [...prevLevels];
-        newLevels[existingIndex] = level;
-        return newLevels;
-      } else {
-        return [...prevLevels, level];
-      }
-    });
-    setGameState('level-select');
+      setCustomLevels(prevLevels => {
+          const existingIndex = prevLevels.findIndex(l => l.uuid === level.uuid);
+          if (existingIndex > -1) {
+              const newLevels = [...prevLevels];
+              newLevels[existingIndex] = level;
+              return newLevels;
+          } else {
+              return [...prevLevels, level];
+          }
+      });
+      setGameState('level-select');
   }, []);
 
   const handleDeleteLevel = useCallback((uuid: string) => {
     if (window.confirm('Are you sure you want to delete this custom map?')) {
-      setCustomLevels(prevLevels => prevLevels.filter(l => l.uuid !== uuid));
+        setCustomLevels(prevLevels => prevLevels.filter(l => l.uuid !== uuid));
     }
   }, []);
 
@@ -320,40 +289,40 @@ const App: React.FC = () => {
   };
 
   const handleBackToLoadout = useCallback(() => {
-    setWeaponToModify(null);
-    setGameState('loadout');
+      setWeaponToModify(null);
+      setGameState('loadout');
   }, []);
 
   const handleAttachmentsChange = (newAttachments: { [slot: string]: string }) => {
-    if (!weaponToModify) return;
+      if (!weaponToModify) return;
+      
+      let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
+      if(weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
+      if(weaponToModify === 'special') attachmentField = 'specialAttachments';
 
-    let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
-    if (weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
-    if (weaponToModify === 'special') attachmentField = 'specialAttachments';
-
-    setPlayerLoadout(prev => ({
-      ...prev,
-      [attachmentField]: newAttachments,
-    }));
+      setPlayerLoadout(prev => ({
+          ...prev,
+          [attachmentField]: newAttachments,
+      }));
   };
 
   const handleGlobalBack = useCallback(() => {
     switch (gameState) {
-      case 'level-select':
-      case 'loadout':
-      case 'multiplayer-lobby':
-        setGameState('main-menu');
-        break;
-      case 'map-editor':
-        // The global back button is not shown in the editor,
-        // but if it were, this would be a "cancel without saving" action.
-        setGameState('level-select');
-        break;
-      case 'weapon-modification':
-        handleBackToLoadout();
-        break;
-      default:
-        break;
+        case 'level-select':
+        case 'loadout':
+        case 'multiplayer-lobby':
+            setGameState('main-menu');
+            break;
+        case 'map-editor':
+            // The global back button is not shown in the editor,
+            // but if it were, this would be a "cancel without saving" action.
+            setGameState('level-select');
+            break;
+        case 'weapon-modification':
+            handleBackToLoadout();
+            break;
+        default:
+            break;
     }
   }, [gameState, handleBackToLoadout]);
 
@@ -370,29 +339,28 @@ const App: React.FC = () => {
           return (
             <div className="w-full h-full flex items-center justify-center p-4">
               <div className="w-full h-full max-h-[calc(100vh-2rem)] aspect-video bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
-                <GameCanvas
-                  level={selectedLevel}
-                  loadout={playerLoadout}
-                  operator={operator}
-                  onMissionEnd={handleMissionEnd}
-                  showSoundWaves={showSoundWaves}
-                  agentSkinColor={skinColor}
-                  customControls={customControls}
-                  aimSensitivity={aimSensitivity}
-                  onAimSensitivityChange={setAimSensitivity}
-                  onCustomControlsChange={setCustomControls}
-                  defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
-                  difficulty={difficulty}
-                  isMultiplayer={isMultiplayer}
-                  networkClient={networkClient}
-
-                  initialRunScore={0}
-                  onScoreChange={(newRunScore: number) => {
-                    console.log(`[App] onScoreChange called with: ${newRunScore}`);
-                    runScoreRef.current = newRunScore;
-                  }}
-                  totalScore={totalScore}
-                  highScore={highScore}
+                <GameCanvas 
+                    level={selectedLevel} 
+                    loadout={playerLoadout} 
+                    operator={operator}
+                    onMissionEnd={handleMissionEnd} 
+                    showSoundWaves={showSoundWaves} 
+                    agentSkinColor={skinColor}
+                    customControls={customControls}
+                    aimSensitivity={aimSensitivity}
+                    onAimSensitivityChange={setAimSensitivity}
+                    onCustomControlsChange={setCustomControls}
+                    defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
+                    difficulty={difficulty}
+                    isMultiplayer={isMultiplayer}
+                    networkClient={networkClientRef.current}
+                    initialRunScore={0}
+                    onScoreChange={(newRunScore: number) => {
+                        console.log(`[App] onScoreChange called with: ${newRunScore}`);
+                        runScoreRef.current = newRunScore;
+                    }}
+                    totalScore={totalScore}
+                    highScore={highScore}
                 />
               </div>
             </div>
@@ -402,10 +370,10 @@ const App: React.FC = () => {
         setGameState('level-select');
         return null;
       case 'level-select':
-        return <LevelSelect
-          officialLevels={MISSIONS}
+        return <LevelSelect 
+          officialLevels={MISSIONS} 
           customLevels={customLevels}
-          onSelectLevel={handleSelectLevel}
+          onSelectLevel={handleSelectLevel} 
           onEditLevel={(level) => handleGoToEditor(level)}
           onDeleteLevel={handleDeleteLevel}
           onCreateNew={() => handleGoToEditor(null)}
@@ -419,105 +387,90 @@ const App: React.FC = () => {
           </div>
         );
       case 'loadout':
-        return <LoadoutMenu
-          currentLoadout={playerLoadout}
+        return <LoadoutMenu 
+          currentLoadout={playerLoadout} 
           onLoadoutChange={setPlayerLoadout}
           currentSkinName={agentSkin}
           onSkinChange={setAgentSkin}
           onModifyWeapon={handleGoToModifyWeapon}
         />;
       case 'weapon-modification': {
-        if (!weaponToModify) {
-          setGameState('loadout'); // Fallback
-          return null;
-        }
-        const weaponName = playerLoadout[weaponToModify];
+          if (!weaponToModify) {
+              setGameState('loadout'); // Fallback
+              return null;
+          }
+          const weaponName = playerLoadout[weaponToModify];
+          
+          let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
+          if(weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
+          if(weaponToModify === 'special') attachmentField = 'specialAttachments';
+          const currentAttachments = playerLoadout[attachmentField];
 
-        let attachmentField: 'primaryAttachments' | 'secondaryAttachments' | 'specialAttachments' = 'primaryAttachments';
-        if (weaponToModify === 'secondary') attachmentField = 'secondaryAttachments';
-        if (weaponToModify === 'special') attachmentField = 'specialAttachments';
-        const currentAttachments = playerLoadout[attachmentField];
-
-        return (
-          <WeaponModificationMenu
-            weaponName={weaponName}
-            currentAttachments={currentAttachments}
-            onAttachmentsChange={handleAttachmentsChange}
-          />
-        );
+          return (
+            <WeaponModificationMenu 
+                weaponName={weaponName}
+                currentAttachments={currentAttachments}
+                onAttachmentsChange={handleAttachmentsChange}
+            />
+          );
       }
       case 'multiplayer-lobby':
-        return <MultiplayerLobby
-          networkClient={networkClient}
-          onStartGame={handleMultiplayerGameStart}
-          onBack={handleGlobalBack}
+        return <MultiplayerLobby 
+            onJoinGame={handleJoinMultiplayerGame}
+            missions={MISSIONS}
         />;
-
       case 'main-menu':
       default:
-        return <MainMenu
-          onStart={handleStartMission}
-          onGoToLoadout={handleGoToLoadout}
-          onGoToMultiplayer={handleGoToMultiplayer}
-          onGoToEditor={() => handleGoToEditor(null)}
-          onLogout={() => {
-            setIsAuthenticated(false);
-            SaveSystem.setAuthToken(null);
-            setGameState('main-menu');
-          }}
-
-          syncStatus={syncStatus}
-          totalScore={totalScore}
-          highScore={highScore}
-          multiplayerTotalScore={multiplayerTotalScore}
-          multiplayerHighScore={multiplayerHighScore}
+        return <MainMenu 
+            onStart={handleStartMission} 
+            onGoToLoadout={handleGoToLoadout} 
+            onGoToEditor={() => handleGoToEditor(null)} 
+            onGoToMultiplayer={handleGoToMultiplayer}
+            syncStatus={syncStatus}
+            totalScore={totalScore}
+            highScore={highScore}
         />;
     }
   };
-
+  
   const BackButton = () => (
     <button
-      onClick={handleGlobalBack}
-      className="absolute top-4 left-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200"
-      aria-label="Go Back"
+        onClick={handleGlobalBack}
+        className="absolute top-4 left-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
+        aria-label="Go Back"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-      </svg>
+        <ArrowLeft className="h-6 w-6" />
     </button>
   );
 
   const SettingsButton = () => (
     <button
-      onClick={() => setShowSettings(true)}
-      className="absolute top-4 right-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200"
-      aria-label="Open Settings"
+        onClick={() => setShowSettings(true)}
+        className="absolute top-4 right-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
+        aria-label="Open Settings"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
+        <Settings className="h-6 w-6 animate-[spin_8s_linear_infinite]" />
     </button>
   );
 
   const shouldShowGlobalUI = gameState !== 'in-game' && gameState !== 'map-editor' && !isCustomizingControls && !showSettings;
 
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-  }
-
   return (
-    <main className="bg-black text-white w-screen h-screen flex flex-col items-center justify-center font-mono overflow-hidden relative">
+    <main className={`bg-black text-white w-screen font-mono relative flex flex-col items-center justify-center ${
+      gameState === 'in-game' || gameState === 'map-editor'
+        ? 'h-screen overflow-hidden'
+        : 'min-h-screen overflow-y-auto py-8 px-4'
+    }`}>
       {shouldShowGlobalUI && gameState !== 'main-menu' && <BackButton />}
       {shouldShowGlobalUI && <SettingsButton />}
-
+      
       {renderContent()}
 
       {showSettings && (
-        <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
             <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
-
+            
             <div className="flex flex-col gap-2 py-4">
               <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
                 <span>Aim Sensitivity</span>
@@ -534,7 +487,7 @@ const App: React.FC = () => {
                 className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
               />
             </div>
-
+            
             <div className="flex items-center justify-between py-4">
               <span className="text-lg text-gray-300" id="sound-waves-label">Show Sound Waves</span>
               <button
@@ -547,10 +500,10 @@ const App: React.FC = () => {
                 <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${showSoundWaves ? 'translate-x-6' : ''}`} />
               </button>
             </div>
-            <button
+             <button
               onClick={() => {
-                setShowSettings(false);
-                setIsCustomizingControls(true);
+                  setShowSettings(false);
+                  setIsCustomizingControls(true);
               }}
               className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
             >
@@ -567,13 +520,13 @@ const App: React.FC = () => {
       )}
       {isCustomizingControls && (
         <ControlCustomizer
-          initialLayout={customControls}
-          defaultLayout={DEFAULT_CONTROLS_LAYOUT}
-          onSave={(newLayout) => {
-            setCustomControls(newLayout);
-            setIsCustomizingControls(false);
-          }}
-          onClose={() => setIsCustomizingControls(false)}
+            initialLayout={customControls}
+            defaultLayout={DEFAULT_CONTROLS_LAYOUT}
+            onSave={(newLayout) => {
+                setCustomControls(newLayout);
+                setIsCustomizingControls(false);
+            }}
+            onClose={() => setIsCustomizingControls(false)}
         />
       )}
     </main>

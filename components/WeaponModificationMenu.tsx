@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { WEAPONS, Attachment, FireMode } from '../data/weapons';
+import { Sliders, Eye, Activity, ChevronRight, Info, Layers, Settings, Crosshair, Zap, Gauge } from 'lucide-react';
 
 interface WeaponModificationMenuProps {
     weaponName: string;
@@ -215,13 +216,17 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
     const partIdToHighlight = selectedSlot ? schematic.slotPartMap[selectedSlot] : null;
 
     return (
-        <div className="w-full h-full max-w-screen-2xl mx-auto p-4 flex flex-col">
+        <div className="w-full min-h-full max-w-screen-2xl mx-auto p-4 flex flex-col my-auto">
              <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-2 text-center">{weaponName.toUpperCase()}</h1>
              <p className="text-gray-400 text-center mb-6">选择一个槽位, 然后从右侧列表中选择配件进行安装</p>
 
             <div className="flex-grow grid grid-cols-1 lg:grid-cols-5 gap-6 min-h-0">
                 {/* Left Column: Slot List */}
-                <div className="lg:col-span-1 bg-gray-900 border-2 border-gray-800 p-2 rounded-md flex flex-col gap-2 overflow-y-auto">
+                <div className="lg:col-span-1 bg-gray-900 border-2 border-gray-800 p-2 rounded-md flex flex-col gap-2 overflow-y-auto shadow-sm">
+                    <div className="p-2 border-b border-gray-800 mb-1 flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-teal-400 font-bold" />
+                        <h2 className="text-xs font-bold text-gray-400 tracking-widest uppercase">SLOTS</h2>
+                    </div>
                     {attachmentSlots.map(slotName => {
                         const isSelected = selectedSlot === slotName;
                         const equippedAttachment = currentAttachments[slotName] || '无配件';
@@ -229,18 +234,23 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                             <button
                                 key={slotName}
                                 onClick={() => setSelectedSlot(slotName)}
-                                className={`w-full p-3 rounded-md text-left transition-colors duration-200 ${isSelected ? 'bg-teal-500/20 border-l-4 border-teal-400' : 'bg-gray-800/50 hover:bg-gray-700/70'}`}
+                                className={`w-full p-3 rounded-md text-left transition-colors duration-200 cursor-pointer ${isSelected ? 'bg-teal-500/10 border-l-4 border-teal-400 text-teal-300' : 'bg-gray-850 hover:bg-gray-800'}`}
                             >
-                                <h3 className="font-bold text-lg tracking-wider uppercase text-gray-300">{slotName}</h3>
-                                <p className="text-sm text-teal-400 truncate">{equippedAttachment}</p>
+                                <h3 className="font-bold text-sm tracking-wider uppercase text-gray-300">{slotName}</h3>
+                                <p className="text-xs text-teal-400 mt-1 truncate">{equippedAttachment}</p>
                             </button>
                         );
                     })}
                 </div>
 
                 {/* Center Column: Exploded View */}
-                <div className="lg:col-span-3 bg-gray-900 border-2 border-gray-800 rounded-md flex items-center justify-center p-8 relative min-h-[300px]">
-                    <div className="relative w-full h-full flex items-center justify-center">
+                <div className="lg:col-span-3 bg-gray-900 border-2 border-gray-800 rounded-md flex flex-col p-4 relative min-h-[300px] shadow-sm">
+                    <div className="p-1 border-b border-gray-800 mb-2 flex items-center gap-2 flex-shrink-0">
+                        <Crosshair className="h-4 w-4 text-teal-400" />
+                        <h2 className="text-xs font-bold text-gray-400 tracking-widest uppercase">SCHEMATIC INTERACTION</h2>
+                    </div>
+                    <div className="flex-grow flex items-center justify-center relative">
+                        <div className="relative w-full h-full flex items-center justify-center">
                         <div className="relative" style={schematic.containerStyle}>
                             {schematic.parts.map(part => {
                                 const isHighlighted = part.id === partIdToHighlight;
@@ -264,11 +274,13 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                         </div>
                     </div>
                 </div>
+            </div>
 
                 {/* Right Column: Attachments */}
-                <div className="lg:col-span-1 bg-gray-900 border-2 border-gray-800 p-2 rounded-md flex flex-col">
-                    <div className="flex-shrink-0 p-2 border-b-2 border-gray-700">
-                        <h2 className="text-xl font-bold text-teal-400 tracking-wider uppercase">{selectedSlot || '选择槽位'}</h2>
+                <div className="lg:col-span-1 bg-gray-900 border-2 border-gray-800 p-2 rounded-md flex flex-col shadow-sm">
+                    <div className="flex-shrink-0 p-2 border-b-2 border-gray-700 mb-2 flex items-center gap-2">
+                        <Sliders className="h-4 w-4 text-teal-400 font-bold" />
+                        <h2 className="text-sm font-bold text-teal-400 tracking-wider uppercase">{selectedSlot || 'SELECT SLOT'}</h2>
                     </div>
                     <div className="flex-grow space-y-3 overflow-y-auto p-2">
                         {selectedSlot && weaponDef.attachmentSlots && (
@@ -308,8 +320,12 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
             </div>
 
             {/* Bottom Row: Stats */}
-            <div className="w-full mt-6 bg-gray-900 border-2 border-gray-800 p-4 rounded-md">
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-4">
+            <div className="w-full mt-6 bg-gray-900 border-2 border-gray-800 p-5 rounded-md shadow-sm">
+                <div className="flex items-center gap-2 border-b border-gray-800 pb-3 mb-4">
+                    <Gauge className="h-5 w-5 text-teal-400 font-bold" />
+                    <h3 className="text-xs font-bold text-gray-400 tracking-widest uppercase">REAL-TIME TELEMETRY</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-5">
                     <StatBar label="Damage" baseValue={weaponDef.damage} modifiedValue={modifiedStats.damage} previewValue={previewStats?.damage} format={v => v.toFixed(0)} />
                     <StatBar label="Fire Rate" baseValue={weaponDef.fireRate} modifiedValue={modifiedStats.fireRate} previewValue={previewStats?.fireRate} lowerIsBetter format={v => `${(1/v).toFixed(1)}/s`} />
                     <StatBar label="Reload Speed" baseValue={weaponDef.reloadTime} modifiedValue={modifiedStats.reloadTime} previewValue={previewStats?.reloadTime} lowerIsBetter format={v => `${v.toFixed(1)}s`} />

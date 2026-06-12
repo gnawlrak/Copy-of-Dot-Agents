@@ -41,7 +41,7 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
         e.preventDefault();
         
         let touch;
-        for (const t of Array.from(e.changedTouches)) {
+        for (const t of Array.from(e.changedTouches) as any[]) {
             if (t.identifier === draggingControl.touchId) {
                 touch = t;
                 break;
@@ -76,7 +76,7 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
 
     const handleContainerTouchEnd = (e: TouchEvent<HTMLDivElement>) => {
         if (!draggingControl) return;
-         for (const t of Array.from(e.changedTouches)) {
+         for (const t of Array.from(e.changedTouches) as any[]) {
             if (t.identifier === draggingControl.touchId) {
                 setDraggingControl(null);
                 break;
@@ -101,7 +101,7 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
     );
 
     return (
-        <div className="absolute inset-0 bg-black bg-opacity-90 z-[100] flex flex-col p-4 text-white font-mono"
+        <div className="fixed inset-0 bg-black bg-opacity-90 z-[100] flex flex-col p-4 text-white font-mono"
              onTouchMove={handleContainerTouchMove}
              onTouchEnd={handleContainerTouchEnd}
              onTouchCancel={handleContainerTouchEnd}
@@ -118,7 +118,8 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
             
             {/* Main content area */}
             <div ref={containerRef} className="flex-grow my-4 border-2 border-dashed border-gray-600 relative overflow-hidden">
-                {Object.entries(layout.layout).map(([id, control]) => {
+                {Object.entries(layout.layout).map(([id, ctrlRaw]) => {
+                    const control = ctrlRaw as any;
                     const baseRadius = (containerRef.current ? containerRef.current.clientHeight * 0.06 : 40) * layout.baseScale;
                     const radius = baseRadius * control.scale;
                     
