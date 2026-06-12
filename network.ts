@@ -22,6 +22,9 @@ export interface RemotePlayer extends PlayerState {
     targetY: number;
     lastUpdateTime: number;
     isShooting: boolean; // Received from network to show muzzle flash
+    playerId?: string; // Alias of id used for drawing username tags compat
+    lastUpdate?: number; // Used for status window filtering compat
+    maxHealth?: number;
 }
 
 // Represents a weapon fire event

@@ -8,6 +8,8 @@ import { Difficulty } from '../App';
 import { Operator } from '../data/operators';
 import { MockNetworkClient, RemotePlayer, PlayerState, FireEventPayload } from '../network';
 
+type BrightnessFn = (x: number, y: number, radius: number) => number;
+
 // Define types for geometry
 type Point = { x: number; y: number };
 type Wall = { x: number; y: number; width: number; height: number };
@@ -597,6 +599,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       y: player.y,
       health: player.health,
       direction: player.direction || 0,
+      skinColor: agentSkinColor,
       team: player.team,
       isReady: player.isReady,
       kills: player.kills,
@@ -681,57 +684,67 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     };
   }, [networkClient, isMultiplayer, handleNetworkHit]);
   
-  // 绘制远程玩家
-  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
+  // 绘制远程玩家（在 camera transform 内部调用，使用世界坐标）
+  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, playerRadius: number, getBrightness: BrightnessFn, visionRadius: number) => {
     if (!isMultiplayer) return;
-    
+
     const now = Date.now();
     const players = remotePlayersRef.current.filter(p => now - p.lastUpdate < 5000); // 只显示最近5秒内有更新的玩家
-    
+
     players.forEach(player => {
-      const { x, y, health, maxHealth, team, isReady } = player;
-      
+      const { x, y, health, maxHealth, team, isReady, skinColor } = player;
+
+      const brightness = getBrightness(x, y, visionRadius);
+      if (brightness <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = brightness;
+
       // 绘制玩家身体
-      ctx.fillStyle = team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)';
+      ctx.fillStyle = skinColor || (team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)');
       ctx.beginPath();
-      ctx.arc(x * scale, y * scale, 10 * scale * cameraScale, 0, Math.PI * 2);
+      ctx.arc(x, y, playerRadius, 0, Math.PI * 2);
       ctx.fill();
-      
+
       // 绘制玩家轮廓
       ctx.strokeStyle = team === 'red' ? 'rgba(255, 50, 50, 0.9)' : 'rgba(50, 50, 255, 0.9)';
-      ctx.lineWidth = 2 * scale * cameraScale;
+      ctx.lineWidth = 2 * scale;
       ctx.stroke();
-      
+
       // 绘制血条
-      const healthPercent = health / maxHealth;
-      const barWidth = 20 * scale * cameraScale;
-      const barHeight = 3 * scale * cameraScale;
-      const barX = x * scale - barWidth / 2;
-      const barY = y * scale - 15 * scale * cameraScale;
-      
+      const currentHealth = health || 0;
+      const currentMaxHealth = maxHealth || 100;
+      const healthPercent = currentMaxHealth > 0 ? currentHealth / currentMaxHealth : 0;
+      const barWidth = 20 * scale;
+      const barHeight = 3 * scale;
+      const barX = x - barWidth / 2;
+      const barY = y - playerRadius - 8 * scale;
+
       // 背景
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(barX, barY, barWidth, barHeight);
-      
+
       // 血量
-      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' : 
-                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' : 
+      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' :
+                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' :
                      'rgba(255, 100, 100, 0.9)';
       ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
-      
+
       // 绘制准备状态
       if (isReady) {
         ctx.fillStyle = 'rgba(100, 255, 100, 0.8)';
         ctx.beginPath();
-        ctx.arc(x * scale, y * scale - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
+        ctx.arc(x, y - playerRadius - 16 * scale, 3 * scale, 0, Math.PI * 2);
         ctx.fill();
       }
-      
+
       // 绘制玩家ID
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.font = `${10 * scale * cameraScale}px Arial`;
+      ctx.font = `${10 * scale}px Arial`;
       ctx.textAlign = 'center';
-      ctx.fillText(player.playerId.substring(0, 8), x * scale, y * scale + 20 * scale * cameraScale);
+      ctx.fillText((player.playerId || player.id || '').substring(0, 8), x, y + playerRadius + 14 * scale);
+
+      ctx.restore();
     });
   }, [isMultiplayer]);
   
@@ -1395,27 +1408,47 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         const ux = Math.cos(playerDirection);
         const uy = Math.sin(playerDirection);
 
-        for (const enemy of enemiesRef.current) {
-            if (enemy.health <= 0) continue;
-            const dx = enemy.x - player.x;
-            const dy = enemy.y - player.y;
+        const tryBashUnit = (unit: Player | RemotePlayer | Enemy, isLocalPlayer: boolean) => {
+            if ('health' in unit && unit.health != null && unit.health <= 0) return;
+            const ur = 'radius' in unit ? (unit as any).radius : player.radius;
+            const dx = unit.x - player.x;
+            const dy = unit.y - player.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist < bashRange + enemy.radius) {
+            if (dist < bashRange + ur) {
                 const angleToEnemy = Math.atan2(dy, dx);
                 let angleDiff = Math.abs(normalizeAngle(angleToEnemy - playerDirection));
                 if (angleDiff < Math.PI / 4) { // 45 degree cone
-                    const healthBefore = enemy.health;
-                    enemy.health -= currentMelee.damage;
-                    enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
-                    if (enemy.health <= 0 && healthBefore > 0) {
-                        hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                        try { addScore(SCORE_PER_KILL); } catch {}
-                        try {
-                            // no drop
-                        } catch (e) {}
+                    if ('id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId) {
+                        // Remote player: authoritative damage on target client
+                        (networkClient as any).send('player-hit', {
+                            targetId: unit.id,
+                            damage: currentMelee.damage,
+                            attackerId: networkClient.ownId,
+                            impact: { x: unit.x, y: unit.y },
+                            sourceDir: { x: ux, y: uy }
+                        });
+                    } else if (!isLocalPlayer) {
+                        // Enemy AI
+                        const enemy = unit as Enemy;
+                        const healthBefore = enemy.health;
+                        enemy.health -= currentMelee.damage;
+                        enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
+                        if (enemy.health <= 0 && healthBefore > 0) {
+                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                            try { addScore(SCORE_PER_KILL); } catch {}
+                        }
                     }
                 }
+            }
+        };
+
+        for (const enemy of enemiesRef.current) {
+            tryBashUnit(enemy, false);
+        }
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                tryBashUnit(rp as any, false);
             }
         }
         shockwavesRef.current.push({ x: player.x + ux * 30, y: player.y + uy * 30, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
@@ -1958,25 +1991,16 @@ const startHealing = () => {
           return weapon;
       }
       
-      // For custom rooms/pvp prototype: start player with only a basic pistol (no attachments) in secondary slot
-      // Use a simplified pistol-only loadout for multiplayer prototype, but keep full loadout for singleplayer
+      // Initialize full loadout for both singleplayer and multiplayer
       try {
-          if (isMultiplayer) {
-              const empty = { name: '__EMPTY__' } as unknown as Weapon;
-              const basicPistol = createWeaponInstance('Pistol', {});
-              player.weapons = [ empty, basicPistol, createWeaponInstance(loadout.melee, {}), createWeaponInstance(loadout.special, loadout.specialAttachments) ];
-              // Default to secondary (index 1) so player holds the pistol in multiplayer
-              player.currentWeaponIndex = 1;
-          } else {
-              player.weapons = [
-                  createWeaponInstance(loadout.primary, loadout.primaryAttachments),
-                  createWeaponInstance(loadout.secondary, loadout.secondaryAttachments),
-                  createWeaponInstance(loadout.melee, {}),
-                  createWeaponInstance(loadout.special, loadout.specialAttachments)
-              ];
-              // Default to primary in singleplayer
-              player.currentWeaponIndex = 0;
-          }
+          player.weapons = [
+              createWeaponInstance(loadout.primary, loadout.primaryAttachments),
+              createWeaponInstance(loadout.secondary, loadout.secondaryAttachments),
+              createWeaponInstance(loadout.melee, {}),
+              createWeaponInstance(loadout.special, loadout.specialAttachments)
+          ];
+          // Default to primary
+          player.currentWeaponIndex = 0;
       } catch (e) {
           // fallback safe state
           try { player.weapons = [ createWeaponInstance(loadout.primary, loadout.primaryAttachments) ]; } catch {}
@@ -2157,9 +2181,16 @@ const startHealing = () => {
               player.y = spawnY;
               player.health = player.maxHealth;
               
-              // Reset magazines to full stock on spawn
+              // Reset magazines, reserves, and shield durability on spawn
               player.weapons.forEach(w => {
+                  const def = WEAPONS[w.name];
                   w.ammoInMag = w.magSize;
+                  if (def) {
+                      w.reserveAmmo = def.reserveAmmo;
+                  }
+                  if (w.durability && w.maxDurability) {
+                      w.durability = w.maxDurability;
+                  }
               });
               
               sendPlayerAction('player-reset', { id: networkClient?.ownId || 'local' });
@@ -2265,7 +2296,7 @@ const startHealing = () => {
         }
 
 
-        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
             const dist = Math.hypot(unit.x - n.x, unit.y - n.y);
             if (dist > rad) return;
 
@@ -2277,12 +2308,14 @@ const startHealing = () => {
                 }
             }
 
+            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
+
             if (n.type === 'grenade') {
                 if (isObstructed) return;
-                const damage = (1 - (dist / rad)) * (isPlayer ? 100 : 999);
-                if(isPlayer) {
+                const damage = (1 - (dist / rad)) * (isLocalPlayer ? 100 : 999);
+                if (isLocalPlayer) {
                     const player = unit as Player;
-                    if(isEnded) return;
+                    if (isEnded) return;
 
                     let damageToApply = damage;
                     const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
@@ -2294,17 +2327,17 @@ const startHealing = () => {
                         if (isEquipped && angleDiff < Math.PI / 2) {
                             shield.durability! -= damageToApply;
                             damageToApply = 0;
-                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) { // Back protection
+                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) {
                             shield.durability! -= damage * 0.8;
                             damageToApply *= 0.2;
                         }
                     }
-                    
+
                     if (damageToApply > 0) {
                         player.health -= damageToApply;
                         player.hitTimer = 0.17;
                     }
-                    
+
                     const dx = player.x - n.x;
                     const dy = player.y - n.y;
                     const impactDist = Math.hypot(dx, dy) || 1;
@@ -2318,24 +2351,31 @@ const startHealing = () => {
                     });
 
                     if (player.health <= 0) {
-                        player.health = 1; // leave 1 hp and let applyDamageToPlayer finish it and process respawn
+                        player.health = 1;
                         applyDamageToPlayer(10, {x: dx / impactDist, y: dy / impactDist}, {x: player.x, y: player.y}, 'explosion');
                     }
+                } else if (isRemotePlayer) {
+                    (networkClient as any).send('player-hit', {
+                        targetId: unit.id,
+                        damage: damage,
+                        attackerId: networkClient.ownId,
+                        impact: { x: unit.x, y: unit.y },
+                        sourceDir: { x: (unit.x - n.x) / dist, y: (unit.y - n.y) / dist }
+                    });
                 } else {
                     const enemy = unit as Enemy;
                     const healthBefore = enemy.health;
                     enemy.health -= damage;
-                                        if (enemy.health <= 0 && healthBefore > 0) {
-                                            hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                                            try { addScore(SCORE_PER_KILL); } catch {}
-                                        }
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                        hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                        try { addScore(SCORE_PER_KILL); } catch {}
+                    }
                 }
-            } else { // flashbang
-                if (isPlayer) {
+            } else if (n.type === 'flashbang') {
+                if (isLocalPlayer) {
                     const player = unit as Player;
                     const viewPoly = getVisionPolygon(player, dynamicSegments, {width: canvas.width, height: canvas.height});
                     if (pointInPoly(n.x, n.y, viewPoly)) {
-                        // Explosion is visible, check direction for flash effect reduction.
                         const mouse = mousePosRef.current;
                         const angleToMouse = Math.atan2(mouse.y - player.y, mouse.x - player.x);
                         const angleToFlash = Math.atan2(n.y - player.y, n.x - player.x);
@@ -2345,31 +2385,30 @@ const startHealing = () => {
                             angleDiff = 2 * Math.PI - angleDiff;
                         }
 
-                        // angleDiff is now between 0 (front) and PI (behind)
-                        const maxFlashDuration = 2.5; // seconds
-                        const minFlashDuration = 0.5; // seconds
-
-                        // Calculate flash intensity based on angle. 1.0 for front, 0.0 for back.
+                        const maxFlashDuration = 2.5;
+                        const minFlashDuration = 0.5;
                         const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
-                        
                         const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
                         player.flashTimer = Math.max(player.flashTimer, flashDuration);
                     }
-                } else { // is enemy
+                } else if (isRemotePlayer) {
+                    // Remote players handle flashbang visuals locally; only notify if you want synced stun.
+                    // For now, we rely on the visual on the victim client, so no network packet needed.
+                } else {
                     if (isObstructed) return;
                     const enemy = unit as Enemy;
                     const angleToFlash = Math.atan2(n.y - enemy.y, n.x - enemy.x);
-                    
+
                     let angleDiff = Math.abs(enemy.direction - angleToFlash);
                     if (angleDiff > Math.PI) {
                         angleDiff = 2 * Math.PI - angleDiff;
                     }
-            
-                    const maxFlashDuration = 2.5; // seconds
-                    const minFlashDuration = 0.5; // seconds
+
+                    const maxFlashDuration = 2.5;
+                    const minFlashDuration = 0.5;
                     const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
                     const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
-                    
+
                     enemy.stunTimer = Math.max(enemy.stunTimer || 0, flashDuration);
                     enemy.isAlert = false;
                 }
@@ -2377,6 +2416,9 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
+        if (isMultiplayer && networkClient) {
+            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
+        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -2395,7 +2437,7 @@ const startHealing = () => {
         explosionsRef.current.push({ x, y, radius: 0, maxRadius: radius, lifetime: 0.5, maxLifetime: 0.5, type: 'grenade' });
         soundWavesRef.current.push({ x, y, radius: 0, maxRadius: 800 * scale / cameraScale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
 
-        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
             const dist = Math.hypot(unit.x - x, unit.y - y);
             if (dist > radius) return;
 
@@ -2408,8 +2450,10 @@ const startHealing = () => {
             }
             if (isObstructed) return;
 
+            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
             const damage = (1 - (dist / radius)) * maxDamage;
-            if (isPlayer) {
+
+            if (isLocalPlayer) {
                 const player = unit as Player;
                 if (isEnded) return;
 
@@ -2428,16 +2472,24 @@ const startHealing = () => {
                         damageToApply *= 0.2;
                     }
                 }
-                
+
                 if (damageToApply > 0) {
                     player.health -= damageToApply;
                     player.hitTimer = 0.17;
                 }
-                
+
                 if (player.health <= 0) {
                     player.health = 1;
                     applyDamageToPlayer(10, {x: 0, y: 0}, {x: player.x, y: player.y}, 'explosion');
                 }
+            } else if (isRemotePlayer) {
+                (networkClient as any).send('player-hit', {
+                    targetId: unit.id,
+                    damage: damage,
+                    attackerId: networkClient.ownId,
+                    impact: { x: unit.x, y: unit.y },
+                    sourceDir: { x: (unit.x - x) / dist, y: (unit.y - y) / dist }
+                });
             } else {
                 const enemy = unit as Enemy;
                 const healthBefore = enemy.health;
@@ -2449,6 +2501,9 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
+        if (isMultiplayer && networkClient) {
+            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
+        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -3270,15 +3325,34 @@ doorsRef.current.forEach(door => {
 
             const healthBefore = enemy.health;
             enemy.health = 0; // Slash is an instant kill
-                            if (healthBefore > 0) {
-                            slashHitThisSwingRef.current.add(enemy);
-                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                            shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
-                                                        try { addScore(SCORE_PER_KILL); } catch {}
-                                                        try {
-                                                                // no drop
-                                                        } catch (e) {}
-                        }
+            if (healthBefore > 0) {
+                slashHitThisSwingRef.current.add(enemy);
+                hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+                try { addScore(SCORE_PER_KILL); } catch {}
+            }
+        }
+
+        // Check remote players in multiplayer for slash hits
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                if (slashHitThisSwingRef.current.has(rp as any)) continue;
+                const dx = rp.x - player.x, dy = rp.y - player.y; const dist = Math.hypot(dx, dy);
+                if (dist < slash.inner || dist > slash.range) continue;
+                const ang = Math.atan2(dy, dx);
+                if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
+                const dClear = raycast(player.x, player.y, ang, dist);
+                if (dClear < dist - 1e-3) continue;
+
+                slashHitThisSwingRef.current.add(rp as any);
+                (networkClient as any).send('player-hit', {
+                    targetId: rp.id,
+                    damage: 150,
+                    attackerId: networkClient.ownId,
+                    impact: { x: rp.x, y: rp.y },
+                    sourceDir: { x: dx / dist, y: dy / dist }
+                });
+            }
         }
 
         if (castDist < slash.range - 0.5){
@@ -3372,6 +3446,21 @@ doorsRef.current.forEach(door => {
                 enemy.burnDamage = patch.damagePerSecond;
                 if (!enemy.isAlert) {
                      enemy.isAlert = true; // Make them react to being on fire
+                }
+            }
+        }
+
+        // Check remote players standing in fire
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                if (Math.hypot(rp.x - patch.x, rp.y - patch.y) < player.radius + patch.radius) {
+                    (networkClient as any).send('player-hit', {
+                        targetId: rp.id,
+                        damage: patch.damagePerSecond * dt,
+                        attackerId: networkClient.ownId,
+                        impact: { x: rp.x, y: rp.y },
+                        sourceDir: { x: 0, y: 0 }
+                    });
                 }
             }
         }
@@ -4071,33 +4160,14 @@ doorsRef.current.forEach(door => {
               
               context.restore();
           }
-
-          // Render remote players
-          if (isMultiplayer) {
-              remotePlayersRef.current.forEach(p => {
-                  const brightness = getBrightnessByDistance(p.x, p.y, visionRadius);
-                  if (brightness <= 0) return;
-
-                  context.save();
-                  context.globalAlpha = brightness;
-                  context.beginPath();
-                  context.arc(p.x, p.y, player.radius, 0, Math.PI * 2);
-                  context.fillStyle = p.skinColor;
-                  context.shadowColor = p.skinColor;
-                  context.shadowBlur = 15 * scale;
-                  context.fill();
-                  context.shadowBlur = 0;
-                  context.restore();
-              });
-          }
         }
 
         // Draw multiplayer elements
         if (isMultiplayer) {
-            drawRemotePlayers(context, scale, cameraScaleRef.current || 1);
+            drawRemotePlayers(context, scale, player.radius, getBrightnessByDistance, visionRadius);
             drawTeamInfo(context, scale, cameraScaleRef.current || 1);
         }
-      }
+      };
 
       // Render Start
       context.fillStyle = 'black';
@@ -5429,6 +5499,16 @@ doorsRef.current.forEach(door => {
                     addScore(50); // Provide 50 points
                     setPurchaseMessage('YOU ELIMINATED AN OPERATOR! [+50]');
                     setTimeout(() => setPurchaseMessage(null), 3000);
+
+                    // Replenish ammo for current weapon on player elimination
+                    const currentWeapon = playerRef.current.weapons[playerRef.current.currentWeaponIndex];
+                    if (currentWeapon && currentWeapon.magSize !== -1) {
+                        const magRefill = currentWeapon.magSize;
+                        currentWeapon.ammoInMag = Math.min(currentWeapon.magSize, currentWeapon.ammoInMag + magRefill);
+                        const def = WEAPONS[currentWeapon.name];
+                        const reserveRefill = def ? Math.ceil(def.reserveAmmo * 0.5) : Math.ceil(currentWeapon.reserveAmmo * 0.5);
+                        currentWeapon.reserveAmmo += reserveRefill;
+                    }
                 } else {
                     const attackerName = attackerId ? String(attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
                     const victimName = victimId ? String(victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
