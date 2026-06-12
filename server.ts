@@ -22,9 +22,19 @@ async function startServer() {
     name: string;
     mode: 'tdm' | 'ffa' | '1v1';
     levelName: string;
+    maxPlayers: number;
     players: Map<string, any>;
     weaponDrops: Map<string, any>;
   }
+
+  const getDefaultMaxPlayers = (mode: 'tdm' | 'ffa' | '1v1') => {
+    switch (mode) {
+      case '1v1': return 2;
+      case 'tdm': return 8;
+      case 'ffa': return 8;
+      default: return 8;
+    }
+  };
 
   const rooms = new Map<string, ServerRoom>();
 
@@ -32,23 +42,35 @@ async function startServer() {
     console.log(`[Socket] Client connection: ${socket.id}`);
 
     socket.on('join-game', (payload: any) => {
-      const { roomId, roomName, mode, levelName, id } = payload;
+      const { roomId, roomName, mode, levelName, id, maxPlayers } = payload;
       const finalRoomId = roomId || 'default-room';
-      
+
+      let room = rooms.get(finalRoomId);
+      if (room && room.players.size >= room.maxPlayers) {
+        console.log(`[Socket] Room ${finalRoomId} is full (${room.players.size}/${room.maxPlayers}). Rejecting player ${id}.`);
+        socket.emit('room-full', { roomId: finalRoomId, maxPlayers: room.maxPlayers });
+        return;
+      }
+
       console.log(`[Socket] Player ${id} joined room ${finalRoomId} (${mode}, ${levelName})`);
-      
+
       (socket as any).roomId = finalRoomId;
       (socket as any).playerId = id;
 
       socket.join(finalRoomId);
 
-      let room = rooms.get(finalRoomId);
       if (!room) {
+        const resolvedMode: 'tdm' | 'ffa' | '1v1' = mode || 'tdm';
+        const resolvedMax =
+          typeof maxPlayers === 'number' && maxPlayers >= 2 && maxPlayers <= 16
+            ? maxPlayers
+            : getDefaultMaxPlayers(resolvedMode);
         room = {
           id: finalRoomId,
           name: roomName || `Room ${finalRoomId}`,
-          mode: mode || 'tdm',
+          mode: resolvedMode,
           levelName: levelName || 'THE FACTORY',
+          maxPlayers: resolvedMax,
           players: new Map(),
           weaponDrops: new Map()
         };
@@ -79,6 +101,7 @@ async function startServer() {
         name: room.name,
         mode: room.mode,
         levelName: room.levelName,
+        maxPlayers: room.maxPlayers,
         players: Object.fromEntries(room.players)
       };
       io.to(finalRoomId).emit('room-updated', roomState);
@@ -177,6 +200,7 @@ async function startServer() {
               name: room.name,
               mode: room.mode,
               levelName: room.levelName,
+              maxPlayers: room.maxPlayers,
               players: Object.fromEntries(room.players)
             };
             io.to(roomId).emit('room-updated', roomState);
@@ -193,7 +217,8 @@ async function startServer() {
       name: r.name,
       mode: r.mode,
       levelName: r.levelName,
-      playersCount: r.players.size
+      playersCount: r.players.size,
+      maxPlayers: r.maxPlayers
     }));
     res.json({ rooms: list });
   });

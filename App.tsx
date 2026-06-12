@@ -197,9 +197,9 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => {
+  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => {
     if (networkClientRef.current) {
-      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name);
+      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name, maxPlayers);
     }
     setSelectedLevel(level);
     setIsMultiplayer(true);

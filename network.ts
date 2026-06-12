@@ -14,6 +14,10 @@ export interface PlayerState {
     deaths?: number;
     score?: number;
     isShooting?: boolean;
+    currentWeaponIndex?: number;
+    shieldName?: string;
+    shieldDurability?: number;
+    shieldMaxDurability?: number;
 }
 
 // Represents a remote player in the game world
@@ -38,6 +42,7 @@ export interface FireEventPayload {
 export type NetworkEvent =
     | { type: 'connect'; payload: { id: string } }
     | { type: 'disconnect'; payload: {} }
+    | { type: 'room-full'; payload: { roomId: string; maxPlayers: number } }
     | { type: 'player-update'; payload: PlayerState & { isShooting: boolean } }
     | { type: 'player-joined'; payload: PlayerState }
     | { type: 'player-left'; payload: { id?: string; playerId?: string } }
@@ -66,12 +71,23 @@ export class MockNetworkClient {
     public roomName: string = 'Default Room';
     public mode: 'tdm' | 'ffa' | '1v1' = 'tdm';
     public levelName: string = 'THE FACTORY';
+    public maxPlayers: number = 8;
 
-    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string) {
+    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string, maxPlayers?: number) {
         this.roomId = roomId;
         this.roomName = roomName;
         this.mode = mode;
         this.levelName = levelName;
+        this.maxPlayers = maxPlayers ?? this.getDefaultMaxPlayers(mode);
+    }
+
+    private getDefaultMaxPlayers(mode: 'tdm' | 'ffa' | '1v1') {
+        switch (mode) {
+            case '1v1': return 2;
+            case 'tdm': return 8;
+            case 'ffa': return 8;
+            default: return 8;
+        }
     }
 
     connect(playerStartState?: { x: number; y: number; skinColor: string }) {
@@ -97,6 +113,7 @@ export class MockNetworkClient {
                 roomName: this.roomName,
                 mode: this.mode,
                 levelName: this.levelName,
+                maxPlayers: this.maxPlayers,
                 id: this.ownId,
                 x: playerStartState?.x || 400,
                 y: playerStartState?.y || 400,
@@ -124,7 +141,8 @@ export class MockNetworkClient {
             'buy-weapon',
             'player-hit',
             'room-updated',
-            'player-action'
+            'player-action',
+            'room-full'
         ];
 
         serverEvents.forEach(evt => {

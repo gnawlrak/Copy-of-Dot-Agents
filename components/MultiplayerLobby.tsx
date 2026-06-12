@@ -3,7 +3,7 @@ import { LevelDefinition } from '../levels/level-definitions';
 import { Globe, Users, Gamepad2, Radio, Play, Plus, Shuffle, ArrowRight } from 'lucide-react';
 
 interface MultiplayerLobbyProps {
-  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => void;
+  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => void;
   missions: LevelDefinition[];
 }
 
@@ -13,6 +13,7 @@ interface ActiveRoom {
   mode: 'tdm' | 'ffa' | '1v1';
   levelName: string;
   playersCount: number;
+  maxPlayers: number;
 }
 
 const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, missions }) => {
@@ -27,6 +28,7 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
     const [customRoomName, setCustomRoomName] = useState('ALPHA SQUADRON');
     const [selectedLevelIndex, setSelectedLevelIndex] = useState(0);
     const [selectedMode, setSelectedMode] = useState<'tdm' | 'ffa' | '1v1'>('tdm');
+    const [maxPlayers, setMaxPlayers] = useState<number>(8);
 
     // Fetch live session info
     const fetchLobbyStats = async () => {
@@ -60,14 +62,15 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
         const choiceLevel = availableLevels[selectedLevelIndex] || availableLevels[0];
         const randomId = `ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
         if (choiceLevel) {
-            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode);
+            const resolvedMax = selectedMode === '1v1' ? 2 : Math.max(2, Math.min(16, maxPlayers));
+            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode, resolvedMax);
         }
     };
 
     // Quick matchmaking trigger (Quick Play)
     const handleQuickMatchmaking = () => {
-        // Look for any existing room that has space (e.g. fewer than 8 players)
-        const joinableRoom = activeRooms.find(r => r.playersCount < 8);
+        // Look for any existing room that has space
+        const joinableRoom = activeRooms.find(r => r.playersCount < r.maxPlayers);
         
         if (joinableRoom) {
             // Find corresponding level definition by name to join
@@ -146,7 +149,12 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                   <button
                     key={m.value}
                     type="button"
-                    onClick={() => setSelectedMode(m.value as any)}
+                    onClick={() => {
+                      setSelectedMode(m.value as any);
+                      if (m.value === '1v1') {
+                        setMaxPlayers(2);
+                      }
+                    }}
                     className={`p-2.5 rounded border-2 text-center transition-all cursor-pointer ${
                       selectedMode === m.value 
                         ? 'border-teal-500 bg-teal-950/40 text-teal-300 font-bold' 
@@ -159,6 +167,25 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                 ))}
               </div>
             </div>
+
+            {/* Max Players */}
+            {selectedMode !== '1v1' && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">最大人数 / Max Players</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={2}
+                    max={16}
+                    step={1}
+                    value={maxPlayers}
+                    onChange={(e) => setMaxPlayers(parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                  />
+                  <span className="text-sm font-bold text-teal-300 font-mono w-8 text-right">{maxPlayers}</span>
+                </div>
+              </div>
+            )}
 
             {/* Select Map */}
             <div className="flex flex-col gap-1.5">
@@ -237,13 +264,13 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                             <Users className="h-4 w-4 text-sky-400/80" />
                             <div>
                                 <p className="text-[9px] text-gray-500 font-bold uppercase leading-tight leading-none">人数</p>
-                                <p className="text-xs font-bold text-white font-mono leading-none mt-1">{room.playersCount} / 8</p>
+                                <p className="text-xs font-bold text-white font-mono leading-none mt-1">{room.playersCount} / {room.maxPlayers}</p>
                             </div>
                         </div>
 
                         <button
                             onClick={() => targetLvl && onJoinGame(targetLvl, room.id, room.name, room.mode)}
-                            disabled={!targetLvl}
+                            disabled={!targetLvl || room.playersCount >= room.maxPlayers}
                             className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white font-bold text-sm rounded transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed uppercase"
                         >
                             加入 <ArrowRight className="h-4 w-4" />

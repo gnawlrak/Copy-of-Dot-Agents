@@ -692,7 +692,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const players = remotePlayersRef.current.filter(p => now - p.lastUpdate < 5000); // 只显示最近5秒内有更新的玩家
 
     players.forEach(player => {
-      const { x, y, health, maxHealth, team, isReady, skinColor } = player;
+      const { x, y, health, maxHealth, team, isReady, skinColor, shieldName, shieldDurability, shieldMaxDurability, currentWeaponIndex } = player;
 
       const brightness = getBrightness(x, y, visionRadius);
       if (brightness <= 0) return;
@@ -710,6 +710,35 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       ctx.strokeStyle = team === 'red' ? 'rgba(255, 50, 50, 0.9)' : 'rgba(50, 50, 255, 0.9)';
       ctx.lineWidth = 2 * scale;
       ctx.stroke();
+
+      // 绘制盾牌（仅当当前武器是盾牌且耐久 > 0）
+      const shieldDurNum = typeof shieldDurability === 'number' ? shieldDurability : 0;
+      const shieldMaxNum = typeof shieldMaxDurability === 'number' ? shieldMaxDurability : 0;
+      const hasShield =
+        shieldName === 'Riot Shield' &&
+        shieldDurNum > 0 &&
+        shieldMaxNum > 0 &&
+        currentWeaponIndex === 2;
+      if (hasShield) {
+          const shieldDir = player.direction || 0;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(shieldDir);
+          const shieldWidth = 16 * scale;
+          const shieldHeight = 28 * scale;
+          ctx.fillStyle = 'rgba(64, 64, 64, 0.85)';
+          ctx.strokeStyle = 'rgba(163, 163, 163, 0.9)';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.beginPath();
+          ctx.moveTo(playerRadius + 2 * scale, -shieldHeight / 2);
+          ctx.lineTo(playerRadius + shieldWidth, -shieldHeight / 2);
+          ctx.lineTo(playerRadius + shieldWidth, shieldHeight / 2);
+          ctx.lineTo(playerRadius + 2 * scale, shieldHeight / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+      }
 
       // 绘制血条
       const currentHealth = health || 0;
@@ -2188,7 +2217,7 @@ const startHealing = () => {
                   if (def) {
                       w.reserveAmmo = def.reserveAmmo;
                   }
-                  if (w.durability && w.maxDurability) {
+                  if (w.name === 'Riot Shield' && w.maxDurability != null) {
                       w.durability = w.maxDurability;
                   }
               });
@@ -5424,6 +5453,10 @@ doorsRef.current.forEach(door => {
             p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
             p.lastUpdate = Date.now();
             p.playerId = payload.id;
+            p.currentWeaponIndex = payload.currentWeaponIndex;
+            p.shieldName = payload.shieldName;
+            p.shieldDurability = payload.shieldDurability;
+            p.shieldMaxDurability = payload.shieldMaxDurability;
         } else {
             handlePlayerJoined(payload);
         }
@@ -5546,7 +5579,21 @@ doorsRef.current.forEach(door => {
             if (networkClient.connected) {
             const player = playerRef.current;
             const isShooting = isShootingRef.current || touchStateRef.current.fire.id !== null || touchStateRef.current.fixedFire.id !== null;
-            (networkClient as any).send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
+            const shield = player.weapons.find(w => w.name === 'Riot Shield');
+            const hasShield = shield && shield.durability != null && shield.durability > 0;
+            (networkClient as any).send('player-update', {
+                id: networkClient.ownId,
+                x: player.x,
+                y: player.y,
+                direction: playerDirectionRef.current,
+                health: player.health,
+                skinColor: agentSkinColor,
+                isShooting,
+                currentWeaponIndex: player.currentWeaponIndex,
+                shieldName: hasShield ? 'Riot Shield' : undefined,
+                shieldDurability: hasShield ? shield.durability : 0,
+                shieldMaxDurability: hasShield ? shield.maxDurability : 0
+            });
         }
     }, 100);
 
