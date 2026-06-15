@@ -14,10 +14,6 @@ export interface PlayerState {
     deaths?: number;
     score?: number;
     isShooting?: boolean;
-    currentWeaponIndex?: number;
-    shieldName?: string;
-    shieldDurability?: number;
-    shieldMaxDurability?: number;
 }
 
 // Represents a remote player in the game world
@@ -26,9 +22,6 @@ export interface RemotePlayer extends PlayerState {
     targetY: number;
     lastUpdateTime: number;
     isShooting: boolean; // Received from network to show muzzle flash
-    playerId?: string; // Alias of id used for drawing username tags compat
-    lastUpdate?: number; // Used for status window filtering compat
-    maxHealth?: number;
 }
 
 // Represents a weapon fire event
@@ -42,15 +35,12 @@ export interface FireEventPayload {
 export type NetworkEvent =
     | { type: 'connect'; payload: { id: string } }
     | { type: 'disconnect'; payload: {} }
-    | { type: 'room-full'; payload: { roomId: string; maxPlayers: number } }
     | { type: 'player-update'; payload: PlayerState & { isShooting: boolean } }
     | { type: 'player-joined'; payload: PlayerState }
     | { type: 'player-left'; payload: { id?: string; playerId?: string } }
     | { type: 'fire-weapon'; payload: FireEventPayload }
     | { type: 'drop-weapon'; payload: { id?: string; playerId: string; weaponName: string; x: number; y: number } }
     | { type: 'pickup-weapon'; payload: { playerId: string; weaponName: string; id?: string } }
-    | { type: 'start-round'; payload: { roundId: string } }
-    | { type: 'buy-weapon'; payload: { playerId: string; weaponName: string; cost: number; attachments?: any } }
     | { type: 'player-hit'; payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } } }
     | { type: 'room-updated'; payload: any }
     | { type: 'player-action'; payload: { action: string; payload: any; playerId: string; timestamp: number } };
@@ -71,23 +61,12 @@ export class MockNetworkClient {
     public roomName: string = 'Default Room';
     public mode: 'tdm' | 'ffa' | '1v1' = 'tdm';
     public levelName: string = 'THE FACTORY';
-    public maxPlayers: number = 8;
 
-    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string, maxPlayers?: number) {
+    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string) {
         this.roomId = roomId;
         this.roomName = roomName;
         this.mode = mode;
         this.levelName = levelName;
-        this.maxPlayers = maxPlayers ?? this.getDefaultMaxPlayers(mode);
-    }
-
-    private getDefaultMaxPlayers(mode: 'tdm' | 'ffa' | '1v1') {
-        switch (mode) {
-            case '1v1': return 2;
-            case 'tdm': return 8;
-            case 'ffa': return 8;
-            default: return 8;
-        }
     }
 
     connect(playerStartState?: { x: number; y: number; skinColor: string }) {
@@ -113,7 +92,6 @@ export class MockNetworkClient {
                 roomName: this.roomName,
                 mode: this.mode,
                 levelName: this.levelName,
-                maxPlayers: this.maxPlayers,
                 id: this.ownId,
                 x: playerStartState?.x || 400,
                 y: playerStartState?.y || 400,
@@ -137,12 +115,9 @@ export class MockNetworkClient {
             'fire-weapon',
             'drop-weapon',
             'pickup-weapon',
-            'start-round',
-            'buy-weapon',
             'player-hit',
             'room-updated',
-            'player-action',
-            'room-full'
+            'player-action'
         ];
 
         serverEvents.forEach(evt => {

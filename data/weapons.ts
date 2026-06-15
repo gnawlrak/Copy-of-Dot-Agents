@@ -56,6 +56,161 @@ export interface WeaponDefinition {
 
 export const WEAPONS: { [key: string]: WeaponDefinition } = {
     // --- 主武器 ---
+    'MK18 CQBR': {
+        name: 'MK18 CQBR',
+        description: 'A compact assault rifle designed for Close Quarters Battle. High mobility and rate of fire.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 38,
+        fireRate: 0.1,
+        bulletSpeed: 0,
+        bulletRadius: 2.6,
+        pellets: 1,
+        spread: 0.045,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 30,
+        ammoInMag: 30,
+        reserveAmmo: 120,
+        reloadTime: 2.1,
+        soundRadius: 500,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '消音器', description: '降低射击噪音，非常适合潜行。', modifiers: { soundRadius: 0.4, spread: 0.9 } },
+                { name: '枪口补偿器', description: '显著改善后坐力，提升射击精度。', modifiers: { spread: 0.8 } },
+            ],
+            'Optic': [
+                { name: '红点瞄准镜', description: '提升目标捕获速度。', modifiers: { } },
+                { name: '全息瞄准镜', description: '提供更加开阔清晰的瞄准视野。', modifiers: { } },
+            ]
+        }
+    },
+    'HK416C': {
+        name: 'HK416C',
+        description: 'An ultra-compact tactical carbine. Exceptional reliability, high muzzle velocity, and heavy kinetic fire.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 42,
+        fireRate: 0.085,
+        bulletSpeed: 0,
+        bulletRadius: 2.8,
+        pellets: 1,
+        spread: 0.04,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 30,
+        ammoInMag: 30,
+        reserveAmmo: 120,
+        reloadTime: 1.95,
+        soundRadius: 540,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '消音器', description: '降低射击噪音，适合静音破房突入。', modifiers: { soundRadius: 0.35, spread: 0.95 } },
+                { name: '枪口制退器', description: '降低枪口上跳，提供极佳的连射控制。', modifiers: { spread: 0.75 } },
+            ],
+            'Optic': [
+                { name: '全息瞄准镜', description: '大视野极佳近战光学镜。', modifiers: { } },
+                { name: '红点瞄准镜', description: '经典红点直觉瞄具。', modifiers: { } },
+            ]
+        }
+    },
+    'SIG MPX': {
+        name: 'SIG MPX',
+        description: 'Next-generation submachine gun utilizing a closed-bolt gas piston system. Semiauto cycle is laser accurate.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 28,
+        fireRate: 0.071,
+        bulletSpeed: 0,
+        bulletRadius: 2.2,
+        pellets: 1,
+        spread: 0.028,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 30,
+        ammoInMag: 30,
+        reserveAmmo: 150,
+        reloadTime: 1.7,
+        soundRadius: 420,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '轻型消音器', description: '牺牲极微量伤害换取绝对声波屏蔽。', modifiers: { soundRadius: 0.4, damage: 0.95 } },
+            ],
+            'Optic': [
+                { name: '红点瞄准镜', description: '基础红点瞄准，微缩死焦。', modifiers: { } },
+            ]
+        }
+    },
+    'H&K MP7A1': {
+        name: 'H&K MP7A1',
+        description: 'Personal Defense Weapon designed to penetrate heavy armor using high-velocity sub-caliber armor-piercing rounds.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 26,
+        fireRate: 0.06,
+        bulletSpeed: 0,
+        bulletRadius: 2.1,
+        pellets: 1,
+        spread: 0.045,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 40,
+        ammoInMag: 40,
+        reserveAmmo: 160,
+        reloadTime: 2.15,
+        soundRadius: 440,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '钛合金消音器', description: '定制潜行枪口配件，射击更悄无声息。', modifiers: { soundRadius: 0.38, spread: 0.9 } },
+            ],
+            'Optic': [
+                { name: '红点瞄准镜', description: '微光自适应红点瞄镜。', modifiers: { } },
+            ]
+        }
+    },
+    'MP5SD': {
+        name: 'MP5SD',
+        description: 'Integrally suppressed submachine gun. Extremely quiet with low recoil.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 28,
+        fireRate: 0.09,
+        bulletSpeed: 0,
+        bulletRadius: 2.3,
+        pellets: 1,
+        spread: 0.035,
+        allowedFireModes: ['semi', 'burst', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 30,
+        ammoInMag: 30,
+        reserveAmmo: 120,
+        reloadTime: 2.3,
+        soundRadius: 200,
+        attachmentSlots: {
+            'Optic': [
+                { name: '红点瞄准镜', description: '基础红点瞄准镜，便于瞄准。', modifiers: { } }
+            ]
+        }
+    },
+    'P90': {
+        name: 'P90',
+        description: 'Bullpup PDW with high capacity and fire rate. Excels in cramped spaces.',
+        category: 'primary',
+        type: 'hitscan',
+        damage: 24,
+        fireRate: 0.066,
+        bulletSpeed: 0,
+        bulletRadius: 2.2,
+        pellets: 1,
+        spread: 0.06,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 50,
+        ammoInMag: 50,
+        reserveAmmo: 150,
+        reloadTime: 2.8,
+        soundRadius: 400,
+    },
     'Assault Rifle': {
         name: 'Assault Rifle',
         description: 'A well-rounded rifle suitable for most combat scenarios. Controllable in full-auto.',
@@ -141,6 +296,26 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
             ]
         }
     },
+    'Benelli M4': {
+        name: 'Benelli M4',
+        description: 'Semi-automatic combat shotgun. Delivers rapid, devastating buckshot in close quarters.',
+        category: 'primary',
+        type: 'projectile',
+        damage: 22,
+        fireRate: 0.4,
+        bulletSpeed: 1700,
+        bulletRadius: 2.5,
+        pellets: 8,
+        spread: 0.15,
+        pelletSpread: Math.PI / 20,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: 7,
+        ammoInMag: 7,
+        reserveAmmo: 35,
+        reloadTime: 2.2,
+        soundRadius: 650,
+    },
     'Shotgun': {
         name: 'Shotgun',
         description: 'Devastating at close range. Wide spread.',
@@ -181,6 +356,33 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         },
     },
     // --- 副武器 ---
+    'Glock 19': {
+        name: 'Glock 19',
+        description: 'Compact 9mm pistol. High capacity, light and extremely reliable.',
+        category: 'secondary',
+        type: 'projectile',
+        damage: 45,
+        fireRate: 0.16,
+        bulletSpeed: 1300,
+        bulletRadius: 2.5,
+        pellets: 1,
+        spread: 0.035,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: 15,
+        ammoInMag: 15,
+        reserveAmmo: 60,
+        reloadTime: 1.3,
+        soundRadius: 350,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '消音器', description: '降低机动战术下的开火噪音。', modifiers: { soundRadius: 0.3 } },
+            ],
+            'Magazine': [
+                { name: '加长弹匣', description: '大幅扩充弹匣容弹量，但略微增加换弹时间。', modifiers: { magSize: 1.33, reloadTime: 1.1 } },
+            ]
+        }
+    },
     'Pistol': {
         name: 'Pistol',
         description: 'Standard issue sidearm. Reliable and versatile.',
@@ -261,6 +463,25 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
         },
     },
     // --- Melee Weapons ---
+    'Karambit': {
+        name: 'Karambit',
+        description: 'Curved CQB blade designed for extreme speed and consecutive slashes.',
+        category: 'melee',
+        type: 'hitscan',
+        damage: 120,
+        fireRate: 0.4,
+        bulletSpeed: 0,
+        bulletRadius: 0,
+        pellets: 1,
+        spread: 0,
+        allowedFireModes: ['semi'],
+        defaultFireMode: 'semi',
+        magSize: -1,
+        ammoInMag: -1,
+        reserveAmmo: -1,
+        reloadTime: 0,
+        soundRadius: 30,
+    },
     'Combat Knife': {
         name: 'Combat Knife',
         description: 'Standard issue combat knife. Fast and deadly for silent takedowns.',

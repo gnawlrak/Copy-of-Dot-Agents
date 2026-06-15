@@ -149,8 +149,8 @@ const THE_FACTORY: LevelDefinition = {
   ],
   doors: [
     // Main Double Doors (White)
-    { id: 1, hinge: { x: 0.4, y: 0.8925 }, length: 0.089, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    { id: 8, hinge: { x: 0.5, y: 0.8925 }, length: 0.089, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
+    { id: 1, hinge: { x: 0.4, y: 0.8925 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
+    { id: 8, hinge: { x: 0.5, y: 0.8925 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
 
     // Locked Doors (Red)
     { id: 3, hinge: { x: 0.94, y: 0.25 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
@@ -187,168 +187,138 @@ const THE_FACTORY: LevelDefinition = {
 };
 
 
-// Helper function to generate the expanded map (won't be exported)
-const generateExpandedFactory = (): LevelDefinition => {
-  const original = THE_FACTORY;
-  const newLevel: LevelDefinition = {
-    name: "THE FACTORY (EXPANSION)",
-    description: "A massive industrial zone with four interconnected sectors. High threat density. Ideal for multi-squad operations.",
-    playerStart: { x: 0.5, y: 0.98 },
-    walls: [],
-    doors: [],
-    enemies: [],
-    enemyCount: 32, // Increased enemy count
-    extractionZone: { x: 0.45, y: 0.45, width: 0.1, height: 0.1 },
-    cameraScale: 2,
-  };
+// --- Handcrafted Expanded Factory Level ---
+const THE_FACTORY_EXPANSION: LevelDefinition = {
+  name: "THE FACTORY (EXPANSION)",
+  description: "A massive industrial zone featuring four handcrafted tactical sectors. Includes a secure central server vault, loading bays, distinct rooms, and high threat density.",
+  playerStart: { x: 0.5, y: 0.965 },
+  enemyCount: 20,
+  cameraScale: 1.0,
+  extractionZone: { x: 0.44, y: 0.12, width: 0.12, height: 0.10 },
+  walls: [
+    // Outer Border Shell
+    { x: 0.05, y: 0.05, width: 0.9, height: 0.015 }, // Top Wall
+    { x: 0.05, y: 0.05, width: 0.015, height: 0.86 }, // Left Wall (ends at y:0.91)
+    { x: 0.935, y: 0.05, width: 0.015, height: 0.86 }, // Right Wall (ends at y:0.91)
+    { x: 0.05, y: 0.91, width: 0.4, height: 0.015 }, // Bottom Left Wall
+    { x: 0.55, y: 0.91, width: 0.4, height: 0.015 }, // Bottom Right Wall (aligned to right wall)
 
-  let doorIdCounter = 1;
+    // Central Corridor / Main Hallway vertical dividers with Door gaps
+    { x: 0.43, y: 0.45, width: 0.015, height: 0.25 }, // Left hallway wall top-half
+    { x: 0.43, y: 0.78, width: 0.015, height: 0.13 }, // Left hallway wall bottom-half (ends at y:0.91)
+    { x: 0.555, y: 0.45, width: 0.015, height: 0.25 }, // Right hallway wall top-half
+    { x: 0.555, y: 0.78, width: 0.015, height: 0.13 }, // Right hallway wall bottom-half (ends at y:0.91)
 
-  const quadrants: ('TL' | 'TR' | 'BL' | 'BR')[] = ['TL', 'TR', 'BL', 'BR'];
+    // Lobby Entry Horizontal Partition Walls
+    { x: 0.35, y: 0.45, width: 0.08, height: 0.015 },  // Left partition before double door
+    { x: 0.57, y: 0.45, width: 0.08, height: 0.015 },  // Right partition after double door
 
-  // Define the original outer shell for precise removal logic
-  const outerShellWalls = new Set([
-    JSON.stringify({ x: 0.05, y: 0.05, width: 0.9, height: 0.015 }), // Top
-    JSON.stringify({ x: 0.05, y: 0.05, width: 0.01, height: 0.85 }), // Left
-    JSON.stringify({ x: 0.94, y: 0.05, width: 0.01, height: 0.85 }), // Right
-    JSON.stringify({ x: 0.05, y: 0.885, width: 0.35, height: 0.015 }), // Bottom Left part
-    JSON.stringify({ x: 0.5, y: 0.885, width: 0.44, height: 0.015 }), // Bottom Right part
-  ]);
+    // Sector 1 (Cooling Lab / Storage - Top Left)
+    // Horizontal divider wall between Sector 1 and Sector 2
+    { x: 0.05, y: 0.45, width: 0.15, height: 0.015 },
+    { x: 0.28, y: 0.45, width: 0.15, height: 0.015 },
+    // Internal partition walls (Laboratory & server rooms)
+    { x: 0.18, y: 0.15, width: 0.025, height: 0.12 }, // Server Rack cover
+    { x: 0.28, y: 0.22, width: 0.025, height: 0.12 }, // Server Rack cover 2
+    { x: 0.05, y: 0.3, width: 0.08, height: 0.02 }, // Table cover
+    { x: 0.27, y: 0.12, width: 0.06, height: 0.02 }, // Lab table (optimized to stay left of x:0.35)
 
-  for (const quadrant of quadrants) {
-    const transformWall = (wall: LevelWall): LevelWall => {
-      const { x, y, width: w, height: h } = wall;
-      switch (quadrant) {
-        case 'TL': return { x: x / 2, y: y / 2, width: w / 2, height: h / 2 };
-        case 'TR': return { x: 0.5 + (1 - x - w) / 2, y: y / 2, width: w / 2, height: h / 2 };
-        case 'BL': return { x: x / 2, y: 0.5 + (1 - y - h) / 2, width: w / 2, height: h / 2 };
-        case 'BR': return { x: 0.5 + (1 - x - w) / 2, y: 0.5 + (1 - y - h) / 2, width: w / 2, height: h / 2 };
-      }
-    };
-    
-    const transformDoor = (door: LevelDoor): LevelDoor => {
-        let hinge = {x: door.hinge.x, y: door.hinge.y};
-        let closedAngle = door.closedAngle;
-        let swingDirection = door.swingDirection;
+    // Sector 2 (Loading Bay / Assembly Line - Bottom Left)
+    // Crates and containers
+    { x: 0.12, y: 0.58, width: 0.12, height: 0.03 }, // Cargo Box A
+    { x: 0.28, y: 0.65, width: 0.03, height: 0.12 }, // Cargo Box B
+    { x: 0.15, y: 0.78, width: 0.15, height: 0.04 }, // Assembler station
 
-        switch(quadrant) {
-            case 'TL':
-                hinge = { x: hinge.x/2, y: hinge.y/2 };
-                break;
-            case 'TR':
-                hinge = { x: 0.5 + (1-hinge.x)/2, y: hinge.y/2 };
-                closedAngle = Math.PI - closedAngle;
-                swingDirection = -swingDirection as 1 | -1;
-                break;
-            case 'BL':
-                hinge = { x: hinge.x/2, y: 0.5 + (1-hinge.y)/2 };
-                closedAngle = -closedAngle;
-                swingDirection = -swingDirection as 1 | -1;
-                break;
-            case 'BR':
-                hinge = { x: 0.5 + (1-hinge.x)/2, y: 0.5 + (1-hinge.y)/2 };
-                closedAngle = Math.PI + closedAngle;
-                break;
-        }
+    // Sector 3 (Heavy Machining / Power Plant - Bottom Right)
+    // Horizontal divider wall between Sector 3 and Sector 4
+    { x: 0.57, y: 0.45, width: 0.18, height: 0.015 },
+    { x: 0.83, y: 0.45, width: 0.12, height: 0.015 },
+    // Heavy machinery obstacles
+    { x: 0.65, y: 0.55, width: 0.08, height: 0.08 }, // Generator Block A
+    { x: 0.78, y: 0.65, width: 0.08, height: 0.08 }, // Generator Block B
+    { x: 0.68, y: 0.8, width: 0.15, height: 0.04 }, // Assembly Deck
 
-        return {
-            ...door,
-            id: doorIdCounter++,
-            hinge,
-            length: door.length / 2,
-            closedAngle,
-            swingDirection,
-        };
-    };
+    // Sector 4 (Control Center & Server Room - Top Right)
+    // Internal partitions
+    { x: 0.65, y: 0.2, width: 0.12, height: 0.02 }, // Administration Desk
+    { x: 0.82, y: 0.22, width: 0.02, height: 0.15 }, // Computer Console Group
+    { x: 0.7, y: 0.35, width: 0.12, height: 0.03 }, // System Mainframe
 
-    const transformEnemy = (enemy: LevelEnemy): LevelEnemy => {
-        let {x, y, direction} = enemy;
-        switch(quadrant) {
-            case 'TL':
-                x /= 2; y /= 2;
-                break;
-            case 'TR':
-                x = 0.5 + (1-x)/2; y /= 2;
-                direction = Math.PI - direction;
-                break;
-            case 'BL':
-                x /= 2; y = 0.5 + (1-y)/2;
-                direction = -direction;
-                break;
-            case 'BR':
-                x = 0.5 + (1-x)/2; y = 0.5 + (1-y)/2;
-                direction = Math.PI + direction;
-                break;
-        }
-        return { ...enemy, x, y, direction };
-    };
-    
-    original.walls.forEach(w => {
-        const isOuterShell = outerShellWalls.has(JSON.stringify(w));
+    // Top Lobby / Command Sector (Top Center)
+    // Vertical lobby walls Left and Right
+    { x: 0.35, y: 0.05, width: 0.015, height: 0.15 }, // Left top wall
+    { x: 0.35, y: 0.28, width: 0.015, height: 0.17 }, // Left bottom wall
+    { x: 0.635, y: 0.05, width: 0.015, height: 0.15 }, // Right top wall
+    { x: 0.635, y: 0.28, width: 0.015, height: 0.17 }, // Right bottom wall
+    // Center server panel split
+    { x: 0.365, y: 0.22, width: 0.095, height: 0.015 }, // Secure partition left
+    { x: 0.54, y: 0.22, width: 0.095, height: 0.015 }, // Secure partition right
+  ],
+  doors: [
+    // Bottom main double entrance doors
+    { id: 101, hinge: { x: 0.45, y: 0.91 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 102, hinge: { x: 0.55, y: 0.91 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
 
-        if (!isOuterShell) {
-            // It's an internal wall, always keep it.
-            newLevel.walls.push(transformWall(w));
-            return;
-        }
+    // Left Hallway Side Entry
+    { id: 103, hinge: { x: 0.43, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
+    // Right Hallway Side Entry
+    { id: 104, hinge: { x: 0.555, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
 
-        // It's an outer shell wall. Decide if we keep it based on the quadrant.
-        const isTop = w.y < 0.1 && w.height < 0.1;
-        const isBottom = w.y > 0.8;
-        const isLeft = w.x < 0.1 && w.width < 0.1;
-        const isRight = w.x > 0.9;
-        
-        let keep = false;
-        switch(quadrant) {
-            case 'TL': if (isTop || isLeft) keep = true; break;
-            case 'TR': if (isTop || isRight) keep = true; break;
-            case 'BL': if (isBottom || isLeft) keep = true; break;
-            case 'BR': if (isBottom || isRight) keep = true; break;
-        }
-        
-        if (keep) {
-            newLevel.walls.push(transformWall(w));
-        }
-    });
+    // Lobby Entry Double Doors (top of central hall)
+    { id: 105, hinge: { x: 0.43, y: 0.45 }, length: 0.07, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 106, hinge: { x: 0.57, y: 0.45 }, length: 0.07, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
 
-    original.doors.forEach(d => {
-        // Exclude doors that were on the now-removed outer walls
-        const isOnRightWall = d.hinge.x > 0.9;
-        const isOnBottomWall = d.hinge.y > 0.8; // main entrance has no doors
-        
-        let shouldBeRemoved = false;
-        switch(quadrant) {
-            case 'TL': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
-            case 'TR': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break; // Original right becomes new right, but its door needs to become internal
-            case 'BL': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
-            case 'BR': if (isOnRightWall || isOnBottomWall) shouldBeRemoved = true; break;
-        }
+    // Sector 1-2 Horizontal Divider Door
+    { id: 107, hinge: { x: 0.2, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
 
-        if (!shouldBeRemoved) {
-             newLevel.doors.push(transformDoor(d));
-        }
-    });
+    // Sector 3-4 Horizontal Divider Door
+    { id: 108, hinge: { x: 0.75, y: 0.45 }, length: 0.08, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
 
-    original.enemies.forEach(e => newLevel.enemies.push(transformEnemy(e)));
-  }
+    // Left Lobby Entry (Lab <-> Lobby)
+    { id: 109, hinge: { x: 0.35, y: 0.2 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
 
-  // Add new central doors
-  const doorLength = 0.1 / 2;
-  const doorMaxAngle = Math.PI / 2 * 0.9;
-  
-  // Vertical Connector
-  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.495, y: 0.45 }, length: doorLength, closedAngle: -Math.PI/2, maxOpenAngle: doorMaxAngle, swingDirection: -1 });
-  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.495, y: 0.55 }, length: doorLength, closedAngle: Math.PI/2, maxOpenAngle: doorMaxAngle, swingDirection: 1 });
-  
-  // Horizontal Connector
-  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.45, y: 0.505 }, length: doorLength, closedAngle: Math.PI, maxOpenAngle: doorMaxAngle, swingDirection: 1 });
-  newLevel.doors.push({ id: doorIdCounter++, hinge: { x: 0.55, y: 0.505 }, length: doorLength, closedAngle: 0, maxOpenAngle: doorMaxAngle, swingDirection: -1 });
+    // Right Lobby Entry (Control <-> Lobby)
+    { id: 110, hinge: { x: 0.635, y: 0.2 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
 
+    // Central Locked Secure Command Room door
+    { id: 111, hinge: { x: 0.46, y: 0.22 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1, locked: true },
+  ],
+  enemies: [
+    // Bottom entry guards
+    { x: 0.42, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
+    { x: 0.58, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
 
-  return newLevel;
+    // Central Hallway
+    { x: 0.5, y: 0.6, direction: Math.PI / 2, type: 'advanced', hasScored: false },
+
+    // Loading Bay (Bottom Left)
+    { x: 0.08, y: 0.58, direction: 0, type: 'standard', hasScored: false },
+    { x: 0.28, y: 0.52, direction: Math.PI, type: 'advanced', hasScored: false },
+    { x: 0.15, y: 0.72, direction: -Math.PI / 4, type: 'standard', hasScored: false },
+    { x: 0.32, y: 0.85, direction: Math.PI * 0.75, type: 'advanced', hasScored: false },
+
+    // Cooling Lab (Top Left)
+    { x: 0.1, y: 0.15, direction: Math.PI / 4, type: 'standard', hasScored: false },
+    { x: 0.22, y: 0.3, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
+    { x: 0.32, y: 0.12, direction: Math.PI, type: 'standard', hasScored: false },
+
+    // Heavy Machining (Bottom Right)
+    { x: 0.62, y: 0.6, direction: Math.PI, type: 'advanced', hasScored: false },
+    { x: 0.88, y: 0.55, direction: -Math.PI * 0.75, type: 'standard', hasScored: false },
+    { x: 0.72, y: 0.75, direction: Math.PI / 2, type: 'standard', hasScored: false },
+    { x: 0.85, y: 0.88, direction: Math.PI * 1.2, type: 'advanced', hasScored: false },
+
+    // Control Center (Top Right)
+    { x: 0.68, y: 0.25, direction: 0, type: 'standard', hasScored: false },
+    { x: 0.88, y: 0.15, direction: Math.PI, type: 'advanced', hasScored: false },
+    { x: 0.78, y: 0.38, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
+
+    // Central Lobby & Secure room (Top Center)
+    { x: 0.5, y: 0.28, direction: Math.PI / 2, type: 'advanced', hasScored: false },
+    { x: 0.42, y: 0.12, direction: Math.PI / 6, type: 'standard', hasScored: false },
+    { x: 0.58, y: 0.12, direction: -Math.PI / 6, type: 'standard', hasScored: false },
+  ],
 };
-
-const THE_FACTORY_EXPANSION = generateExpandedFactory();
 
 
 export const MISSIONS: LevelDefinition[] = [

@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useLanguage } from '../LanguageContext';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
@@ -7,8 +8,6 @@ import ControlCustomizer from './ControlCustomizer';
 import { Difficulty } from '../App';
 import { Operator } from '../data/operators';
 import { MockNetworkClient, RemotePlayer, PlayerState, FireEventPayload } from '../network';
-
-type BrightnessFn = (x: number, y: number, radius: number) => number;
 
 // Define types for geometry
 type Point = { x: number; y: number };
@@ -495,6 +494,7 @@ import 'react/jsx-runtime';
 import { JSX } from 'react';
 
 const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient, onScoreChange, initialRunScore, totalScore, highScore }: GameCanvasProps): JSX.Element => {
+  const { t, language } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -599,7 +599,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       y: player.y,
       health: player.health,
       direction: player.direction || 0,
-      skinColor: agentSkinColor,
       team: player.team,
       isReady: player.isReady,
       kills: player.kills,
@@ -684,96 +683,57 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     };
   }, [networkClient, isMultiplayer, handleNetworkHit]);
   
-  // 绘制远程玩家（在 camera transform 内部调用，使用世界坐标）
-  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, playerRadius: number, getBrightness: BrightnessFn, visionRadius: number) => {
+  // 绘制远程玩家
+  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
     if (!isMultiplayer) return;
-
+    
     const now = Date.now();
     const players = remotePlayersRef.current.filter(p => now - p.lastUpdate < 5000); // 只显示最近5秒内有更新的玩家
-
+    
     players.forEach(player => {
-      const { x, y, health, maxHealth, team, isReady, skinColor, shieldName, shieldDurability, shieldMaxDurability, currentWeaponIndex } = player;
-
-      const brightness = getBrightness(x, y, visionRadius);
-      if (brightness <= 0) return;
-
-      ctx.save();
-      ctx.globalAlpha = brightness;
-
+      const { x, y, health, maxHealth, team, isReady } = player;
+      
       // 绘制玩家身体
-      ctx.fillStyle = skinColor || (team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)');
+      ctx.fillStyle = team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)';
       ctx.beginPath();
-      ctx.arc(x, y, playerRadius, 0, Math.PI * 2);
+      ctx.arc(x * scale, y * scale, 10 * scale * cameraScale, 0, Math.PI * 2);
       ctx.fill();
-
+      
       // 绘制玩家轮廓
       ctx.strokeStyle = team === 'red' ? 'rgba(255, 50, 50, 0.9)' : 'rgba(50, 50, 255, 0.9)';
-      ctx.lineWidth = 2 * scale;
+      ctx.lineWidth = 2 * scale * cameraScale;
       ctx.stroke();
-
-      // 绘制盾牌（仅当当前武器是盾牌且耐久 > 0）
-      const shieldDurNum = typeof shieldDurability === 'number' ? shieldDurability : 0;
-      const shieldMaxNum = typeof shieldMaxDurability === 'number' ? shieldMaxDurability : 0;
-      const hasShield =
-        shieldName === 'Riot Shield' &&
-        shieldDurNum > 0 &&
-        shieldMaxNum > 0 &&
-        currentWeaponIndex === 2;
-      if (hasShield) {
-          const shieldDir = player.direction || 0;
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.rotate(shieldDir);
-          const shieldWidth = 16 * scale;
-          const shieldHeight = 28 * scale;
-          ctx.fillStyle = 'rgba(64, 64, 64, 0.85)';
-          ctx.strokeStyle = 'rgba(163, 163, 163, 0.9)';
-          ctx.lineWidth = 1.5 * scale;
-          ctx.beginPath();
-          ctx.moveTo(playerRadius + 2 * scale, -shieldHeight / 2);
-          ctx.lineTo(playerRadius + shieldWidth, -shieldHeight / 2);
-          ctx.lineTo(playerRadius + shieldWidth, shieldHeight / 2);
-          ctx.lineTo(playerRadius + 2 * scale, shieldHeight / 2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-      }
-
+      
       // 绘制血条
-      const currentHealth = health || 0;
-      const currentMaxHealth = maxHealth || 100;
-      const healthPercent = currentMaxHealth > 0 ? currentHealth / currentMaxHealth : 0;
-      const barWidth = 20 * scale;
-      const barHeight = 3 * scale;
-      const barX = x - barWidth / 2;
-      const barY = y - playerRadius - 8 * scale;
-
+      const healthPercent = health / maxHealth;
+      const barWidth = 20 * scale * cameraScale;
+      const barHeight = 3 * scale * cameraScale;
+      const barX = x * scale - barWidth / 2;
+      const barY = y * scale - 15 * scale * cameraScale;
+      
       // 背景
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(barX, barY, barWidth, barHeight);
-
+      
       // 血量
-      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' :
-                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' :
+      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' : 
+                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' : 
                      'rgba(255, 100, 100, 0.9)';
       ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
-
+      
       // 绘制准备状态
       if (isReady) {
         ctx.fillStyle = 'rgba(100, 255, 100, 0.8)';
         ctx.beginPath();
-        ctx.arc(x, y - playerRadius - 16 * scale, 3 * scale, 0, Math.PI * 2);
+        ctx.arc(x * scale, y * scale - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
         ctx.fill();
       }
-
+      
       // 绘制玩家ID
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.font = `${10 * scale}px Arial`;
+      ctx.font = `${10 * scale * cameraScale}px Arial`;
       ctx.textAlign = 'center';
-      ctx.fillText((player.playerId || player.id || '').substring(0, 8), x, y + playerRadius + 14 * scale);
-
-      ctx.restore();
+      ctx.fillText(player.playerId.substring(0, 8), x * scale, y * scale + 20 * scale * cameraScale);
     });
   }, [isMultiplayer]);
   
@@ -814,145 +774,9 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     ctx.fillText(`房间: ${room.name || '未命名'}`, panelX + 10 * scale * cameraScale, panelY + 60 * scale * cameraScale);
     ctx.fillText(`状态: ${room.status}`, panelX + 10 * scale * cameraScale, panelY + 80 * scale * cameraScale);
   }, [isMultiplayer]);
+
   const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
-    const runScoreRef = useRef<number>(initialRunScore || 0);
-
-    // Round currency (1 score = 2 money)
-    const [roundMoney, setRoundMoney] = useState<number>(Math.floor((initialRunScore || 0) * 2));
-    const roundMoneyRef = useRef<number>(Math.floor((initialRunScore || 0) * 2));
-
-
-        // Round and shop state
-        const [isRoundActive, setIsRoundActive] = useState<boolean>(false);
-        const isRoundActiveRef = useRef<boolean>(false);
-        const [showShop, setShowShop] = useState<boolean>(false);
-
-        const createWeaponFromDef = (weaponName: string): Weapon | null => {
-                const def = WEAPONS[weaponName];
-                if (!def) return null;
-                const scale = scaleRef.current;
-                const cameraScale = cameraScaleRef.current || 1;
-                const w: any = { ...def };
-                w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
-                w.bulletRadius = def.bulletRadius * scale / cameraScale;
-                w.ammoInMag = def.magSize;
-                w.reserveAmmo = def.reserveAmmo;
-                w.allowedFireModes = [...def.allowedFireModes];
-                w.currentFireMode = def.defaultFireMode;
-                w.shake = (ux: number, uy: number) => {};
-                return w as Weapon;
-        };
-
-        // Create a full Weapon instance applying attachments (attachments: { slotName: attachmentName })
-        const createWeaponWithAttachments = (weaponName: string, attachments: { [slot: string]: string }): Weapon | null => {
-            const def = WEAPONS[weaponName];
-            if (!def) return null;
-            const scale = scaleRef.current;
-            const cameraScale = cameraScaleRef.current || 1;
-            const w: any = { ...def };
-            w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
-            w.bulletRadius = def.bulletRadius * scale / cameraScale;
-            w.ammoInMag = def.magSize;
-            w.reserveAmmo = def.reserveAmmo;
-            w.allowedFireModes = [...def.allowedFireModes];
-            w.currentFireMode = def.defaultFireMode;
-            w.shake = (ux: number, uy: number) => {};
-
-            // Apply attachment modifiers if definitions exist
-            if (def.attachmentSlots && attachments) {
-                for (const slotName in attachments) {
-                    const attName = attachments[slotName];
-                    if (!attName) continue;
-                    const slotList = def.attachmentSlots[slotName];
-                    if (!slotList) continue;
-                    const att = slotList.find(a => a.name === attName);
-                    if (!att) continue;
-                    const mod = att.modifiers;
-                    if (mod.damage) w.damage = (w.damage || def.damage) * mod.damage;
-                    if (mod.soundRadius) w.soundRadius = (w.soundRadius || def.soundRadius) * mod.soundRadius;
-                    if (mod.fireRate) w.fireRate = (w.fireRate || def.fireRate) * mod.fireRate;
-                    if (mod.reloadTime) w.reloadTime = (w.reloadTime || def.reloadTime) * mod.reloadTime;
-                    if (mod.bulletRadius) w.bulletRadius = (w.bulletRadius || def.bulletRadius) + mod.bulletRadius * scale / cameraScale;
-                    if (mod.pellets) w.pellets = (w.pellets || def.pellets) + mod.pellets;
-                    if (mod.magSize) {
-                        w.magSize = Math.round((w.magSize || def.magSize) * mod.magSize);
-                        w.ammoInMag = w.magSize;
-                    }
-                    if (mod.spread) w.spread = (w.spread || def.spread) * mod.spread;
-                    if (mod.addFireModes) {
-                        mod.addFireModes.forEach((m: any) => { if (!w.allowedFireModes.includes(m)) w.allowedFireModes.push(m); });
-                    }
-                    if (mod.specialEffect) w.specialEffect = mod.specialEffect;
-                }
-            }
-            return w as Weapon;
-        };
-
-        // Shop state includes a 15s pre-round customization window
-        const [shopTimer, setShopTimer] = useState<number | null>(null);
-        const selectedAttachmentsRef = useRef<{ [weaponName: string]: { [slot: string]: string } }>({});
-    const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
-        const openShopForRound = () => {
-            setShowShop(true);
-            // Start a 15s timer to auto-close shop
-            setShopTimer(15);
-        };
-
-        const startRound = () => {
-            setIsRoundActive(true);
-            isRoundActiveRef.current = true;
-            setShowShop(false);
-            setShopTimer(null);
-        };
-
-        // Shop timer countdown effect
-        useEffect(() => {
-            if (shopTimer == null) return;
-            if (shopTimer <= 0) {
-                startRound();
-                return;
-            }
-            const id = setInterval(() => {
-                setShopTimer(t => (t !== null ? t - 1 : null));
-            }, 1000);
-            return () => clearInterval(id);
-        }, [shopTimer]);
-
-        const buyWeapon = (weaponName: string, targetSlot: 'primary'|'secondary'|'melee'|'special'|'auto' = 'auto') => {
-            const def = WEAPONS[weaponName];
-            if (!def) return;
-            const cost = (def as any).cost || 0;
-            if (roundMoneyRef.current < cost) return; // not enough
-            const player = playerRef.current;
-            // Deduct money
-            const nextMoney = roundMoneyRef.current - cost;
-            roundMoneyRef.current = nextMoney;
-            setRoundMoney(nextMoney);
-            // Decide which slot to put the purchased weapon into based on weapon.category or explicit targetSlot
-            let slotIndex = player.currentWeaponIndex;
-            if (targetSlot !== 'auto') {
-                if (targetSlot === 'primary') slotIndex = 0;
-                else if (targetSlot === 'secondary') slotIndex = 1;
-                else if (targetSlot === 'melee') slotIndex = 2;
-                else if (targetSlot === 'special') slotIndex = 3;
-            } else {
-                switch (def.category) {
-                    case 'primary': slotIndex = 0; break;
-                    case 'secondary': slotIndex = 1; break;
-                    case 'melee': slotIndex = 2; break;
-                    case 'special': slotIndex = 3; break;
-                    default: slotIndex = player.currentWeaponIndex; break;
-                }
-            }
-            // Create weapon instance with attachments applied if present
-            const attachments = selectedAttachmentsRef.current[weaponName] || {};
-            const inst = createWeaponWithAttachments(weaponName, attachments) || createWeaponFromDef(weaponName);
-            if (inst) {
-                player.weapons[slotIndex] = inst;
-            }
-            // Broadcast buy
-            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName, cost, attachments }); } catch {}
-        };
+  const runScoreRef = useRef<number>(initialRunScore || 0);
 
   // Helper to increment score and notify parent (applies difficulty multiplier)
   const addScore = (amount: number) => {
@@ -1086,15 +910,28 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       doorToInteract.isPlayerHolding = true;
       doorToInteract.targetAngle = null;
 
+      // Calculate door direction vector and normal vector pointing to the swing-open side
+      const doorVecX = Math.cos(doorToInteract.closedAngle);
+      const doorVecY = Math.sin(doorToInteract.closedAngle);
+      
+      // The side the door swings into
+      const normalX = -doorVecY * doorToInteract.swingDirection;
+      const normalY = doorVecX * doorToInteract.swingDirection;
+
       const relX = playerRef.current.x - doorToInteract.hinge.x;
       const relY = playerRef.current.y - doorToInteract.hinge.y;
-      const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
-      const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
-      const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
       
-      const pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
-      
-      doorToInteract.angularVelocity = 1.8 * pushDirection;
+      const dotProd = relX * normalX + relY * normalY;
+
+      if (dotProd < 0) {
+          // Player is on the opposite side of the swing rotation (the opening direction/side)
+          // Interacting from this side always OPENS the door
+          doorToInteract.angularVelocity = 1.8 * doorToInteract.swingDirection;
+      } else {
+          // Player is on the swing rotation side (the closing direction/side)
+          // Interacting from this side always CLOSES the door
+          doorToInteract.angularVelocity = -1.8 * doorToInteract.swingDirection;
+      }
   }, []);
 
   const stopDoorInteraction = useCallback(() => {
@@ -1103,6 +940,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
           if (door) {
               door.isPlayerHolding = false;
               door.angularVelocity = 0;
+              door.targetAngle = null;
           }
           interactingDoorIdRef.current = null;
       }
@@ -1437,47 +1275,27 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         const ux = Math.cos(playerDirection);
         const uy = Math.sin(playerDirection);
 
-        const tryBashUnit = (unit: Player | RemotePlayer | Enemy, isLocalPlayer: boolean) => {
-            if ('health' in unit && unit.health != null && unit.health <= 0) return;
-            const ur = 'radius' in unit ? (unit as any).radius : player.radius;
-            const dx = unit.x - player.x;
-            const dy = unit.y - player.y;
+        for (const enemy of enemiesRef.current) {
+            if (enemy.health <= 0) continue;
+            const dx = enemy.x - player.x;
+            const dy = enemy.y - player.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist < bashRange + ur) {
+            if (dist < bashRange + enemy.radius) {
                 const angleToEnemy = Math.atan2(dy, dx);
                 let angleDiff = Math.abs(normalizeAngle(angleToEnemy - playerDirection));
                 if (angleDiff < Math.PI / 4) { // 45 degree cone
-                    if ('id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId) {
-                        // Remote player: authoritative damage on target client
-                        (networkClient as any).send('player-hit', {
-                            targetId: unit.id,
-                            damage: currentMelee.damage,
-                            attackerId: networkClient.ownId,
-                            impact: { x: unit.x, y: unit.y },
-                            sourceDir: { x: ux, y: uy }
-                        });
-                    } else if (!isLocalPlayer) {
-                        // Enemy AI
-                        const enemy = unit as Enemy;
-                        const healthBefore = enemy.health;
-                        enemy.health -= currentMelee.damage;
-                        enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
-                        if (enemy.health <= 0 && healthBefore > 0) {
-                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                            try { addScore(SCORE_PER_KILL); } catch {}
-                        }
+                    const healthBefore = enemy.health;
+                    enemy.health -= currentMelee.damage;
+                    enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                        hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                        try { addScore(SCORE_PER_KILL); } catch {}
+                        try {
+                            // no drop
+                        } catch (e) {}
                     }
                 }
-            }
-        };
-
-        for (const enemy of enemiesRef.current) {
-            tryBashUnit(enemy, false);
-        }
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                tryBashUnit(rp as any, false);
             }
         }
         shockwavesRef.current.push({ x: player.x + ux * 30, y: player.y + uy * 30, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
@@ -1732,25 +1550,19 @@ const startHealing = () => {
         });
         
         level.doors.forEach(d => {
-            // Algorithmic length selection by aspect ratio:
-            // - portrait (aspect ~< 1): use canvas.height as base
-            // - square: interpolate between height and width
-            // - wide desktop: smoothly bias toward canvas.width but cap to avoid excessive length
-            const aspect = canvas.width / canvas.height;
-            // map aspect 1.0..2.0 to t 0..1, clamp
-            const tRaw = (aspect - 1.0) / (2.0 - 1.0);
-            const t = Math.max(0, Math.min(1, tRaw));
-            // smoothstep for nicer transition
-            const smooth = t * t * (3 - 2 * t);
-            const base = canvas.height + (canvas.width - canvas.height) * smooth; // lerp(height, width, smooth)
-
-            // Scale down doors slightly to avoid visually oversized doors across modes.
-            const DOOR_LENGTH_SCALE = 0.7; // Reduce by ~30% (adjustable)
-            let lengthPixels = d.length * base * DOOR_LENGTH_SCALE;
-            // Cap: do not exceed 65% of the longer canvas side
-            const maxLen = Math.max(canvas.width, canvas.height) * 0.65;
-            const minLen = Math.min(canvas.width, canvas.height) * 0.06; // ensure not vanishingly small
-            lengthPixels = Math.max(minLen, Math.min(lengthPixels, maxLen));
+            // Precise orientation-locked door scale:
+            // Horizontal doors span X gaps of walls (scaled by canvas.width),
+            // vertical doors span Y gaps of walls (scaled by canvas.height).
+            // This maintains perfect gap closure and scale alignment across ALL resolutions & aspect ratios.
+            const cosAngle = Math.abs(Math.cos(d.closedAngle));
+            const sinAngle = Math.abs(Math.sin(d.closedAngle));
+            
+            let lengthPixels = 0;
+            if (cosAngle > sinAngle) {
+                lengthPixels = d.length * canvas.width;
+            } else {
+                lengthPixels = d.length * canvas.height;
+            }
 
             doorsRef.current.push({
               ...d,
@@ -2020,7 +1832,6 @@ const startHealing = () => {
           return weapon;
       }
       
-      // Initialize full loadout for both singleplayer and multiplayer
       try {
           player.weapons = [
               createWeaponInstance(loadout.primary, loadout.primaryAttachments),
@@ -2028,7 +1839,6 @@ const startHealing = () => {
               createWeaponInstance(loadout.melee, {}),
               createWeaponInstance(loadout.special, loadout.specialAttachments)
           ];
-          // Default to primary
           player.currentWeaponIndex = 0;
       } catch (e) {
           // fallback safe state
@@ -2210,16 +2020,9 @@ const startHealing = () => {
               player.y = spawnY;
               player.health = player.maxHealth;
               
-              // Reset magazines, reserves, and shield durability on spawn
+              // Reset magazines to full stock on spawn
               player.weapons.forEach(w => {
-                  const def = WEAPONS[w.name];
                   w.ammoInMag = w.magSize;
-                  if (def) {
-                      w.reserveAmmo = def.reserveAmmo;
-                  }
-                  if (w.name === 'Riot Shield' && w.maxDurability != null) {
-                      w.durability = w.maxDurability;
-                  }
               });
               
               sendPlayerAction('player-reset', { id: networkClient?.ownId || 'local' });
@@ -2325,7 +2128,7 @@ const startHealing = () => {
         }
 
 
-        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
             const dist = Math.hypot(unit.x - n.x, unit.y - n.y);
             if (dist > rad) return;
 
@@ -2337,14 +2140,12 @@ const startHealing = () => {
                 }
             }
 
-            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
-
             if (n.type === 'grenade') {
                 if (isObstructed) return;
-                const damage = (1 - (dist / rad)) * (isLocalPlayer ? 100 : 999);
-                if (isLocalPlayer) {
+                const damage = (1 - (dist / rad)) * (isPlayer ? 100 : 999);
+                if(isPlayer) {
                     const player = unit as Player;
-                    if (isEnded) return;
+                    if(isEnded) return;
 
                     let damageToApply = damage;
                     const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
@@ -2356,17 +2157,17 @@ const startHealing = () => {
                         if (isEquipped && angleDiff < Math.PI / 2) {
                             shield.durability! -= damageToApply;
                             damageToApply = 0;
-                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) {
+                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) { // Back protection
                             shield.durability! -= damage * 0.8;
                             damageToApply *= 0.2;
                         }
                     }
-
+                    
                     if (damageToApply > 0) {
                         player.health -= damageToApply;
                         player.hitTimer = 0.17;
                     }
-
+                    
                     const dx = player.x - n.x;
                     const dy = player.y - n.y;
                     const impactDist = Math.hypot(dx, dy) || 1;
@@ -2380,31 +2181,24 @@ const startHealing = () => {
                     });
 
                     if (player.health <= 0) {
-                        player.health = 1;
+                        player.health = 1; // leave 1 hp and let applyDamageToPlayer finish it and process respawn
                         applyDamageToPlayer(10, {x: dx / impactDist, y: dy / impactDist}, {x: player.x, y: player.y}, 'explosion');
                     }
-                } else if (isRemotePlayer) {
-                    (networkClient as any).send('player-hit', {
-                        targetId: unit.id,
-                        damage: damage,
-                        attackerId: networkClient.ownId,
-                        impact: { x: unit.x, y: unit.y },
-                        sourceDir: { x: (unit.x - n.x) / dist, y: (unit.y - n.y) / dist }
-                    });
                 } else {
                     const enemy = unit as Enemy;
                     const healthBefore = enemy.health;
                     enemy.health -= damage;
-                    if (enemy.health <= 0 && healthBefore > 0) {
-                        hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                        try { addScore(SCORE_PER_KILL); } catch {}
-                    }
+                                        if (enemy.health <= 0 && healthBefore > 0) {
+                                            hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                            try { addScore(SCORE_PER_KILL); } catch {}
+                                        }
                 }
-            } else if (n.type === 'flashbang') {
-                if (isLocalPlayer) {
+            } else { // flashbang
+                if (isPlayer) {
                     const player = unit as Player;
                     const viewPoly = getVisionPolygon(player, dynamicSegments, {width: canvas.width, height: canvas.height});
                     if (pointInPoly(n.x, n.y, viewPoly)) {
+                        // Explosion is visible, check direction for flash effect reduction.
                         const mouse = mousePosRef.current;
                         const angleToMouse = Math.atan2(mouse.y - player.y, mouse.x - player.x);
                         const angleToFlash = Math.atan2(n.y - player.y, n.x - player.x);
@@ -2414,30 +2208,31 @@ const startHealing = () => {
                             angleDiff = 2 * Math.PI - angleDiff;
                         }
 
-                        const maxFlashDuration = 2.5;
-                        const minFlashDuration = 0.5;
+                        // angleDiff is now between 0 (front) and PI (behind)
+                        const maxFlashDuration = 2.5; // seconds
+                        const minFlashDuration = 0.5; // seconds
+
+                        // Calculate flash intensity based on angle. 1.0 for front, 0.0 for back.
                         const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
+                        
                         const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
                         player.flashTimer = Math.max(player.flashTimer, flashDuration);
                     }
-                } else if (isRemotePlayer) {
-                    // Remote players handle flashbang visuals locally; only notify if you want synced stun.
-                    // For now, we rely on the visual on the victim client, so no network packet needed.
-                } else {
+                } else { // is enemy
                     if (isObstructed) return;
                     const enemy = unit as Enemy;
                     const angleToFlash = Math.atan2(n.y - enemy.y, n.x - enemy.x);
-
+                    
                     let angleDiff = Math.abs(enemy.direction - angleToFlash);
                     if (angleDiff > Math.PI) {
                         angleDiff = 2 * Math.PI - angleDiff;
                     }
-
-                    const maxFlashDuration = 2.5;
-                    const minFlashDuration = 0.5;
+            
+                    const maxFlashDuration = 2.5; // seconds
+                    const minFlashDuration = 0.5; // seconds
                     const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
                     const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
-
+                    
                     enemy.stunTimer = Math.max(enemy.stunTimer || 0, flashDuration);
                     enemy.isAlert = false;
                 }
@@ -2445,9 +2240,6 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
-        if (isMultiplayer && networkClient) {
-            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
-        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -2466,7 +2258,7 @@ const startHealing = () => {
         explosionsRef.current.push({ x, y, radius: 0, maxRadius: radius, lifetime: 0.5, maxLifetime: 0.5, type: 'grenade' });
         soundWavesRef.current.push({ x, y, radius: 0, maxRadius: 800 * scale / cameraScale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
 
-        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
             const dist = Math.hypot(unit.x - x, unit.y - y);
             if (dist > radius) return;
 
@@ -2479,10 +2271,8 @@ const startHealing = () => {
             }
             if (isObstructed) return;
 
-            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
             const damage = (1 - (dist / radius)) * maxDamage;
-
-            if (isLocalPlayer) {
+            if (isPlayer) {
                 const player = unit as Player;
                 if (isEnded) return;
 
@@ -2501,24 +2291,16 @@ const startHealing = () => {
                         damageToApply *= 0.2;
                     }
                 }
-
+                
                 if (damageToApply > 0) {
                     player.health -= damageToApply;
                     player.hitTimer = 0.17;
                 }
-
+                
                 if (player.health <= 0) {
                     player.health = 1;
                     applyDamageToPlayer(10, {x: 0, y: 0}, {x: player.x, y: player.y}, 'explosion');
                 }
-            } else if (isRemotePlayer) {
-                (networkClient as any).send('player-hit', {
-                    targetId: unit.id,
-                    damage: damage,
-                    attackerId: networkClient.ownId,
-                    impact: { x: unit.x, y: unit.y },
-                    sourceDir: { x: (unit.x - x) / dist, y: (unit.y - y) / dist }
-                });
             } else {
                 const enemy = unit as Enemy;
                 const healthBefore = enemy.health;
@@ -2530,9 +2312,6 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
-        if (isMultiplayer && networkClient) {
-            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
-        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -3354,34 +3133,15 @@ doorsRef.current.forEach(door => {
 
             const healthBefore = enemy.health;
             enemy.health = 0; // Slash is an instant kill
-            if (healthBefore > 0) {
-                slashHitThisSwingRef.current.add(enemy);
-                hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
-                try { addScore(SCORE_PER_KILL); } catch {}
-            }
-        }
-
-        // Check remote players in multiplayer for slash hits
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                if (slashHitThisSwingRef.current.has(rp as any)) continue;
-                const dx = rp.x - player.x, dy = rp.y - player.y; const dist = Math.hypot(dx, dy);
-                if (dist < slash.inner || dist > slash.range) continue;
-                const ang = Math.atan2(dy, dx);
-                if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
-                const dClear = raycast(player.x, player.y, ang, dist);
-                if (dClear < dist - 1e-3) continue;
-
-                slashHitThisSwingRef.current.add(rp as any);
-                (networkClient as any).send('player-hit', {
-                    targetId: rp.id,
-                    damage: 150,
-                    attackerId: networkClient.ownId,
-                    impact: { x: rp.x, y: rp.y },
-                    sourceDir: { x: dx / dist, y: dy / dist }
-                });
-            }
+                            if (healthBefore > 0) {
+                            slashHitThisSwingRef.current.add(enemy);
+                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                            shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+                                                        try { addScore(SCORE_PER_KILL); } catch {}
+                                                        try {
+                                                                // no drop
+                                                        } catch (e) {}
+                        }
         }
 
         if (castDist < slash.range - 0.5){
@@ -3475,21 +3235,6 @@ doorsRef.current.forEach(door => {
                 enemy.burnDamage = patch.damagePerSecond;
                 if (!enemy.isAlert) {
                      enemy.isAlert = true; // Make them react to being on fire
-                }
-            }
-        }
-
-        // Check remote players standing in fire
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                if (Math.hypot(rp.x - patch.x, rp.y - patch.y) < player.radius + patch.radius) {
-                    (networkClient as any).send('player-hit', {
-                        targetId: rp.id,
-                        damage: patch.damagePerSecond * dt,
-                        attackerId: networkClient.ownId,
-                        impact: { x: rp.x, y: rp.y },
-                        sourceDir: { x: 0, y: 0 }
-                    });
                 }
             }
         }
@@ -4189,14 +3934,33 @@ doorsRef.current.forEach(door => {
               
               context.restore();
           }
+
+          // Render remote players
+          if (isMultiplayer) {
+              remotePlayersRef.current.forEach(p => {
+                  const brightness = getBrightnessByDistance(p.x, p.y, visionRadius);
+                  if (brightness <= 0) return;
+
+                  context.save();
+                  context.globalAlpha = brightness;
+                  context.beginPath();
+                  context.arc(p.x, p.y, player.radius, 0, Math.PI * 2);
+                  context.fillStyle = p.skinColor;
+                  context.shadowColor = p.skinColor;
+                  context.shadowBlur = 15 * scale;
+                  context.fill();
+                  context.shadowBlur = 0;
+                  context.restore();
+              });
+          }
         }
 
         // Draw multiplayer elements
         if (isMultiplayer) {
-            drawRemotePlayers(context, scale, player.radius, getBrightnessByDistance, visionRadius);
+            drawRemotePlayers(context, scale, cameraScaleRef.current || 1);
             drawTeamInfo(context, scale, cameraScaleRef.current || 1);
         }
-      };
+      }
 
       // Render Start
       context.fillStyle = 'black';
@@ -4647,7 +4411,7 @@ doorsRef.current.forEach(door => {
         context.textAlign = 'center';
         context.shadowColor = 'black';
         context.shadowBlur = 10 * scale;
-        context.fillText('EXTRACT', zone.x + zone.width / 2, zone.y + zone.height / 2 + 8 * scale);
+        context.fillText(t('extraction').toUpperCase(), zone.x + zone.width / 2, zone.y + zone.height / 2 + 8 * scale);
         context.shadowBlur = 0;
       }
 
@@ -4659,7 +4423,7 @@ doorsRef.current.forEach(door => {
           context.font = `bold ${18 * scale}px mono`;
           context.fillStyle = 'rgba(255, 255, 255, 0.95)';
           context.textAlign = 'center';
-          context.fillText(`Enemy density: ${rangeInfo}`, canvas.width / 2, 40 * scale);
+          context.fillText(`${t('enemyDensity')}: ${rangeInfo}`, canvas.width / 2, 40 * scale);
           context.restore();
       }
 
@@ -4751,7 +4515,7 @@ doorsRef.current.forEach(door => {
           context.fillStyle = '#cbd5e1';
           context.textAlign = 'left';
           context.textBaseline = 'middle';
-          context.fillText(`HP: ${Math.round(player.health)}/${player.maxHealth}`, leftX, drawY - 6 * scale);
+          context.fillText(`${t('health')}: ${Math.round(player.health)}/${player.maxHealth}`, leftX, drawY - 6 * scale);
 
           // Shield block or Armor block
           drawY = dockY + 38 * scale;
@@ -4765,14 +4529,14 @@ doorsRef.current.forEach(door => {
               
               context.font = `bold ${9 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText(`SHIELD: ${Math.round(shield.durability)}/${shield.maxDurability}`, leftX, drawY - 6 * scale);
+              context.fillText(`${t('shield')}: ${Math.round(shield.durability)}/${shield.maxDurability}`, leftX, drawY - 6 * scale);
           } else {
               context.fillStyle = 'rgba(148, 163, 184, 0.05)';
               context.fillRect(leftX, drawY, barW, barH);
               
               context.font = `bold ${9 * scale}px mono`;
               context.fillStyle = '#64748b'; // Slate 500
-              context.fillText(`ARMOR RETAINED`, leftX, drawY - 6 * scale);
+              context.fillText(t('armor').toUpperCase(), leftX, drawY - 6 * scale);
           }
 
           // Medkits counter
@@ -4815,12 +4579,12 @@ doorsRef.current.forEach(door => {
           // Ammo status text
           let ammoText = '';
           if (player.isReloading) {
-              ammoText = 'RELOADING...';
+              ammoText = t('reload').toUpperCase() + '...';
               context.fillStyle = '#f59e0b';
           } else if (currentWeapon) {
               if (currentWeapon.category === 'melee') {
                   const isReady = player.shootCooldown <= 0;
-                  ammoText = isReady ? 'READY' : `COOLDOWN: ${player.shootCooldown.toFixed(1)}s`;
+                  ammoText = isReady ? t('readyBtn').toUpperCase() : `${t('reload').toUpperCase()}: ${player.shootCooldown.toFixed(1)}s`;
                   context.fillStyle = isReady ? 'white' : '#94a3b8';
               } else {
                   if (level.name === 'TRAINING GROUND' || isMultiplayer) {
@@ -4875,7 +4639,7 @@ doorsRef.current.forEach(door => {
                 context.textAlign = 'center';
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
-                context.fillText('[E] TAKEDOWN', enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
+                context.fillText(t('takedown'), enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
                 context.shadowBlur = 0;
             }
           } else if (interactionHintDoorIdRef.current !== null) {
@@ -4889,7 +4653,7 @@ doorsRef.current.forEach(door => {
                 context.textAlign = 'center';
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
-                context.fillText('[E] INTERACT', midX, midY - 20 * scale);
+                context.fillText(t('interact'), midX, midY - 20 * scale);
                 context.shadowBlur = 0;
               }
             }
@@ -4904,7 +4668,7 @@ doorsRef.current.forEach(door => {
                 context.textAlign = 'center';
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
-                context.fillText('LOCKED', midX, midY - 20 * scale);
+                context.fillText(t('locked'), midX, midY - 20 * scale);
                 context.shadowBlur = 0;
               }
             }
@@ -4958,10 +4722,10 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${36 * scale}px mono`;
               if (isMissionCompleteRef.current) {
                   context.fillStyle = '#10b981';
-                  context.fillText('MISSION COMPLETE', cx, py + 52 * scale);
+                  context.fillText(t('missionSuccess').toUpperCase(), cx, py + 52 * scale);
               } else {
                   context.fillStyle = '#ef4444';
-                  context.fillText('MISSION FAILED', cx, py + 52 * scale);
+                  context.fillText(t('died').toUpperCase(), cx, py + 52 * scale);
               }
               context.shadowBlur = 0;
 
@@ -4974,7 +4738,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'left';
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Mission Time:', leftX, rowY);
+              context.fillText(`${t('missionTime')}:`, leftX, rowY);
               context.font = `${18 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${missionTimeRef.current.toFixed(2)}s`, leftX + 160 * scale, rowY);
@@ -4982,7 +4746,7 @@ doorsRef.current.forEach(door => {
               rowY += rowGap;
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Kills:', leftX, rowY);
+              context.fillText(`${t('kills')}:`, leftX, rowY);
               context.font = `${18 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${kills} / ${totalEnemies}`, leftX + 160 * scale, rowY);
@@ -4992,7 +4756,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'left';
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Run Score:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('score')}:`, rightX - 80 * scale, rowY);
               context.font = `bold ${22 * scale}px mono`;
               context.fillStyle = '#34d399';
               context.fillText(`${runScoreRef.current}`, rightX + 40 * scale, rowY);
@@ -5001,7 +4765,7 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${16 * scale}px mono`;
               context.fillStyle = '#94a3b8';
               const projectedTotal = (typeof totalScore === 'number' ? totalScore : 0) + (level.isTrainingGround ? 0 : runScoreRef.current);
-              context.fillText('Projected Total:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('projectedTotal')}:`, rightX - 80 * scale, rowY);
               context.font = `${16 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${projectedTotal}`, rightX + 40 * scale, rowY);
@@ -5010,7 +4774,7 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${16 * scale}px mono`;
               context.fillStyle = '#94a3b8';
               const globalHigh = typeof highScore !== 'undefined' ? highScore : 0;
-              context.fillText('High Score:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('highScore')}:`, rightX - 80 * scale, rowY);
               context.font = `${16 * scale}px mono`;
               context.fillStyle = (runScore > globalHigh) ? '#f59e0b' : 'white';
               context.fillText(`${globalHigh}`, rightX + 40 * scale, rowY);
@@ -5019,7 +4783,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'center';
               context.font = `${18 * scale}px mono`;
               context.fillStyle = '#94a3b8';
-              context.fillText('Tap or press Space to continue', cx, py + panelH - 32 * scale);
+              context.fillText(t('pressToRespawn'), cx, py + panelH - 32 * scale);
           }
       }
       
@@ -5388,28 +5152,58 @@ doorsRef.current.forEach(door => {
   }, [level, difficulty, loadout, customControls, aimSensitivity, agentSkinColor, isMultiplayer]);
 
   useEffect(() => {
-    // Prevent dual-finger pinch-to-zoom on the entire window natively using non-passive event listeners
-    const preventZoom = (e: TouchEvent) => {
-      if (e.touches.length > 1) {
+    const canvas = canvasRef.current;
+
+    // Prevent default touch gestures (pinch-to-zoom, swipe-to-scroll, bounce, pull-to-refresh)
+    // ONLY on the game canvas itself to preserve interactive menus and options outside!
+    const preventDefaultTouch = (e: TouchEvent) => {
+      if (e.cancelable) {
         e.preventDefault();
       }
     };
 
-    // Prevent Safari/iOS gesture-based zooming gestures
+    // Prevent browser zoom wheel gestures (especially with Ctrl/Pinch on trackpad)
+    const preventWheelZoom = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
+    };
+
+    // Prevent iOS/Safari desktop gestures zooming
     const preventGesture = (e: Event) => {
       e.preventDefault();
     };
 
-    window.addEventListener('touchstart', preventZoom, { passive: false });
-    window.addEventListener('touchmove', preventZoom, { passive: false });
+    // Prevent context menu (long press gesture or right click)
+    const preventCtxMenu = (e: Event) => {
+      e.preventDefault();
+    };
+
+    if (canvas) {
+      canvas.addEventListener('touchstart', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchend', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchcancel', preventDefaultTouch, { passive: false });
+    }
+
+    window.addEventListener('wheel', preventWheelZoom, { passive: false });
     window.addEventListener('gesturestart', preventGesture, { passive: false });
     window.addEventListener('gesturechange', preventGesture, { passive: false });
+    window.addEventListener('gestureend', preventGesture, { passive: false });
+    window.addEventListener('contextmenu', preventCtxMenu, { passive: false });
 
     return () => {
-      window.removeEventListener('touchstart', preventZoom);
-      window.removeEventListener('touchmove', preventZoom);
+      if (canvas) {
+        canvas.removeEventListener('touchstart', preventDefaultTouch);
+        canvas.removeEventListener('touchmove', preventDefaultTouch);
+        canvas.removeEventListener('touchend', preventDefaultTouch);
+        canvas.removeEventListener('touchcancel', preventDefaultTouch);
+      }
+      window.removeEventListener('wheel', preventWheelZoom);
       window.removeEventListener('gesturestart', preventGesture);
       window.removeEventListener('gesturechange', preventGesture);
+      window.removeEventListener('gestureend', preventGesture);
+      window.removeEventListener('contextmenu', preventCtxMenu);
     };
   }, []);
 
@@ -5453,10 +5247,6 @@ doorsRef.current.forEach(door => {
             p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
             p.lastUpdate = Date.now();
             p.playerId = payload.id;
-            p.currentWeaponIndex = payload.currentWeaponIndex;
-            p.shieldName = payload.shieldName;
-            p.shieldDurability = payload.shieldDurability;
-            p.shieldMaxDurability = payload.shieldMaxDurability;
         } else {
             handlePlayerJoined(payload);
         }
@@ -5490,32 +5280,6 @@ doorsRef.current.forEach(door => {
             createFireEffects(p.x, p.y, playerRef.current.radius, payload.baseAngle, remoteWeapon, 'enemy', dynamicSegments);
         }
     };
-    const handleStartRound = (payload: { roundId: string }) => {
-        // Only open shop on THE_FACTORY
-        if (level.name === 'THE FACTORY') {
-            // Convert current runScore to money for the round (already done in addScore), show shop
-            openShopForRound();
-        }
-    };
-    const handleBuyWeapon = (payload: { playerId: string; weaponName: string; cost: number; attachments?: any }) => {
-        // Could display notifications; if payload.playerId === ownId we already processed purchase locally
-        console.log('[Network] buy-weapon', payload);
-        try {
-            const { playerId, weaponName, attachments } = payload;
-            if (playerId !== (networkClient && networkClient.ownId)) {
-                // Find remote player and apply purchased weapon instance
-                const rp = remotePlayersRef.current.find(p => p.id === playerId);
-                const created = createWeaponWithAttachments(weaponName, attachments || {});
-                if (rp) {
-                    (rp as any)['weapons'] = (rp as any)['weapons'] || [];
-                    (rp as any)['weapons'].push(created || { name: weaponName });
-                }
-                // show small on-screen message
-                setPurchaseMessage(`${playerId} bought ${weaponName}`);
-                setTimeout(() => setPurchaseMessage(null), 2000);
-            }
-        } catch (e) { console.error(e); }
-    };
 
     const handlePlayerAction = (payload: any) => {
         try {
@@ -5532,16 +5296,6 @@ doorsRef.current.forEach(door => {
                     addScore(50); // Provide 50 points
                     setPurchaseMessage('YOU ELIMINATED AN OPERATOR! [+50]');
                     setTimeout(() => setPurchaseMessage(null), 3000);
-
-                    // Replenish ammo for current weapon on player elimination
-                    const currentWeapon = playerRef.current.weapons[playerRef.current.currentWeaponIndex];
-                    if (currentWeapon && currentWeapon.magSize !== -1) {
-                        const magRefill = currentWeapon.magSize;
-                        currentWeapon.ammoInMag = Math.min(currentWeapon.magSize, currentWeapon.ammoInMag + magRefill);
-                        const def = WEAPONS[currentWeapon.name];
-                        const reserveRefill = def ? Math.ceil(def.reserveAmmo * 0.5) : Math.ceil(currentWeapon.reserveAmmo * 0.5);
-                        currentWeapon.reserveAmmo += reserveRefill;
-                    }
                 } else {
                     const attackerName = attackerId ? String(attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
                     const victimName = victimId ? String(victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
@@ -5557,8 +5311,6 @@ doorsRef.current.forEach(door => {
     networkClient.on('player-left', handlePlayerLeft);
     networkClient.on('player-update', handlePlayerUpdate);
     networkClient.on('fire-weapon', handleFireWeapon);
-    networkClient.on('start-round', handleStartRound as any);
-    networkClient.on('buy-weapon', handleBuyWeapon as any);
     networkClient.on('player-action' as any, handlePlayerAction as any);
     
     const handlePlayerHit = (payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } }) => {
@@ -5579,21 +5331,7 @@ doorsRef.current.forEach(door => {
             if (networkClient.connected) {
             const player = playerRef.current;
             const isShooting = isShootingRef.current || touchStateRef.current.fire.id !== null || touchStateRef.current.fixedFire.id !== null;
-            const shield = player.weapons.find(w => w.name === 'Riot Shield');
-            const hasShield = shield && shield.durability != null && shield.durability > 0;
-            (networkClient as any).send('player-update', {
-                id: networkClient.ownId,
-                x: player.x,
-                y: player.y,
-                direction: playerDirectionRef.current,
-                health: player.health,
-                skinColor: agentSkinColor,
-                isShooting,
-                currentWeaponIndex: player.currentWeaponIndex,
-                shieldName: hasShield ? 'Riot Shield' : undefined,
-                shieldDurability: hasShield ? shield.durability : 0,
-                shieldMaxDurability: hasShield ? shield.maxDurability : 0
-            });
+            (networkClient as any).send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
         }
     }, 100);
 
@@ -5603,8 +5341,6 @@ doorsRef.current.forEach(door => {
         networkClient.off('player-left', handlePlayerLeft);
         networkClient.off('player-update', handlePlayerUpdate);
         networkClient.off('fire-weapon', handleFireWeapon);
-        networkClient.off('start-round', handleStartRound);
-        networkClient.off('buy-weapon', handleBuyWeapon);
         networkClient.off('player-hit', handlePlayerHit);
         networkClient.off('player-action', handlePlayerAction);
         clearInterval(intervalId);
@@ -5643,20 +5379,29 @@ doorsRef.current.forEach(door => {
                     soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
                 }
             } else if (interactionHintDoorIdRef.current !== null) {
-                if (now - lastEKeyPressTimeRef.current < 300 && lastInteractedDoorIdRef.current === interactionHintDoorIdRef.current) {
-                    const door = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-                    if (door) door.targetAngle = Math.abs(door.currentAngle - door.closedAngle) < 0.1 ? (door.closedAngle + door.maxOpenAngle * door.swingDirection) : door.closedAngle;
-                } else {
-                    startDoorInteraction();
+                const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
+                    const isDoubleClick = (now - lastEKeyPressTimeRef.current < 300) && (lastInteractedDoorIdRef.current === doorToInteract.id);
+                    
+                    const doorVecX = Math.cos(doorToInteract.closedAngle);
+                    const doorVecY = Math.sin(doorToInteract.closedAngle);
+                    const normalX = -doorVecY * doorToInteract.swingDirection;
+                    const normalY = doorVecX * doorToInteract.swingDirection;
+                    const relX = playerRef.current.x - doorToInteract.hinge.x;
+                    const relY = playerRef.current.y - doorToInteract.hinge.y;
+                    const dotProd = relX * normalX + relY * normalY;
+
+                    if (isDoubleClick && dotProd < 0) {
+                        doorToInteract.targetAngle = doorToInteract.closedAngle;
+                        doorToInteract.angularVelocity = 0;
+                        doorToInteract.isPlayerHolding = false;
+                        interactingDoorIdRef.current = null;
+                    } else {
+                        startDoorInteraction();
+                    }
                 }
                 lastEKeyPressTimeRef.current = now;
                 lastInteractedDoorIdRef.current = interactionHintDoorIdRef.current;
-            }
-            break;
-        case 'b':
-            // Open shop (local test) only on factory
-            if (level.name === 'THE FACTORY') {
-                openShopForRound();
             }
             break;
         case '1': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 0; } break;
@@ -5891,7 +5636,31 @@ doorsRef.current.forEach(door => {
                 touchState.fire.lastY = touch.clientY;
             } else if (controlKey === 'interact') {
                 if (!takedownHintEnemyRef.current && interactionHintDoorIdRef.current !== null) {
-                    startDoorInteraction(); // Hold to interact with doors
+                    const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                    if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
+                        const now = performance.now();
+                        const isDoubleClick = (now - lastEKeyPressTimeRef.current < 300) && (lastInteractedDoorIdRef.current === doorToInteract.id);
+                        
+                        const doorVecX = Math.cos(doorToInteract.closedAngle);
+                        const doorVecY = Math.sin(doorToInteract.closedAngle);
+                        const normalX = -doorVecY * doorToInteract.swingDirection;
+                        const normalY = doorVecX * doorToInteract.swingDirection;
+                        const relX = playerRef.current.x - doorToInteract.hinge.x;
+                        const relY = playerRef.current.y - doorToInteract.hinge.y;
+                        const dotProd = relX * normalX + relY * normalY;
+
+                        if (isDoubleClick && dotProd < 0) {
+                            doorToInteract.targetAngle = doorToInteract.closedAngle;
+                            doorToInteract.angularVelocity = 0;
+                            doorToInteract.isPlayerHolding = false;
+                            interactingDoorIdRef.current = null;
+                        } else {
+                            startDoorInteraction();
+                        }
+                        
+                        lastEKeyPressTimeRef.current = now;
+                        lastInteractedDoorIdRef.current = doorToInteract.id;
+                    }
                 }
             } else if (controlKey === 'throwableSelect') { // Repurposed as throw button
                  isAimingThrowableRef.current = true;
@@ -6118,73 +5887,6 @@ doorsRef.current.forEach(door => {
                         </div>
                     )}
                  </div>
-            </div>
-        )}
-        {showShop && level.name === 'THE FACTORY' && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-                <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-3xl shadow-lg text-white">
-                    <h2 className="text-3xl font-bold text-teal-300 mb-4">ROUND SHOP</h2>
-                    <div className="flex items-center justify-between mb-4">
-                        <p className="text-sm text-gray-300">Round Money: <span className="font-mono text-teal-300">{roundMoney}</span></p>
-                        <p className="text-sm text-gray-300">Shop timer: <span className="font-mono text-teal-300">{shopTimer ?? 0}s</span></p>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto">
-                        {Object.keys(WEAPONS).map((wName) => {
-                            const def = WEAPONS[wName];
-                            const cost = (def as any).cost || 0;
-                            // Only show weapons that are not training-only and that map to a valid slot
-                            return (
-                                <div key={wName} className="p-3 bg-gray-800 rounded-md border border-gray-700">
-                                    <div className="font-bold text-lg">{def.name} <span className="text-sm text-gray-400 ml-2">({def.category})</span></div>
-                                    <div className="text-sm text-gray-400">{def.description}</div>
-                                    {/* Attachment selectors */}
-                                    {def.attachmentSlots && Object.keys(def.attachmentSlots).length > 0 && (
-                                        <div className="mt-2">
-                                            {Object.keys(def.attachmentSlots).map(slotName => (
-                                                <div key={slotName} className="text-sm text-gray-300 mt-1">
-                                                    <label className="mr-2">{slotName}:</label>
-                                                    <select className="bg-gray-700 text-white p-1 rounded" value={(selectedAttachmentsRef.current[wName] && selectedAttachmentsRef.current[wName][slotName]) || ''} onChange={(e) => {
-                                                        const cur = selectedAttachmentsRef.current[wName] || {};
-                                                        const next = { ...cur, [slotName]: e.target.value };
-                                                        selectedAttachmentsRef.current = { ...selectedAttachmentsRef.current, [wName]: next };
-                                                        // force update UI by toggling a state
-                                                        setRoundMoney(r => r);
-                                                    }}>
-                                                        <option value="">--</option>
-                                                        {def.attachmentSlots[slotName].map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
-                                                    </select>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <div className="mt-2 flex items-center justify-between">
-                                        <div className="text-teal-300 font-mono">{cost}</div>
-                                        <button onClick={() => {
-                                            const attachments = selectedAttachmentsRef.current[wName] || {};
-                                            // Attempt purchase: check funds
-                                            if (roundMoneyRef.current < cost) {
-                                                setPurchaseMessage('Not enough money');
-                                                setTimeout(() => setPurchaseMessage(null), 2000);
-                                                return;
-                                            }
-                                            // Apply purchase locally
-                                            buyWeapon(wName);
-                                            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName: wName, cost, attachments }); } catch {}
-                                            setPurchaseMessage('Purchased ' + def.name);
-                                            setTimeout(() => setPurchaseMessage(null), 2000);
-                                        }} className="px-3 py-1 bg-teal-600 text-black rounded-md font-bold">BUY</button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div className="mt-6 flex justify-end">
-                        <div className="flex items-center gap-4">
-                            {purchaseMessage && <div className="text-sm text-teal-300">{purchaseMessage}</div>}
-                            <button onClick={() => { setShowShop(false); startRound(); }} className="px-6 py-3 bg-teal-600 text-black font-bold rounded-md">START ROUND</button>
-                        </div>
-                    </div>
-                </div>
             </div>
         )}
         {isCustomizingInGame && (

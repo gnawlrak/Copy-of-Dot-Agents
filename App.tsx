@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ArrowLeft, Settings } from 'lucide-react';
+import { useLanguage } from './LanguageContext';
 import GameCanvas from './components/GameCanvas';
 import MainMenu from './components/MainMenu';
 import LevelSelect from './components/LevelSelect';
@@ -21,13 +22,11 @@ type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'load
 export type Difficulty = 'simple' | 'normal' | 'hard';
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
-  primary: 'Assault Rifle',
-  secondary: WEAPON_TYPES.secondary[0],
-  melee: 'Combat Knife',
+  primary: 'MK18 CQBR',
+  secondary: 'Glock 19',
+  melee: 'Karambit',
   special: 'Rocket Launcher',
-  primaryAttachments: {
-    'Trigger': '三连发扳机组' // Default with burst fire
-  },
+  primaryAttachments: {},
   secondaryAttachments: {},
   specialAttachments: {},
   throwables: {
@@ -59,6 +58,7 @@ const DEFAULT_CONTROLS_LAYOUT: CustomControls = {
 
 
 const App: React.FC = () => {
+  const { language, setLanguage, t } = useLanguage();
   const [gameState, setGameState] = useState<GameState>('main-menu');
   const [selectedLevel, setSelectedLevel] = useState<LevelDefinition | null>(null);
   const [levelToEdit, setLevelToEdit] = useState<LevelDefinition | null>(null);
@@ -89,6 +89,40 @@ const App: React.FC = () => {
         networkClientRef.current = new MockNetworkClient();
     }
   }, []);
+
+  useEffect(() => {
+    // Dynamically adjust overflow and scroll behavior depending on whether we are in active play vs menu
+    const isPlaying = gameState === 'in-game' || gameState === 'map-editor';
+    const rootEl = document.getElementById('root');
+    
+    if (isPlaying) {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+      if (rootEl) {
+        rootEl.style.overflow = 'hidden';
+        rootEl.style.height = '100%';
+      }
+    } else {
+      document.documentElement.style.overflow = 'auto';
+      document.body.style.overflow = 'auto';
+      document.body.style.touchAction = 'auto';
+      if (rootEl) {
+        rootEl.style.overflow = 'visible';
+        rootEl.style.height = 'auto';
+      }
+    }
+    
+    return () => {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+      if (rootEl) {
+        rootEl.style.overflow = '';
+        rootEl.style.height = '';
+      }
+    };
+  }, [gameState]);
   
   // Data Loading Effect
   useEffect(() => {
@@ -197,9 +231,9 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => {
+  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => {
     if (networkClientRef.current) {
-      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name, maxPlayers);
+      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name);
     }
     setSelectedLevel(level);
     setIsMultiplayer(true);
@@ -456,10 +490,10 @@ const App: React.FC = () => {
   const shouldShowGlobalUI = gameState !== 'in-game' && gameState !== 'map-editor' && !isCustomizingControls && !showSettings;
 
   return (
-    <main className={`bg-black text-white w-screen font-mono relative flex flex-col items-center justify-center ${
+    <main className={`bg-black text-white w-screen font-mono relative flex flex-col items-center select-none ${
       gameState === 'in-game' || gameState === 'map-editor'
-        ? 'h-screen overflow-hidden'
-        : 'min-h-screen overflow-y-auto py-8 px-4'
+        ? 'h-screen overflow-hidden justify-center'
+        : 'h-screen overflow-y-auto py-8 px-4 md:py-12 justify-start'
     }`}>
       {shouldShowGlobalUI && gameState !== 'main-menu' && <BackButton />}
       {shouldShowGlobalUI && <SettingsButton />}
@@ -469,11 +503,11 @@ const App: React.FC = () => {
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
-            <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">SETTINGS</h2>
+            <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">{language === 'en' ? 'SETTINGS' : '系统设置'}</h2>
             
-            <div className="flex flex-col gap-2 py-4">
+            <div className="flex flex-col gap-2 py-4 border-b border-gray-800">
               <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
-                <span>Aim Sensitivity</span>
+                <span>{language === 'en' ? 'Aim Sensitivity' : '操作瞄准灵敏度'}</span>
                 <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
               </label>
               <input
@@ -488,8 +522,26 @@ const App: React.FC = () => {
               />
             </div>
             
+            <div className="flex items-center justify-between py-4 border-b border-gray-800">
+              <span className="text-lg text-gray-300">{language === 'en' ? 'Language' : '界面语言'}</span>
+              <div className="flex bg-gray-800 p-1 rounded-md border border-gray-700">
+                <button 
+                  onClick={() => setLanguage('zh')}
+                  className={`px-3 py-1 text-sm font-bold rounded transition-colors ${language === 'zh' ? 'bg-teal-500 text-black' : 'text-gray-400 hover:text-teal-300'}`}
+                >
+                  中文
+                </button>
+                <button 
+                  onClick={() => setLanguage('en')}
+                  className={`px-3 py-1 text-sm font-bold rounded transition-colors ${language === 'en' ? 'bg-teal-500 text-black' : 'text-gray-400 hover:text-teal-300'}`}
+                >
+                  EN
+                </button>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between py-4">
-              <span className="text-lg text-gray-300" id="sound-waves-label">Show Sound Waves</span>
+              <span className="text-lg text-gray-300" id="sound-waves-label">{language === 'en' ? 'Show Sound Waves' : '开火显示震波范围'}</span>
               <button
                 onClick={() => setShowSoundWaves(!showSoundWaves)}
                 className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${showSoundWaves ? 'bg-teal-500' : 'bg-gray-700'}`}
@@ -507,13 +559,13 @@ const App: React.FC = () => {
               }}
               className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
             >
-              CUSTOMIZE CONTROLS
+              {language === 'en' ? 'CUSTOMIZE CONTROLS' : '自定义布局与虚拟按键'}
             </button>
             <button
               onClick={() => setShowSettings(false)}
               className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
             >
-              CLOSE
+              {language === 'en' ? 'CLOSE' : '关闭并返回'}
             </button>
           </div>
         </div>
