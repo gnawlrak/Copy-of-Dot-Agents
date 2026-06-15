@@ -62,6 +62,7 @@ const ATTACHMENT_TRANSLATIONS: { [key: string]: { name: string; desc: string } }
     '快速装弹器': { name: 'Speed Loader', desc: 'Dramatically speeds up shotgun reloading.' },
     '快拔弹匣': { name: 'Quick-Draw Mag', desc: 'Standard tactical modification that speeds up reloading.' },
     '配重弹匣': { name: 'Weighted Magazine', desc: 'Heavy base plate provides stability, enhancing precision.' },
+    '33发长弹匣': { name: '33rd Extended Mag', desc: 'Massively expands capacity for sustained automatic fire.' },
 
     // Barrels
     '加长枪管': { name: 'Extended Barrel', desc: 'Increases projectile impact size but slightly slows fire rate.' },
@@ -302,7 +303,7 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                       (weaponName === 'MK18 CQBR' ? schematics['Assault Rifle'] :
                        (weaponName === 'MP5SD' || weaponName === 'P90' ? schematics['SMG'] :
                         (weaponName === 'Benelli M4' ? schematics['Shotgun'] :
-                         (weaponName === 'Glock 19' ? schematics['Pistol'] : schematics['Assault Rifle']))));
+                         (weaponName === 'Glock 19' || weaponName === 'Glock 18C' ? schematics['Pistol'] : schematics['Assault Rifle']))));
     const partIdToHighlight = selectedSlot ? schematic.slotPartMap[selectedSlot] : null;
 
     return (

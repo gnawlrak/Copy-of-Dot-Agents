@@ -39,6 +39,7 @@ export const DICTIONARY = {
     difficultySimple: "Simple (No enemies, learning controls)",
     difficultyNormal: "Normal (Standard CQB training layout)",
     difficultyHard: "Hard (Reinforced defenses; extreme threat)",
+    difficultyTest: "Test (No AI attack power; show door & wall IDs)",
     selectLevel: "Select Level",
 
     // Weapon Mod Menu
@@ -151,6 +152,7 @@ export const DICTIONARY = {
     difficultySimple: "简单 (无敌方人员, 熟悉移动与开火)",
     difficultyNormal: "普通 (标准 CQB 战术推演布局)",
     difficultyHard: "困难 (敌方设防严密; 极高交火烈度)",
+    difficultyTest: "测试 (所有AI无攻击力, 开启门/墙编号显示)",
     selectLevel: "选择关卡",
 
     // 武器改装菜单

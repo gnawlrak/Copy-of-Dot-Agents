@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 // Represents the state of a player to be sent over the network
 export interface PlayerState {
     id: string;
+    name?: string;
     x: number;
     y: number;
     direction: number;
@@ -55,6 +56,7 @@ export class MockNetworkClient {
     private handlers: Map<string, EventHandler[]> = new Map();
     public connected = false;
     public ownId = `player_${Math.random().toString(36).substring(7)}`;
+    public ownName: string = 'Anonymous';
 
     // Room parameters configuration
     public roomId: string = 'default-room';
@@ -93,6 +95,7 @@ export class MockNetworkClient {
                 mode: this.mode,
                 levelName: this.levelName,
                 id: this.ownId,
+                name: this.ownName,
                 x: playerStartState?.x || 400,
                 y: playerStartState?.y || 400,
                 skinColor: playerStartState?.skinColor || '#60a5fa',

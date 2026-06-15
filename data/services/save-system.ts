@@ -2,6 +2,7 @@
 import { PlayerLoadout, CustomControls } from '../../types';
 import { LevelDefinition } from '../../levels/level-definitions';
 import { OperatorClassID } from '../operators';
+import { encodeData, decodeData } from './encryption';
 
 // A single, versioned interface for all game data.
 export interface GameData {
@@ -17,24 +18,26 @@ export interface GameData {
   highScore?: number; // best single-run score
 }
 
-const LOCAL_STORAGE_KEY = 'dot_agents_save_data';
+const getStorageKey = (username: string) => `dot_agents_save_data_${username}`;
 
 /**
  * A provider for saving and loading game data.
- * This is an abstraction layer that currently uses localStorage but can be
- * swapped with a cloud-based implementation in the future.
  */
 class SaveProvider {
   /**
-   * Loads the entire game data object from persistence.
-   * @returns A promise that resolves with the GameData object, or null if not found.
+   * Loads the entire game data object from persistence for a specific user.
    */
-  async loadGameData(): Promise<GameData | null> {
+  async loadGameData(username: string): Promise<GameData | null> {
     try {
-      const dataJson = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (dataJson) {
-        const data = JSON.parse(dataJson) as GameData;
-        // Future migration logic based on data.version can be added here.
+      const dataStr = localStorage.getItem(getStorageKey(username));
+      if (dataStr) {
+        // Try to decode (backwards compatible with unencrypted JSON from before)
+        let parsedStr = dataStr;
+        try {
+            parsedStr = decodeData(dataStr);
+        } catch (e) {} // Fallback to raw string if old format
+
+        const data = JSON.parse(parsedStr) as GameData;
         return data;
       }
     } catch (error) {
@@ -44,14 +47,13 @@ class SaveProvider {
   }
 
   /**
-   * Saves the entire game data object to persistence.
-   * @param data The complete game data object to save.
-   * @returns A promise that resolves when the save is complete.
+   * Saves the entire game data object to persistence for a user.
    */
-  async saveGameData(data: GameData): Promise<void> {
+  async saveGameData(username: string, data: GameData): Promise<void> {
     try {
       const dataJson = JSON.stringify(data);
-      localStorage.setItem(LOCAL_STORAGE_KEY, dataJson);
+      const encoded = encodeData(dataJson);
+      localStorage.setItem(getStorageKey(username), encoded);
     } catch (error) {
       console.error("Failed to save game data:", error);
     }

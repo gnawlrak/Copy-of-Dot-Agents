@@ -2,7 +2,7 @@
 import React from 'react';
 import { LevelDefinition } from '../levels/level-definitions';
 import { Difficulty } from '../App';
-import { Flame, ShieldAlert, Swords, Plus, Edit3, Trash2, Play, Compass } from 'lucide-react';
+import { Flame, ShieldAlert, Swords, Plus, Edit3, Trash2, Play, Compass, Wrench } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
 
 interface LevelSelectProps {
@@ -14,9 +14,10 @@ interface LevelSelectProps {
   onCreateNew: () => void;
   difficulty: Difficulty;
   onDifficultyChange: (difficulty: Difficulty) => void;
+  isAdmin: boolean;
 }
 
-const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels, onSelectLevel, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange }) => {
+const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels, onSelectLevel, onEditLevel, onDeleteLevel, onCreateNew, difficulty, onDifficultyChange, isAdmin }) => {
   const { language, t } = useLanguage();
 
   const getLevelTranslation = (name: string, desc: string) => {
@@ -87,6 +88,7 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
         difficulty === d 
         ? d === 'simple' ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/10' :
           d === 'hard' ? 'bg-red-500 text-black border-red-300 shadow-md shadow-red-500/10' :
+          d === 'test' ? 'bg-indigo-500 text-white border-indigo-300 shadow-md shadow-indigo-500/10' :
           'bg-teal-500 text-black border-teal-300 shadow-md shadow-teal-500/10'
         : 'bg-gray-800 text-gray-400 border-gray-700/80 hover:bg-gray-700 hover:text-white'
     }`;
@@ -113,6 +115,12 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
                 <Flame className="h-4 w-4" />
                 {language === 'en' ? 'HARD' : '突击/重压'}
             </button>
+            {isAdmin && (
+                <button onClick={() => onDifficultyChange('test')} className={difficultyButtonClass('test')} title={t('difficultyTest')}>
+                    <Wrench className="h-4 w-4" />
+                    {language === 'en' ? 'TEST' : '测试'}
+                </button>
+            )}
         </div>
       </div>
       

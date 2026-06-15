@@ -28,6 +28,10 @@ type Door = {
   isPlayerHolding: boolean;
   lastSoundTime?: number;
   locked?: boolean;
+  isBlownOpen?: boolean;
+  isBreachable?: boolean;
+  isBreachPlanted?: boolean;
+  breachTimer?: number;
 };
 type Bullet = {
   x: number;
@@ -264,6 +268,7 @@ const DIFFICULTY_MULTIPLIERS: { [key in import('../App').Difficulty]: number } =
   simple: 0.75,
   normal: 1.0,
   hard: 1.5,
+  test: 0.5,
 };
 
 // --- Manual Healing Constants ---
@@ -780,6 +785,10 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
 
   // Helper to increment score and notify parent (applies difficulty multiplier)
   const addScore = (amount: number) => {
+      if (difficulty === 'test') {
+          console.log(`[addScore] Test difficulty - score recording is disabled`);
+          return;
+      }
       const mult = DIFFICULTY_MULTIPLIERS[difficulty] ?? 1.0;
       const applied = Math.round(amount * mult);
 
@@ -831,12 +840,14 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const interactingDoorIdRef = useRef<number | null>(null);
   const interactionHintDoorIdRef = useRef<number | null>(null);
   const lockedDoorHintIdRef = useRef<number | null>(null);
+  const breachableDoorHintIdRef = useRef<number | null>(null);
   const lastEKeyPressTimeRef = useRef<number>(0);
   const lastInteractedDoorIdRef = useRef<number | null>(null);
   const isShootingRef = useRef<boolean>(false); // For mouse input ONLY
   const isAimingThrowableRef = useRef<boolean>(false);
   const cookingThrowableRef = useRef<{ type: ThrowableType; timer: number; maxTimer: number; } | null>(null);
   let nextThrowableId = 0;
+  const resetGameOuterRef = useRef<(() => void) | null>(null);
   const isThrowableModeRef = useRef<boolean>(false);
   // Kunai charging refs
   const isChargingKunaiRef = useRef<boolean>(false);
@@ -994,6 +1005,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
 
   // Circle-Rotated Rectangle collision for doors
   const checkCollisionWithDoor = (circle: {x: number, y: number, radius: number}, door: Door) => {
+    if (door.isBlownOpen) return false;
     const angle = -door.currentAngle;
     const cosAngle = Math.cos(angle);
     const sinAngle = Math.sin(angle);
@@ -1004,8 +1016,9 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const rotatedX = dx * cosAngle - dy * sinAngle;
     const rotatedY = dx * sinAngle + dy * cosAngle;
     
+    const hingeOffset = 0;
     const doorRect = {
-        x: 0, y: -door.thickness / 2, width: door.length, height: door.thickness
+        x: hingeOffset, y: -door.thickness / 2, width: door.length - hingeOffset, height: door.thickness
     };
     
     const closestX = Math.max(doorRect.x, Math.min(rotatedX, doorRect.x + doorRect.width));
@@ -1022,15 +1035,23 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     circle: { x: number, y: number, radius: number },
     door: Door
   ): Point | null => {
+    if (door.isBlownOpen) return null;
     const doorRadius = door.thickness / 2;
     const totalRadius = circle.radius + doorRadius;
 
     // Get door segment endpoints
-    const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
-    const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
+    // OFFSET: Start the collision segment slightly away from the hinge (e.g., by thickness)
+    // to prevent the player from getting stuck on the hinge point at the corner of the wall frame.
+    const cosA = Math.cos(door.currentAngle);
+    const sinA = Math.sin(door.currentAngle);
+    const hingeOffset = 0;
+    const startX = door.hinge.x + hingeOffset * cosA;
+    const startY = door.hinge.y + hingeOffset * sinA;
+    const endX = door.hinge.x + door.length * cosA;
+    const endY = door.hinge.y + door.length * sinA;
 
     // Get closest point on door's centerline to circle's center
-    const { d2, cx, cy } = distPtSegSquared(circle.x, circle.y, door.hinge.x, door.hinge.y, endX, endY);
+    const { d2, cx, cy } = distPtSegSquared(circle.x, circle.y, startX, startY, endX, endY);
 
     // Check for penetration
     if (d2 >= totalRadius * totalRadius) {
@@ -1309,6 +1330,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   };
 
   const applyDamageToPlayer = (damage: number, sourceDirection: { x: number, y: number }, impactPoint: { x: number, y: number }, attackerId?: string) => {
+    if (difficulty === 'test') return;
     const player = playerRef.current;
     if (isGameOverRef.current || (isMultiplayer && (player as any).isRespawning)) return;
 
@@ -1505,6 +1527,7 @@ const startHealing = () => {
         const player = playerRef.current;
         const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
         doorsRef.current.forEach(door => {
+            if (door.isBlownOpen) return;
             const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
             const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
             dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
@@ -1925,6 +1948,8 @@ const startHealing = () => {
       takedownHintEnemyRef.current = null;
       takedownEffectsRef.current = [];
     };
+    
+    resetGameOuterRef.current = resetGame;
 
     resetGame();
     
@@ -2065,6 +2090,7 @@ const startHealing = () => {
 
       const dynamicSegments = [...wallSegmentsRef.current];
       doorsRef.current.forEach(door => {
+          if (door.isBlownOpen) return;
           const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
           const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
           dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
@@ -2149,7 +2175,7 @@ const startHealing = () => {
                     const player = unit as Player;
                     if(isEnded) return;
 
-                    let damageToApply = damage;
+                    let damageToApply = difficulty === 'test' ? 0 : damage;
                     const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
                     if (shield) {
                         const angleToExplosion = Math.atan2(n.y - player.y, n.x - player.x);
@@ -2278,7 +2304,7 @@ const startHealing = () => {
                 const player = unit as Player;
                 if (isEnded) return;
 
-                let damageToApply = damage;
+                let damageToApply = difficulty === 'test' ? 0 : damage;
                 const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
                 if (shield) {
                     const angleToExplosion = Math.atan2(y - player.y, x - player.x);
@@ -2440,6 +2466,53 @@ const startHealing = () => {
       }
       
 doorsRef.current.forEach(door => {
+    if (door.isBreachPlanted && door.breachTimer !== undefined) {
+        door.breachTimer -= dt;
+        if (door.breachTimer <= 0) {
+            door.isBreachPlanted = false;
+            door.isBlownOpen = true;
+            
+            const midX = door.hinge.x + (door.length / 2) * Math.cos(door.closedAngle);
+            const midY = door.hinge.y + (door.length / 2) * Math.sin(door.closedAngle);
+            
+            shakerRef.current.addImpulse({ amp: 36 * scaleRef.current, rotAmp: 0.08, freq: 40, decay: 8, dirx: 0, diry: 0 });
+            
+            const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
+            doorsRef.current.forEach(d => {
+                if (d.isBlownOpen || d.id === door.id) return;
+                const endX = d.hinge.x + d.length * Math.cos(d.currentAngle);
+                const endY = d.hinge.y + d.length * Math.sin(d.currentAngle);
+                dynamicSegments.push({ a: d.hinge, b: { x: endX, y: endY } });
+            });
+            
+            createExplosion(midX, midY, 300 * scaleRef.current, 200, dynamicSegments);
+            
+            for (let i = 0; i < 24; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = Math.random() * 40 * scaleRef.current;
+                smokeCloudsRef.current.push({
+                    x: midX + Math.cos(angle) * dist,
+                    y: midY + Math.sin(angle) * dist,
+                    vx: (Math.random() - 0.5) * 120 * scaleRef.current,
+                    vy: (Math.random() - 0.5) * 120 * scaleRef.current,
+                    radius: (20 + Math.random() * 20) * scaleRef.current,
+                    lifetime: 1.0 + Math.random() * 0.8,
+                    maxLifetime: 1.8,
+                });
+            }
+            
+            soundWavesRef.current.push({
+                x: midX,
+                y: midY,
+                radius: 0,
+                maxRadius: 1200 * scaleRef.current / cameraScaleRef.current,
+                lifetime: 0.8,
+                maxLifetime: 0.8,
+                type: 'explosion'
+            });
+        }
+    }
+    if (door.isBlownOpen) return;
     const previousAngle = door.currentAngle;
     let newAngle = door.currentAngle;
     let deltaAngle = 0;
@@ -2486,12 +2559,20 @@ doorsRef.current.forEach(door => {
     // --- NEW: Check for door-wall collision first ---
     const c = Math.cos(tempDoor.currentAngle);
     const s = Math.sin(tempDoor.currentAngle);
-    const midPoint = { x: tempDoor.hinge.x + (tempDoor.length * 0.5) * c, y: tempDoor.hinge.y + (tempDoor.length * 0.5) * s };
-    const endPoint = { x: tempDoor.hinge.x + tempDoor.length * c, y: tempDoor.hinge.y + tempDoor.length * s };
+    
+    // Skip the first 40% of the door to prevent getting stuck on the door frame/hinge wall.
+    // Also skip the very tip center to avoid getting stuck on the opposite wall frame.
+    const collisionStartOffset = tempDoor.length * 0.4; 
+    const collisionEndOffset = 0.002;
+    
+    const collisionPoints = [
+        { x: tempDoor.hinge.x + (tempDoor.length * 0.7) * c, y: tempDoor.hinge.y + (tempDoor.length * 0.7) * s },
+        { x: tempDoor.hinge.x + (tempDoor.length - collisionEndOffset) * c, y: tempDoor.hinge.y + (tempDoor.length - collisionEndOffset) * s }
+    ];
 
     for (const wall of wallsRef.current) {
         const pointInWall = (p: Point, w: Wall) => p.x >= w.x && p.x <= w.x + w.width && p.y >= w.y && p.y <= w.y + w.height;
-        if (pointInWall(midPoint, wall) || pointInWall(endPoint, wall)) {
+        if (collisionPoints.some(p => pointInWall(p, wall))) {
             isBlocked = true;
             break;
         }
@@ -2553,12 +2634,14 @@ doorsRef.current.forEach(door => {
 });
       interactionHintDoorIdRef.current = null;
       lockedDoorHintIdRef.current = null;
+      breachableDoorHintIdRef.current = null;
       if (interactingDoorIdRef.current === null) {
           const interactionRadius = 50 * scale / cameraScale;
           let closestDist = interactionRadius;
           let closestDoor: Door | null = null;
 
           for (const door of doorsRef.current) {
+              if (door.isBlownOpen || door.isBreachPlanted) continue;
               const endPoint = { x: door.hinge.x + door.length * Math.cos(door.currentAngle), y: door.hinge.y + door.length * Math.sin(door.currentAngle) };
               const dist = pointToSegmentDistance({ x: player.x, y: player.y }, door.hinge, endPoint);
               if (dist < closestDist) {
@@ -2568,7 +2651,9 @@ doorsRef.current.forEach(door => {
           }
 
           if (closestDoor) {
-              if (closestDoor.locked) {
+              if (closestDoor.isBreachable) {
+                  breachableDoorHintIdRef.current = closestDoor.id;
+              } else if (closestDoor.locked) {
                   lockedDoorHintIdRef.current = closestDoor.id;
               } else {
                   interactionHintDoorIdRef.current = closestDoor.id;
@@ -3699,14 +3784,25 @@ doorsRef.current.forEach(door => {
         context.fillStyle = '#374151'; // A solid, dark gray
         context.strokeStyle = '#4b5563'; // A slightly lighter gray for borders
         context.lineWidth = 1 * scale;
-        wallsRef.current.forEach(wall => {
+        wallsRef.current.forEach((wall, index) => {
             context.fillRect(wall.x, wall.y, wall.width, wall.height);
             context.strokeRect(wall.x, wall.y, wall.width, wall.height);
+            
+            // Temporary debugging labels
+            if (difficulty === 'test' && index >= 4) {
+                context.save();
+                context.fillStyle = '#fde047'; // yellow-300
+                context.font = `bold ${Math.max(12, 10 * scale)}px Inter`;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText((index - 4).toString(), wall.x + wall.width / 2, wall.y + wall.height / 2);
+                context.restore();
+            }
         });
         context.shadowBlur = 0;
   
         // Draw Door Frames (the opening in the wall)
-        context.fillStyle = '#374151'; // Match the wall color for a "cutout" look
+        context.fillStyle = 'black'; // Clear cutout representing the opening in the wall
         doorsRef.current.forEach(door => {
             const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
             if (brightness <= 0) return;
@@ -3740,8 +3836,84 @@ doorsRef.current.forEach(door => {
         });
         context.globalAlpha = 1.0; // Reset alpha
 
-        doorsRef.current.forEach(door => {
+        doorsRef.current.forEach((door, index) => {
           const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
+          
+          if (door.isBlownOpen) {
+              // Draw a highly stylized, broken, blown-open look!
+              // Draw explosion soot/burn marks first (drawn directly in global coordinates)
+              context.save();
+              const grad = context.createRadialGradient(door.hinge.x, door.hinge.y, 2 * scale, door.hinge.x, door.hinge.y, door.length * 1.5);
+              grad.addColorStop(0, `rgba(15, 12, 10, ${0.85 * brightness})`);
+              grad.addColorStop(0.3, `rgba(35, 25, 20, ${0.55 * brightness})`);
+              grad.addColorStop(0.7, `rgba(20, 20, 20, ${0.25 * brightness})`);
+              grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              context.fillStyle = grad;
+              context.beginPath();
+              context.arc(door.hinge.x, door.hinge.y, door.length * 1.5, 0, Math.PI * 2);
+              context.fill();
+              context.restore();
+
+              // Draw Shard 1: Hanging broken piece attached to the hinge, slightly bent and jagged
+              context.save();
+              context.translate(door.hinge.x, door.hinge.y);
+              context.rotate(door.closedAngle + 0.2); // slightly warped angle
+              
+              const borderWidth = 2 * scale;
+              const fill = `rgba(64, 64, 64, ${brightness})`; // darker, charred-looking fill
+              const border = `rgba(100, 100, 100, ${brightness})`; // charred gray border
+              
+              context.fillStyle = border;
+              context.fillRect(0, -door.thickness / 2, door.length * 0.35, door.thickness);
+              context.fillStyle = fill;
+              context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length * 0.35 - borderWidth, door.thickness - borderWidth * 2);
+              
+              // Draw jagged jagged teeth/rips on the broken end of Shard 1
+              context.fillStyle = border;
+              context.beginPath();
+              context.moveTo(door.length * 0.35, -door.thickness / 2);
+              context.lineTo(door.length * 0.39, -door.thickness / 6);
+              context.lineTo(door.length * 0.34, 0);
+              context.lineTo(door.length * 0.38, door.thickness / 3);
+              context.lineTo(door.length * 0.35, door.thickness / 2);
+              context.closePath();
+              context.fill();
+              context.restore();
+
+              // Draw Shard 2: Blown on the floor nearby, twisted and rotated
+              context.save();
+              // Position it offset slightly to the left and forward, as if blown by explosion
+              context.translate(
+                  door.hinge.x + door.length * 0.55 * Math.cos(door.closedAngle - 0.5), 
+                  door.hinge.y + door.length * 0.55 * Math.sin(door.closedAngle - 0.5)
+              );
+              context.rotate(door.closedAngle + 1.35); // Blown away angle on the ground
+              
+              context.fillStyle = border;
+              context.fillRect(0, -door.thickness / 2, door.length * 0.45, door.thickness);
+              context.fillStyle = fill;
+              context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length * 0.45 - borderWidth * 2, door.thickness - borderWidth * 2);
+              
+              // Jagged end on Shard 2 (where it tore off)
+              context.fillStyle = border;
+              context.beginPath();
+              context.moveTo(0, -door.thickness / 2);
+              context.lineTo(door.length * 0.05, -door.thickness / 6);
+              context.lineTo(0, 0);
+              context.lineTo(door.length * 0.04, door.thickness / 6);
+              context.lineTo(0, door.thickness / 2);
+              context.closePath();
+              context.fill();
+              
+              // Add simple debris details (three tiny metal scraps around it)
+              context.fillStyle = border;
+              context.fillRect(-5 * scale, 12 * scale, 4 * scale, 1.5 * scale);
+              context.fillRect(8 * scale, -14 * scale, 3 * scale, 2 * scale);
+              
+              context.restore();
+              return;
+          }
+
           const isLocked = door.locked;
           context.save();
           context.translate(door.hinge.x, door.hinge.y);
@@ -3753,6 +3925,58 @@ doorsRef.current.forEach(door => {
           context.fillRect(0, -door.thickness / 2, door.length, door.thickness);
           context.fillStyle = doorFillColor;
           context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length - (borderWidth * 2), door.thickness - (borderWidth * 2));
+          
+          if (door.isBreachPlanted && door.breachTimer !== undefined) {
+              context.save();
+              context.translate(door.length / 2, 0);
+              
+              const flashFreq = door.breachTimer > 2.0 ? 3 : 6;
+              const phase = (performance.now() / 1000) * Math.PI * flashFreq;
+              const flashAlpha = 0.4 + 0.6 * Math.sin(phase);
+              const lightColor = `rgba(239, 68, 68, ${flashAlpha})`;
+              
+              context.fillStyle = '#1e293b';
+              context.strokeStyle = '#64748b';
+              context.lineWidth = 1 * scale;
+              const chargeW = 16 * scale;
+              const chargeH = door.thickness + 4 * scale;
+              context.fillRect(-chargeW / 2, -chargeH / 2, chargeW, chargeH);
+              context.strokeRect(-chargeW / 2, -chargeH / 2, chargeW, chargeH);
+              
+              context.strokeStyle = '#f59e0b';
+              context.lineWidth = 1 * scale;
+              context.beginPath();
+              context.moveTo(-chargeW / 2 + 2 * scale, -chargeH / 4);
+              context.lineTo(chargeW / 2 - 2 * scale, chargeH / 4);
+              context.stroke();
+              
+              context.fillStyle = lightColor;
+              context.beginPath();
+              context.arc(0, -chargeH / 3, 3 * scale, 0, Math.PI * 2);
+              context.fill();
+              
+              context.rotate(-door.currentAngle);
+              context.shadowColor = 'black';
+              context.shadowBlur = 4 * scale;
+              context.fillStyle = '#ef4444';
+              context.font = `bold ${11 * scale}px mono`;
+              context.textAlign = 'center';
+              context.textBaseline = 'middle';
+              
+              const secsLeft = Math.max(0, door.breachTimer).toFixed(1);
+              context.fillText(`${secsLeft}s`, 0, -chargeH - 4 * scale);
+              context.restore();
+          }
+
+          // Temporary labels
+          if (difficulty === 'test') {
+              context.fillStyle = '#fde047';
+              context.font = `bold ${Math.max(10, 8 * scale)}px Inter`;
+              context.textAlign = 'center';
+              context.textBaseline = 'middle';
+              context.fillText(`d${door.id}`, door.length / 2, 0);
+          }
+          
           context.restore();
         });
   
@@ -3943,6 +4167,18 @@ doorsRef.current.forEach(door => {
                   const brightness = getBrightnessByDistance(p.x, p.y, visionRadius);
                   if (brightness <= 0) return;
 
+                  // Draw name tag
+                  if (p.name) {
+                      context.save();
+                      const drawPx = p.x;
+                      const drawPy = p.y - 15 * scale;
+                      context.font = `bold ${8 * scale}px mono`;
+                      context.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                      context.textAlign = 'center';
+                      context.fillText(p.name, drawPx, drawPy);
+                      context.restore();
+                  }
+
                   context.save();
                   context.globalAlpha = brightness;
                   context.beginPath();
@@ -3999,11 +4235,22 @@ doorsRef.current.forEach(door => {
           context.shadowColor = 'rgba(100, 116, 139, 0.5)';
           context.shadowBlur = 8 * scale;
 
-          wallsRef.current.forEach(wall => {
+          wallsRef.current.forEach((wall, index) => {
               context.strokeRect(wall.x, wall.y, wall.width, wall.height);
+              
+              // Temporary debugging labels
+              if (difficulty === 'test' && index >= 4) {
+                  context.save();
+                  context.fillStyle = 'rgba(253, 224, 71, 0.6)'; // yellow-300 @ 60%
+                  context.font = `${Math.max(10, 8 * scale)}px Inter`;
+                  context.textAlign = 'center';
+                  context.textBaseline = 'middle';
+                  context.fillText((index - 4).toString(), wall.x + wall.width / 2, wall.y + wall.height / 2);
+                  context.restore();
+              }
           });
 
-          doorsRef.current.forEach(door => {
+          doorsRef.current.forEach((door, index) => {
             context.save();
             context.translate(door.hinge.x, door.hinge.y);
             context.rotate(door.currentAngle);
@@ -4011,6 +4258,16 @@ doorsRef.current.forEach(door => {
             context.moveTo(0,0);
             context.lineTo(door.length, 0);
             context.stroke();
+            
+            // Temporary labels
+            if (difficulty === 'test') {
+                context.fillStyle = 'rgba(253, 224, 71, 0.6)';
+                context.font = `${Math.max(8, 6 * scale)}px Inter`;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(`d${door.id}`, door.length / 2, 0);
+            }
+            
             context.restore();
           });
 
@@ -4429,6 +4686,85 @@ doorsRef.current.forEach(door => {
           context.restore();
       }
 
+      // Test mode big header debugging info box
+      if (difficulty === 'test') {
+          let testMessages: string[] = [];
+          
+          if (interactionHintDoorIdRef.current !== null) {
+              testMessages.push(`INTERACT DOOR: d${interactionHintDoorIdRef.current}`);
+          } else if (lockedDoorHintIdRef.current !== null) {
+              testMessages.push(`LOCKED DOOR: d${lockedDoorHintIdRef.current}`);
+          }
+          
+          // Nearest door
+          let closestDoorId = -1;
+          let minDoorDist = Infinity;
+          doorsRef.current.forEach(door => {
+              const midX = door.hinge.x + (door.length / 2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length / 2) * Math.sin(door.currentAngle);
+              const d = Math.hypot(player.x - midX, player.y - midY);
+              if (d < minDoorDist) {
+                  minDoorDist = d;
+                  closestDoorId = door.id;
+              }
+          });
+          if (closestDoorId !== -1 && minDoorDist < 120 * scale) {
+              testMessages.push(`CLOSEST DOOR: d${closestDoorId}`);
+          }
+
+          // Nearest Wall
+          let closestWallIdx = -1;
+          let minWallDist = Infinity;
+          wallsRef.current.forEach((wall, idx) => {
+              if (idx < 4) return; // ignore outer borders
+              const cenX = wall.x + wall.width / 2;
+              const cenY = wall.y + wall.height / 2;
+              const d = Math.hypot(player.x - cenX, player.y - cenY);
+              if (d < minWallDist) {
+                  minWallDist = d;
+                  closestWallIdx = idx - 4;
+              }
+          });
+          if (closestWallIdx !== -1 && minWallDist < 100 * scale) {
+              testMessages.push(`CLOSEST WALL: #${closestWallIdx}`);
+          }
+
+          if (testMessages.length > 0) {
+              const displayStr = testMessages.join('  |  ');
+              context.save();
+              context.font = `bold ${Math.max(16, 20 * scale)}px mono`;
+              context.textBaseline = 'middle';
+              context.textAlign = 'center';
+              
+              const textWidth = context.measureText(displayStr).width || 300 * scale;
+              const padX = 24 * scale;
+              const padY = 12 * scale;
+              const bgWidth = textWidth + padX * 2;
+              const bgHeight = Math.max(16, 20 * scale) + padY * 2;
+              const bgX = (canvas.width - bgWidth) / 2;
+              const bgY = 40 * scale;
+              
+              // Draw rounded background
+              context.fillStyle = 'rgba(15, 23, 42, 0.95)'; // dark slate
+              context.strokeStyle = 'rgba(253, 224, 71, 0.8)'; // bright yellow
+              context.lineWidth = 2 * scale;
+              
+              context.beginPath();
+              if (typeof (context as any).roundRect === 'function') {
+                  (context as any).roundRect(bgX, bgY, bgWidth, bgHeight, 8 * scale);
+              } else {
+                  context.rect(bgX, bgY, bgWidth, bgHeight);
+              }
+              context.fill();
+              context.stroke();
+              
+              // Draw text
+              context.fillStyle = '#fde047'; // yellow-300
+              context.fillText(displayStr, canvas.width / 2, bgY + bgHeight / 2);
+              context.restore();
+          }
+      }
+
       if (player.hitTimer > 0) {
           const life = player.hitTimer / 0.17; // 1 down to 0
           const cx_vignette = canvas.width / 2;
@@ -4649,30 +4985,39 @@ doorsRef.current.forEach(door => {
             if (door) {
               const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
               const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
-              if (pointInPoly(midX, midY, viewPoly)) {
-                context.font = `bold ${14 * scale}px mono`;
-                context.fillStyle = 'white';
-                context.textAlign = 'center';
-                context.shadowColor = 'black';
-                context.shadowBlur = 5 * scale;
-                context.fillText(t('interact'), midX, midY - 20 * scale);
-                context.shadowBlur = 0;
-              }
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = 'white';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText(t('interact'), midX, midY - 20 * scale);
+              context.shadowBlur = 0;
+            }
+          } else if (breachableDoorHintIdRef.current) {
+            const door = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+            if (door) {
+              const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = '#f97316';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText('[E] BREACH / 贴上炸药', midX, midY - 20 * scale);
+              context.shadowBlur = 0;
             }
           } else if (lockedDoorHintIdRef.current) {
             const door = doorsRef.current.find(d => d.id === lockedDoorHintIdRef.current);
              if (door) {
               const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
               const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
-              if (pointInPoly(midX, midY, viewPoly)) {
-                context.font = `bold ${14 * scale}px mono`;
-                context.fillStyle = 'red';
-                context.textAlign = 'center';
-                context.shadowColor = 'black';
-                context.shadowBlur = 5 * scale;
-                context.fillText(t('locked'), midX, midY - 20 * scale);
-                context.shadowBlur = 0;
-              }
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = 'red';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText(t('locked'), midX, midY - 20 * scale);
+              context.shadowBlur = 0;
             }
           }
       }
@@ -5148,6 +5493,7 @@ doorsRef.current.forEach(door => {
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      resetGameOuterRef.current = null;
       // Clear end auto-close timer if component unmounts
       if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
     };
@@ -5278,7 +5624,10 @@ doorsRef.current.forEach(door => {
                 reserveAmmo: weaponDef.reserveAmmo,
             };
             const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
-            doorsRef.current.forEach(d => dynamicSegments.push({ a: d.hinge, b: { x: d.hinge.x + d.length * Math.cos(d.currentAngle), y: d.hinge.y + d.length * Math.sin(d.currentAngle) } }));
+            doorsRef.current.forEach(d => {
+                if (d.isBlownOpen) return;
+                dynamicSegments.push({ a: d.hinge, b: { x: d.hinge.x + d.length * Math.cos(d.currentAngle), y: d.hinge.y + d.length * Math.sin(d.currentAngle) } });
+            });
             createFireEffects(p.x, p.y, playerRef.current.radius, payload.baseAngle, remoteWeapon, 'enemy', dynamicSegments);
         }
     };
@@ -5380,6 +5729,25 @@ doorsRef.current.forEach(door => {
                     takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 60 * scaleRef.current, lifetime: 0.4, maxLifetime: 0.4 });
                     soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
                 }
+            } else if (breachableDoorHintIdRef.current !== null) {
+                const doorToInteract = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+                if (doorToInteract && !playerRef.current.isHealing) {
+                    doorToInteract.isBreachPlanted = true;
+                    doorToInteract.breachTimer = 5.0;
+                    
+                    const midX = doorToInteract.hinge.x + (doorToInteract.length / 2) * Math.cos(doorToInteract.closedAngle);
+                    const midY = doorToInteract.hinge.y + (doorToInteract.length / 2) * Math.sin(doorToInteract.closedAngle);
+                    
+                    soundWavesRef.current.push({
+                        x: midX,
+                        y: midY,
+                        radius: 0,
+                        maxRadius: 150 * scaleRef.current / cameraScaleRef.current,
+                        lifetime: 0.3,
+                        maxLifetime: 0.3,
+                        type: 'door'
+                    });
+                }
             } else if (interactionHintDoorIdRef.current !== null) {
                 const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
                 if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
@@ -5434,6 +5802,11 @@ doorsRef.current.forEach(door => {
         case 'g': switchFireMode(); break;
         case 't': switchThrowable(); break;
         case 'h': startHealing(); break;
+        case 'v':
+            if (difficulty === 'test') {
+                resetGameOuterRef.current?.();
+            }
+            break;
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -5637,7 +6010,26 @@ doorsRef.current.forEach(door => {
                 touchState.fire.lastX = touch.clientX;
                 touchState.fire.lastY = touch.clientY;
             } else if (controlKey === 'interact') {
-                if (!takedownHintEnemyRef.current && interactionHintDoorIdRef.current !== null) {
+                if (breachableDoorHintIdRef.current !== null) {
+                    const doorToInteract = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+                    if (doorToInteract && !playerRef.current.isHealing) {
+                        doorToInteract.isBreachPlanted = true;
+                        doorToInteract.breachTimer = 5.0;
+                        
+                        const midX = doorToInteract.hinge.x + (doorToInteract.length / 2) * Math.cos(doorToInteract.closedAngle);
+                        const midY = doorToInteract.hinge.y + (doorToInteract.length / 2) * Math.sin(doorToInteract.closedAngle);
+                        
+                        soundWavesRef.current.push({
+                            x: midX,
+                            y: midY,
+                            radius: 0,
+                            maxRadius: 150 * scaleRef.current / cameraScaleRef.current,
+                            lifetime: 0.3,
+                            maxLifetime: 0.3,
+                            type: 'door'
+                        });
+                    }
+                } else if (!takedownHintEnemyRef.current && interactionHintDoorIdRef.current !== null) {
                     const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
                     if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
                         const now = performance.now();
@@ -5818,11 +6210,28 @@ doorsRef.current.forEach(door => {
 
   return (
     <div className="relative w-full h-full font-mono">
-        {/* HUD: score display */}
-        <div className="absolute top-4 left-4 z-40 bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300 font-mono">
-            <div className="text-sm">
-                {level.isTrainingGround ? 'Practice Score' : 'Score'}: <span className="font-bold">{runScore}</span>
-            </div>
+        {/* HUD: score display & test mode tools */}
+        <div className="absolute top-4 left-4 z-40 flex flex-col gap-2 font-mono">
+            {difficulty !== 'test' ? (
+                <div className="bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300">
+                    <div className="text-sm">
+                        {level.isTrainingGround ? 'Practice Score' : 'Score'}: <span className="font-bold">{runScore}</span>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                    <div className="bg-amber-950/80 border border-amber-600 px-3 py-1.5 rounded-md text-amber-200 text-xs font-bold tracking-wide shadow-md">
+                        {language === 'zh' ? '测试模式 (不计积分)' : 'TEST MODE (NO SCORE)'}
+                    </div>
+                    <button 
+                        onClick={() => resetGameOuterRef.current?.()}
+                        className="bg-red-950/85 hover:bg-red-900 border border-red-500 text-red-200 px-3 py-1.5 rounded-md font-bold text-xs tracking-wider cursor-pointer shadow-lg shadow-red-950/50 flex items-center gap-1.5 transition-all active:scale-95 select-none"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-rotate-ccw"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        {language === 'zh' ? '一键还原地图 (按V)' : 'RESTORE MAP (Press V)'}
+                    </button>
+                </div>
+            )}
         </div>
         <canvas ref={canvasRef} onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} className="w-full h-full" />
         {isPortrait && (

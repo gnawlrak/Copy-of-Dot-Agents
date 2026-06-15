@@ -16,6 +16,8 @@ export interface LevelDoor {
   maxOpenAngle: number;
   swingDirection: 1 | -1;
   locked?: boolean;
+  isBlownOpen?: boolean;
+  isBreachable?: boolean;
 }
 
 export interface LevelEnemy {
@@ -52,7 +54,8 @@ const TRAINING_GROUND: LevelDefinition = {
   walls: [
     // Door Practice House (Top) - Outer walls
     { x: 0.3, y: 0.1, width: 0.4, height: 0.015 }, // Top wall
-    { x: 0.3, y: 0.4, width: 0.4, height: 0.015 }, // Bottom wall
+    { x: 0.3, y: 0.4, width: 0.1, height: 0.015 },  // Bottom wall - Left part
+    { x: 0.5, y: 0.4, width: 0.1, height: 0.015 },  // Bottom wall - Middle part
     { x: 0.3, y: 0.1, width: 0.01, height: 0.3 }, // Left wall
     { x: 0.7, y: 0.1, width: 0.01, height: 0.3 }, // Right wall
     
@@ -72,8 +75,8 @@ const TRAINING_GROUND: LevelDefinition = {
   ],
   doors: [
     // Doors for the practice house
-    { id: 1, hinge: { x: 0.4, y: 0.4 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 }, // Bottom door left room
-    { id: 2, hinge: { x: 0.6, y: 0.4 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },// Bottom door right room
+    { id: 1, hinge: { x: 0.4, y: 0.4 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 }, // Bottom door left room (bridges x=0.4 to 0.5)
+    { id: 2, hinge: { x: 0.7, y: 0.4 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },// Bottom door right room (bridges x=0.6 to 0.7)
     
     // -- RE-CORRECTED: Internal doors now positioned in the new gaps --
     // Door in vertical divider (gap from y=0.2 to y=0.3)
@@ -93,96 +96,117 @@ const TRAINING_GROUND: LevelDefinition = {
   enemyCount: 5,
 };
 
-const THE_FACTORY: LevelDefinition = {
-  name: 'THE FACTORY',
-  description: 'An abandoned industrial complex has been taken over by hostiles. Breach the facility, clear the factory floor, and neutralize all threats. Watch out for reinforced doors.',
-  playerStart: { x: 0.45, y: 0.95 },
-  enemyCount: 11,
+const BASTION_7: LevelDefinition = {
+  name: 'BASTION-7',
+  description: 'A classified military stronghold and tactical compound. Breach the outer barriers, infiltrate the secure server vaults and weapon armories, and secure the helipad for extraction. Highly hostile environment.',
+  playerStart: { x: 0.5, y: 0.95 },
+  enemyCount: 22,
+  cameraScale: 1.0,
+  extractionZone: { x: 0.44, y: 0.06, width: 0.12, height: 0.08 },
   walls: [
     // Outer Shell
-    { x: 0.05, y: 0.05, width: 0.9, height: 0.015 }, // Top
-    { x: 0.05, y: 0.05, width: 0.01, height: 0.85 }, // Left
-    { x: 0.94, y: 0.05, width: 0.01, height: 0.85 }, // Right
-    // Bottom wall (with main entrance gap)
-    { x: 0.05, y: 0.885, width: 0.35, height: 0.015 },
-    { x: 0.5, y: 0.885, width: 0.44, height: 0.015 },
+    { x: 0.05, y: 0.05, width: 0.9, height: 0.015 }, // Top Wall
+    { x: 0.05, y: 0.05, width: 0.015, height: 0.86 }, // Left Wall
+    { x: 0.935, y: 0.05, width: 0.015, height: 0.86 }, // Right Wall
+    { x: 0.05, y: 0.91, width: 0.4, height: 0.015 }, // Bottom Left Wall
+    { x: 0.55, y: 0.91, width: 0.4, height: 0.015 }, // Bottom Right Wall
 
-    // --- Room 1 & 2 Walls ---
-    // Vertical divider between room 1 and 2 (with door gap)
-    { x: 0.25, y: 0.05, width: 0.01, height: 0.15 }, 
-    { x: 0.25, y: 0.30, width: 0.01, height: 0.1 }, 
-    // Small horizontal walls in Room 1
-    { x: 0.15, y: 0.15, width: 0.05, height: 0.02 }, // New small cover
-    { x: 0.05, y: 0.25, width: 0.05, height: 0.02 },
-    { x: 0.15, y: 0.25, width: 0.05, height: 0.02 },
-    
-    // Bottom wall of rooms 1 & 2 (with window gaps)
-    { x: 0.05, y: 0.385, width: 0.05, height: 0.015 },
-    { x: 0.15, y: 0.385, width: 0.05, height: 0.015 },
-    { x: 0.25, y: 0.385, width: 0.05, height: 0.015 },
-    { x: 0.35, y: 0.385, width: 0.05, height: 0.015 },
-    
-    // --- Dividing Walls between major sections (Blue walls from image) ---
-    // Wall between Room 2 and 3 (with doorway)
-    { x: 0.4, y: 0.05, width: 0.01, height: 0.15 },
-    { x: 0.4, y: 0.3, width: 0.01, height: 0.1 },
-    // Wall between Room 3 and corridor for 4/5 (with doorway)
-    { x: 0.6, y: 0.05, width: 0.01, height: 0.2 },
-    { x: 0.6, y: 0.35, width: 0.01, height: 0.3 }, // Corridor choke point
-    { x: 0.6, y: 0.75, width: 0.01, height: 0.135 },
-    { x: 0.61, y: 0.65, width: 0.05, height: 0.015 }, // Corridor choke point horizontal part
-    
-    // --- Wall defining top of room 5 ---
-    { x: 0.6, y: 0.2, width: 0.05, height: 0.015 },
+    // --- Sector A: South Infiltration Zone ---
+    { x: 0.35, y: 0.75, width: 0.015, height: 0.16 }, // Left barrier wall
+    { x: 0.635, y: 0.75, width: 0.015, height: 0.16 }, // Right barrier wall
+    { x: 0.20, y: 0.80, width: 0.15, height: 0.02 }, // Left sandbags barrier
+    { x: 0.65, y: 0.80, width: 0.15, height: 0.02 }, // Right sandbags barrier
 
-    // --- Room 5 Shelving ---
-    { x: 0.65, y: 0.25, width: 0.25, height: 0.04 },
-    { x: 0.75, y: 0.4, width: 0.04, height: 0.2 }, // Rotated shelf
-    { x: 0.65, y: 0.55, width: 0.25, height: 0.04 },
-    { x: 0.65, y: 0.7, width: 0.25, height: 0.04 },
+    // --- Sector B: Central Command Hub ---
+    { x: 0.38, y: 0.45, width: 0.015, height: 0.10 }, // Left Hub Wall Upper
+    { x: 0.38, y: 0.62, width: 0.015, height: 0.05 }, // Left Hub Wall Lower
+    { x: 0.605, y: 0.45, width: 0.015, height: 0.10 }, // Right Hub Wall Upper
+    { x: 0.605, y: 0.62, width: 0.015, height: 0.05 }, // Right Hub Wall Lower
+    { x: 0.38, y: 0.45, width: 0.08, height: 0.015 }, // Top Left Hub Wall
+    { x: 0.54, y: 0.45, width: 0.08, height: 0.015 }, // Top Right Hub Wall
+    { x: 0.38, y: 0.67, width: 0.09, height: 0.015 }, // Bottom Hub Wall Left
+    { x: 0.53, y: 0.67, width: 0.09, height: 0.015 }, // Bottom Hub Wall Right
 
-    // --- Room 3 Cover Objects ---
-    { x: 0.45, y: 0.2, width: 0.1, height: 0.1 },
-    { x: 0.30, y: 0.6, width: 0.1, height: 0.02 }, // L-Shape cover horizontal
-    { x: 0.30, y: 0.6, width: 0.02, height: 0.15 }, // L-Shape cover vertical
-    { x: 0.5, y: 0.45, width: 0.08, height: 0.2 },
+    // --- Sector C: Western Vault & Server Room ---
+    { x: 0.05, y: 0.45, width: 0.25, height: 0.015 }, // Main horizontal separator
+    { x: 0.20, y: 0.05, width: 0.015, height: 0.32 }, // Server room partition vertical 
+    { x: 0.05, y: 0.22, width: 0.15, height: 0.015 }, // Server room container A
+    { x: 0.10, y: 0.33, width: 0.10, height: 0.02 }, // Server room rack B
+
+    // --- Sector D: Eastern Armory & Storage ---
+    { x: 0.70, y: 0.45, width: 0.25, height: 0.015 }, // Main horizontal separator right
+    { x: 0.78, y: 0.45, width: 0.015, height: 0.28 }, // Armory wall vertical
+    { x: 0.78, y: 0.84, width: 0.015, height: 0.07 },
+    { x: 0.62, y: 0.60, width: 0.16, height: 0.02 }, // Armory internal partitions
+    { x: 0.84, y: 0.68, width: 0.10, height: 0.02 }, // Heavy weapon crate block
+
+    // --- Sector E: Northern VIP Helipad & Extraction ---
+    { x: 0.38, y: 0.05, width: 0.015, height: 0.20 }, // Left Helipad Wall
+    { x: 0.605, y: 0.05, width: 0.015, height: 0.20 }, // Right Helipad Wall
+    { x: 0.38, y: 0.25, width: 0.08, height: 0.015 }, // Helipad bottom left partition
+    { x: 0.54, y: 0.25, width: 0.08, height: 0.015 }, // Helipad bottom right partition
+    // Helipad markings
+    { x: 0.46, y: 0.14, width: 0.08, height: 0.01 }, // Landing zone mark H horizontal
+    { x: 0.46, y: 0.09, width: 0.01, height: 0.10 }, // Landing zone mark H left vertical
+    { x: 0.53, y: 0.09, width: 0.01, height: 0.10 }, // Landing zone mark H right vertical
   ],
   doors: [
-    // Main Double Doors (White)
-    { id: 1, hinge: { x: 0.4, y: 0.8925 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    { id: 8, hinge: { x: 0.5, y: 0.8925 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
+    // Bottom Entrance Double Doors
+    { id: 201, hinge: { x: 0.45, y: 0.91 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    { id: 202, hinge: { x: 0.55, y: 0.91 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
-    // Locked Doors (Red)
-    { id: 3, hinge: { x: 0.94, y: 0.25 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
-    { id: 4, hinge: { x: 0.94, y: 0.65 }, length: 0.1, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.48, swingDirection: 1, locked: true },
+    // Entry from Sector A to Central Hub Command Area
+    { id: 203, hinge: { x: 0.47, y: 0.67 }, length: 0.06, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
-    // --- Internal Doors (for blue walls) ---
-    { id: 5, hinge: { x: 0.41, y: 0.2 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    { id: 6, hinge: { x: 0.61, y: 0.25 }, length: 0.1, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.48, swingDirection: -1 },
-    // New door between room 1 and 2
-    { id: 7, hinge: { x: 0.25, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.48, swingDirection: 1 },
+    // Sector C Doors
+    { id: 204, hinge: { x: 0.30, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, // Entrance to database corridor
+    { id: 205, hinge: { x: 0.20, y: 0.37 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1, locked: true }, // LOCKED vault door
+
+    // Sector D Doors
+    { id: 206, hinge: { x: 0.70, y: 0.45 }, length: 0.08, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 }, // Entrance to Armory bay
+    { id: 207, hinge: { x: 0.7875, y: 0.735 }, length: 0.105, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1, isBreachable: true }, // Back door of armory (Can be breached!)
+
+    // Sector E Security Air-lock Double Doors
+    { id: 208, hinge: { x: 0.46, y: 0.25 }, length: 0.045, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 209, hinge: { x: 0.54, y: 0.25 }, length: 0.045, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    
+    // Side Access Security Doors
+    { id: 210, hinge: { x: 0.3875, y: 0.55 }, length: 0.07, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, 
+    { id: 211, hinge: { x: 0.6125, y: 0.55 }, length: 0.07, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, 
   ],
   enemies: [
-    // --- Spawn Pool ---
-    // Room 1 (2 AI Crossfire)
-    { x: 0.13, y: 0.15, direction: 5 * Math.PI / 4, type: 'standard', hasScored: false },
-    { x: 0.22, y: 0.35, direction: Math.PI / 4, type: 'standard', hasScored: false },
-    // Room 2 (2 AI Crossfire)
-    { x: 0.28, y: 0.15, direction: 3 * Math.PI / 2, type: 'advanced', hasScored: false },
-    { x: 0.37, y: 0.35, direction: Math.PI, type: 'standard', hasScored: false },
-    // Room 3 (5 AI, defensive positions)
-    { x: 0.35, y: 0.7, direction: 0, type: 'advanced', hasScored: false }, // Behind new L-cover
-    { x: 0.55, y: 0.6, direction: Math.PI, type: 'standard', hasScored: false },
-    { x: 0.47, y: 0.3, direction: Math.PI / 2, type: 'advanced', hasScored: false },
-    { x: 0.57, y: 0.25, direction: Math.PI, type: 'standard', hasScored: false },
-    { x: 0.45, y: 0.8, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
-    // Room 4 (2 AI Crossfire)
-    { x: 0.75, y: 0.15, direction: Math.PI, type: 'standard', hasScored: false },
-    { x: 0.85, y: 0.3, direction: 3 * Math.PI / 2, type: 'advanced', hasScored: false },
-    // Room 5 (3 AI, trickier)
-    { x: 0.75, y: 0.45, direction: Math.PI, type: 'standard', hasScored: false }, // Behind rotated shelf
-    { x: 0.85, y: 0.6, direction: 0, type: 'advanced', hasScored: false },
-    { x: 0.68, y: 0.75, direction: -Math.PI / 2, type: 'standard', hasScored: false },
+    // Southern Checkpoint Patrols
+    { x: 0.38, y: 0.85, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.62, y: 0.85, direction: 0, type: 'standard', hasScored: false },
+    { x: 0.5, y: 0.80, direction: -Math.PI / 2, type: 'advanced', hasScored: false }, 
+
+    // Central Command Hub Guard Team 
+    { x: 0.45, y: 0.55, direction: -Math.PI / 4, type: 'advanced', hasScored: false },
+    { x: 0.55, y: 0.55, direction: -3 * Math.PI / 4, type: 'advanced', hasScored: false },
+    { x: 0.5, y: 0.48, direction: Math.PI / 2, type: 'standard', hasScored: false },
+
+    // Sector C 
+    { x: 0.12, y: 0.12, direction: Math.PI / 6, type: 'standard', hasScored: false }, 
+    { x: 0.26, y: 0.25, direction: Math.PI, type: 'advanced', hasScored: false }, 
+    { x: 0.08, y: 0.38, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
+    { x: 0.15, y: 0.40, direction: 0, type: 'advanced', hasScored: false },
+
+    // Sector D
+    { x: 0.85, y: 0.52, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.72, y: 0.70, direction: Math.PI / 4, type: 'advanced', hasScored: false },
+    { x: 0.90, y: 0.85, direction: -Math.PI / 2, type: 'standard', hasScored: false },
+    { x: 0.84, y: 0.80, direction: Math.PI, type: 'advanced', hasScored: false },
+
+    // Perimeter Side Passages
+    { x: 0.30, y: 0.60, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
+    { x: 0.70, y: 0.60, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
+
+    // Sector E 
+    { x: 0.42, y: 0.20, direction: Math.PI / 4, type: 'advanced', hasScored: false },
+    { x: 0.58, y: 0.20, direction: 3 * Math.PI / 4, type: 'advanced', hasScored: false },
+    { x: 0.5, y: 0.12, direction: -Math.PI / 2, type: 'advanced', hasScored: false }, 
+    { x: 0.35, y: 0.15, direction: 0, type: 'standard', hasScored: false },
+    { x: 0.65, y: 0.15, direction: Math.PI, type: 'standard', hasScored: false },
   ],
 };
 
@@ -205,18 +229,19 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
 
     // Central Corridor / Main Hallway vertical dividers with Door gaps
     { x: 0.43, y: 0.45, width: 0.015, height: 0.25 }, // Left hallway wall top-half
-    { x: 0.43, y: 0.78, width: 0.015, height: 0.13 }, // Left hallway wall bottom-half (ends at y:0.91)
+    { x: 0.43, y: 0.78, width: 0.015, height: 0.13 }, // Left hallway wall bottom-half
     { x: 0.555, y: 0.45, width: 0.015, height: 0.25 }, // Right hallway wall top-half
-    { x: 0.555, y: 0.78, width: 0.015, height: 0.13 }, // Right hallway wall bottom-half (ends at y:0.91)
-
-    // Lobby Entry Horizontal Partition Walls
-    { x: 0.35, y: 0.45, width: 0.08, height: 0.015 },  // Left partition before double door
-    { x: 0.57, y: 0.45, width: 0.08, height: 0.015 },  // Right partition after double door
+    { x: 0.555, y: 0.78, width: 0.015, height: 0.13 }, // Right hallway wall bottom-half
 
     // Sector 1 (Cooling Lab / Storage - Top Left)
-    // Horizontal divider wall between Sector 1 and Sector 2
-    { x: 0.05, y: 0.45, width: 0.15, height: 0.015 },
-    { x: 0.28, y: 0.45, width: 0.15, height: 0.015 },
+    // Horizontal divider wall between Sector 1 and Sector 2 (y: 0.45)
+    { x: 0.05, y: 0.45, width: 0.15, height: 0.015 }, // Outer segment
+    { x: 0.28, y: 0.45, width: 0.15, height: 0.015 }, // Inner segment (meets hallway at 0.43)
+    
+    // Sector 3 (Heavy Machining / Power Plant - Bottom Right)
+    // Horizontal divider wall between Sector 3 and Sector 4 (y: 0.45)
+    { x: 0.57, y: 0.45, width: 0.18, height: 0.015 }, // Inner segment (starts after hallway 0.555)
+    { x: 0.83, y: 0.45, width: 0.105, height: 0.015 }, // Outer segment (ends at right wall 0.935)
     // Internal partition walls (Laboratory & server rooms)
     { x: 0.18, y: 0.15, width: 0.025, height: 0.12 }, // Server Rack cover
     { x: 0.28, y: 0.22, width: 0.025, height: 0.12 }, // Server Rack cover 2
@@ -230,58 +255,62 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     { x: 0.15, y: 0.78, width: 0.15, height: 0.04 }, // Assembler station
 
     // Sector 3 (Heavy Machining / Power Plant - Bottom Right)
-    // Horizontal divider wall between Sector 3 and Sector 4
-    { x: 0.57, y: 0.45, width: 0.18, height: 0.015 },
-    { x: 0.83, y: 0.45, width: 0.12, height: 0.015 },
     // Heavy machinery obstacles
     { x: 0.65, y: 0.55, width: 0.08, height: 0.08 }, // Generator Block A
     { x: 0.78, y: 0.65, width: 0.08, height: 0.08 }, // Generator Block B
     { x: 0.68, y: 0.8, width: 0.15, height: 0.04 }, // Assembly Deck
 
     // Sector 4 (Control Center & Server Room - Top Right)
-    // Internal partitions
-    { x: 0.65, y: 0.2, width: 0.12, height: 0.02 }, // Administration Desk
+    // Horizontal partitions and furniture obstacles
+    { x: 0.05, y: 0.2, width: 0.1, height: 0.015 }, // Lab Ceiling part A
+    { x: 0.25, y: 0.2, width: 0.1, height: 0.015 }, // Lab Ceiling part B
+    { x: 0.65, y: 0.2, width: 0.1, height: 0.02 },  // Admin Ceiling part A
+    { x: 0.85, y: 0.2, width: 0.1, height: 0.02 },  // Admin Ceiling part B
     { x: 0.82, y: 0.22, width: 0.02, height: 0.15 }, // Computer Console Group
     { x: 0.7, y: 0.35, width: 0.12, height: 0.03 }, // System Mainframe
 
     // Top Lobby / Command Sector (Top Center)
     // Vertical lobby walls Left and Right
-    { x: 0.35, y: 0.05, width: 0.015, height: 0.15 }, // Left top wall
+    { x: 0.35, y: 0.05, width: 0.015, height: 0.17 }, // Left top wall
     { x: 0.35, y: 0.28, width: 0.015, height: 0.17 }, // Left bottom wall
-    { x: 0.635, y: 0.05, width: 0.015, height: 0.15 }, // Right top wall
-    { x: 0.635, y: 0.28, width: 0.015, height: 0.17 }, // Right bottom wall
+    { x: 0.65, y: 0.05, width: 0.015, height: 0.17 }, // Right top wall (Aligned to 0.65)
+    { x: 0.65, y: 0.28, width: 0.015, height: 0.17 }, // Right bottom wall (Aligned to 0.65)
     // Center server panel split
-    { x: 0.365, y: 0.22, width: 0.095, height: 0.015 }, // Secure partition left
-    { x: 0.54, y: 0.22, width: 0.095, height: 0.015 }, // Secure partition right
+    { x: 0.365, y: 0.22, width: 0.092, height: 0.015 }, // Secure partition left (closes more gap)
+    { x: 0.543, y: 0.22, width: 0.107, height: 0.015 }, // Secure partition right (closes more gap)
   ],
   doors: [
     // Bottom main double entrance doors
-    { id: 101, hinge: { x: 0.45, y: 0.91 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
-    { id: 102, hinge: { x: 0.55, y: 0.91 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 101, hinge: { x: 0.45, y: 0.91 }, length: 0.051, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    { id: 102, hinge: { x: 0.55, y: 0.91 }, length: 0.051, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
     // Left Hallway Side Entry
-    { id: 103, hinge: { x: 0.43, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
+    { id: 103, hinge: { x: 0.43, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
     // Right Hallway Side Entry
-    { id: 104, hinge: { x: 0.555, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 104, hinge: { x: 0.555, y: 0.7 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
     // Lobby Entry Double Doors (top of central hall)
-    { id: 105, hinge: { x: 0.43, y: 0.45 }, length: 0.07, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
-    { id: 106, hinge: { x: 0.57, y: 0.45 }, length: 0.07, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
+    { id: 105, hinge: { x: 0.43, y: 0.45 }, length: 0.062, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 106, hinge: { x: 0.555, y: 0.45 }, length: 0.062, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
     // Sector 1-2 Horizontal Divider Door
-    { id: 107, hinge: { x: 0.2, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
+    { id: 107, hinge: { x: 0.2, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
     // Sector 3-4 Horizontal Divider Door
-    { id: 108, hinge: { x: 0.75, y: 0.45 }, length: 0.08, closedAngle: Math.PI, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 108, hinge: { x: 0.75, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
     // Left Lobby Entry (Lab <-> Lobby)
-    { id: 109, hinge: { x: 0.35, y: 0.2 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: -1 },
+    { id: 109, hinge: { x: 0.35, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
     // Right Lobby Entry (Control <-> Lobby)
-    { id: 110, hinge: { x: 0.635, y: 0.2 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1 },
+    { id: 110, hinge: { x: 0.65, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
     // Central Locked Secure Command Room door
-    { id: 111, hinge: { x: 0.46, y: 0.22 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI / 2 * 0.9, swingDirection: 1, locked: true },
+    { id: 111, hinge: { x: 0.457, y: 0.22 }, length: 0.086, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1, locked: true },
+
+    // New doors in ceiling walls
+    { id: 112, hinge: { x: 0.15, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 113, hinge: { x: 0.75, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
   ],
   enemies: [
     // Bottom entry guards
@@ -323,6 +352,6 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
 
 export const MISSIONS: LevelDefinition[] = [
   TRAINING_GROUND,
-  THE_FACTORY,
+  BASTION_7,
   THE_FACTORY_EXPANSION,
 ];

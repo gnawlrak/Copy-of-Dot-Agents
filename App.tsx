@@ -17,9 +17,12 @@ import { OperatorClassID, OPERATORS } from './data/operators';
 import MultiplayerLobby from './components/MultiplayerLobby';
 import { MockNetworkClient } from './network';
 import { SaveSystem, GameData } from './data/services/save-system';
+import { AuthSystem } from './data/services/auth-system';
+import { LoginScreen } from './components/LoginScreen';
+import { AccountSettings } from './components/AccountSettings';
 
 type GameState = 'main-menu' | 'level-select' | 'in-game' | 'map-editor' | 'loadout' | 'weapon-modification' | 'multiplayer-lobby';
-export type Difficulty = 'simple' | 'normal' | 'hard';
+export type Difficulty = 'simple' | 'normal' | 'hard' | 'test';
 
 const DEFAULT_LOADOUT: PlayerLoadout = {
   primary: 'MK18 CQBR',
@@ -84,6 +87,17 @@ const App: React.FC = () => {
   const [totalScore, setTotalScore] = useState<number>(0);
   const [highScore, setHighScore] = useState<number>(0);
 
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+
+  useEffect(() => {
+    AuthSystem.init();
+    const user = AuthSystem.getCurrentUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+  }, []);
+
   useEffect(() => {
     if (!networkClientRef.current) {
         networkClientRef.current = new MockNetworkClient();
@@ -126,8 +140,10 @@ const App: React.FC = () => {
   
   // Data Loading Effect
   useEffect(() => {
+    if (!currentUser) return; // Wait for login
+
     const loadData = async () => {
-        let loadedData = await SaveSystem.loadGameData();
+        let loadedData = await SaveSystem.loadGameData(currentUser);
 
         // One-time migration from old format to the new unified save object
         if (!loadedData && localStorage.getItem('dot_agents_player_loadout')) {
@@ -153,7 +169,7 @@ const App: React.FC = () => {
                 customLevels: oldCustomLevels
             };
             loadedData = migratedData;
-            await SaveSystem.saveGameData(migratedData);
+            await SaveSystem.saveGameData(currentUser, migratedData);
             await SaveSystem.clearOldData();
         }
 
@@ -167,15 +183,25 @@ const App: React.FC = () => {
             setCustomLevels(loadedData.customLevels || []);
             setTotalScore(loadedData.totalScore || 0);
             setHighScore(loadedData.highScore || 0);
+        } else {
+            // New user, insert defaults
+            setOperatorClassId('A-Red');
+            setAimSensitivity(1.0);
+            setAgentSkin(AGENT_SKINS[0].name);
+            setPlayerLoadout(DEFAULT_LOADOUT);
+            setCustomControls(DEFAULT_CONTROLS_LAYOUT);
+            setCustomLevels([]);
+            setTotalScore(0);
+            setHighScore(0);
         }
         setIsDataLoaded(true);
     };
     loadData();
-  }, []);
+  }, [currentUser]);
 
   // Centralized Data Saving Effect
   useEffect(() => {
-    if (!isDataLoaded) {
+    if (!isDataLoaded || !currentUser) {
         return; // Don't save before initial data is loaded, to prevent overwriting save with defaults.
     }
 
@@ -193,7 +219,7 @@ const App: React.FC = () => {
     
     setSyncStatus('syncing');
     const handler = setTimeout(() => {
-        SaveSystem.saveGameData(gameData).then(() => {
+        SaveSystem.saveGameData(currentUser, gameData).then(() => {
             setSyncStatus('synced');
             setTimeout(() => setSyncStatus('idle'), 1500);
         }).catch(() => {
@@ -204,8 +230,7 @@ const App: React.FC = () => {
     return () => {
         clearTimeout(handler);
     };
-
-    }, [operatorClassId, aimSensitivity, agentSkin, playerLoadout, customControls, customLevels, totalScore, highScore, isDataLoaded]);
+  }, [operatorClassId, aimSensitivity, agentSkin, playerLoadout, customControls, customLevels, totalScore, highScore, isDataLoaded, currentUser]);
 
   
   const handleStartMission = () => {
@@ -233,11 +258,21 @@ const App: React.FC = () => {
 
   const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => {
     if (networkClientRef.current) {
+      if (currentUser) {
+          networkClientRef.current.ownName = currentUser;
+      }
       networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name);
     }
     setSelectedLevel(level);
     setIsMultiplayer(true);
     setGameState('in-game');
+  };
+
+  const handleLogout = () => {
+      setCurrentUser(null);
+      setDifficulty('simple');
+      setGameState('main-menu');
+      setShowSettings(false);
   };
 
   const handleMissionEnd = () => {
@@ -248,7 +283,7 @@ const App: React.FC = () => {
     
     // When mission ends, accumulate run score into total and update high score
     // Skip scoring accumulation for training ground maps
-    const isTrainingGround = selectedLevel?.isTrainingGround || false;
+    const isTrainingGround = selectedLevel?.isTrainingGround || difficulty === 'test' || false;
     const run = runScoreRef.current || 0;
     console.log(`[App] Mission end - isTrainingGround=${isTrainingGround}, run=${run}, selectedLevel=${selectedLevel?.name}`);
     
@@ -413,6 +448,7 @@ const App: React.FC = () => {
           onCreateNew={() => handleGoToEditor(null)}
           difficulty={difficulty}
           onDifficultyChange={setDifficulty}
+          isAdmin={currentUser === 'root'}
         />;
       case 'map-editor':
         return (
@@ -489,6 +525,10 @@ const App: React.FC = () => {
 
   const shouldShowGlobalUI = gameState !== 'in-game' && gameState !== 'map-editor' && !isCustomizingControls && !showSettings;
 
+  if (!currentUser) {
+    return <LoginScreen onLoginSuccess={setCurrentUser} />;
+  }
+
   return (
     <main className={`bg-black text-white w-screen font-mono relative flex flex-col items-center select-none ${
       gameState === 'in-game' || gameState === 'map-editor'
@@ -502,9 +542,13 @@ const App: React.FC = () => {
 
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30">
+          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30 overflow-y-auto max-h-[90vh]">
             <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">{language === 'en' ? 'SETTINGS' : '系统设置'}</h2>
             
+            <AccountSettings currentUser={currentUser} onLogout={handleLogout} onNameChange={(newName) => {
+                setCurrentUser(newName);
+            }} />
+
             <div className="flex flex-col gap-2 py-4 border-b border-gray-800">
               <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
                 <span>{language === 'en' ? 'Aim Sensitivity' : '操作瞄准灵敏度'}</span>

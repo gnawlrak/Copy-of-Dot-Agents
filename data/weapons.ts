@@ -383,6 +383,37 @@ export const WEAPONS: { [key: string]: WeaponDefinition } = {
             ]
         }
     },
+    'Glock 18C': {
+        name: 'Glock 18C',
+        description: 'Full-automatic 9mm pistol variant. Extremely high cyclic rate of fire with controllable burst capability.',
+        category: 'secondary',
+        type: 'projectile',
+        damage: 40,
+        fireRate: 0.054, // ~1100 RPM
+        bulletSpeed: 1250,
+        bulletRadius: 2.4,
+        pellets: 1,
+        spread: 0.065,
+        allowedFireModes: ['semi', 'auto'],
+        defaultFireMode: 'auto',
+        magSize: 19,
+        ammoInMag: 19,
+        reserveAmmo: 76,
+        reloadTime: 1.45,
+        soundRadius: 380,
+        attachmentSlots: {
+            'Muzzle': [
+                { name: '消音器', description: '降低射击噪音，适合极近距离隐蔽作战。', modifiers: { soundRadius: 0.35, spread: 0.95 } },
+                { name: '枪口制退器', description: '削减全自动射击时的剧烈跳动。', modifiers: { spread: 0.8 } },
+            ],
+            'Optic': [
+                { name: '红点瞄准镜', description: '微型手枪红点，提升捕获速度。', modifiers: {} },
+            ],
+            'Magazine': [
+                { name: '33发长弹匣', description: '大幅扩充载弹量，提供持续压制力。', modifiers: { magSize: 1.73, reloadTime: 1.2 } },
+            ]
+        }
+    },
     'Pistol': {
         name: 'Pistol',
         description: 'Standard issue sidearm. Reliable and versatile.',
