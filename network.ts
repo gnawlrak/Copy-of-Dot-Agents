@@ -15,6 +15,11 @@ export interface PlayerState {
     deaths?: number;
     score?: number;
     isShooting?: boolean;
+    shieldName?: string;
+    shieldDurability?: number;
+    shieldMaxDurability?: number;
+    maxHealth?: number;
+    currentWeaponIndex?: number;
 }
 
 // Represents a remote player in the game world
@@ -23,6 +28,9 @@ export interface RemotePlayer extends PlayerState {
     targetY: number;
     lastUpdateTime: number;
     isShooting: boolean; // Received from network to show muzzle flash
+    playerId?: string;
+    lastUpdate?: number;
+    currentWeaponIndex?: number;
 }
 
 // Represents a weapon fire event
@@ -43,6 +51,12 @@ export type NetworkEvent =
     | { type: 'drop-weapon'; payload: { id?: string; playerId: string; weaponName: string; x: number; y: number } }
     | { type: 'pickup-weapon'; payload: { playerId: string; weaponName: string; id?: string } }
     | { type: 'player-hit'; payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } } }
+    | { type: 'player-killed'; payload: { victimId: string; attackerId: string } }
+    | { type: 'score-update'; payload: { players: Array<{ id: string; kills: number; deaths: number }>; totalKills: number; mode: 'tdm' | 'ffa' | '1v1' } }
+    | { type: 'kill-feed'; payload: { victimId: string; attackerId: string; timestamp: number } }
+    | { type: 'leaderboard-update'; payload: { killLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>; kdLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }> } }
+    | { type: 'start-round'; payload: { roundId: string } }
+    | { type: 'buy-weapon'; payload: { playerId: string; weaponName: string; cost: number; attachments?: any } }
     | { type: 'room-updated'; payload: any }
     | { type: 'player-action'; payload: { action: string; payload: any; playerId: string; timestamp: number } };
 
@@ -119,6 +133,10 @@ export class MockNetworkClient {
             'drop-weapon',
             'pickup-weapon',
             'player-hit',
+            'player-killed',
+            'score-update',
+            'kill-feed',
+            'leaderboard-update',
             'room-updated',
             'player-action'
         ];
