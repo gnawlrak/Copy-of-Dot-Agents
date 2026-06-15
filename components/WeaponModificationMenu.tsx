@@ -306,86 +306,90 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
     const partIdToHighlight = selectedSlot ? schematic.slotPartMap[selectedSlot] : null;
 
     return (
-        <div className="w-full min-h-full max-w-screen-2xl mx-auto p-6 md:p-8 flex flex-col">
-             <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-2 text-center">{weaponName.toUpperCase()}</h1>
-             <p className="text-gray-400 text-center mb-8">{language === 'en' ? 'GUNSMITH: Customize modules to optimize weapon tactical parameters.' : '配件定制：调整物理组件以极致压榨战术指标'}</p>
-
-            <div className="flex-grow grid grid-cols-1 lg:grid-cols-5 gap-8 min-h-0">
+        <div className="w-full h-fit max-w-screen-2xl mx-auto p-6 md:p-8 flex flex-col gap-8">
+             <div className="flex flex-col items-center justify-center pt-4 sm:pt-0">
+                <h1 className="text-4xl lg:text-6xl font-bold tracking-[0.2em] text-teal-300 mb-2 text-center uppercase">{weaponName}</h1>
+                <p className="text-gray-400 text-center max-w-2xl px-4 text-xs lg:text-sm tracking-widest">{language === 'en' ? 'GUNSMITH: Customize modules to optimize weapon tactical parameters.' : '配件定制：调整物理组件以极致压榨战术指标与作战效能'}</p>
+             </div>
+ 
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                 {/* Left Column: Slot List */}
-                <div className="lg:col-span-1 bg-gray-950/50 border border-gray-800 p-4 rounded-xl flex flex-col gap-3 overflow-y-auto">
-                    <div className="p-2 border-b border-gray-800 mb-2 flex items-center gap-2">
+                <div className="lg:col-span-1 bg-gray-950/40 border border-gray-800 p-4 rounded-2xl flex flex-col gap-2 backdrop-blur-sm shadow-xl h-fit">
+                    <div className="p-2 border-b border-gray-800/50 mb-2 flex items-center gap-2">
                         <Layers className="h-4 w-4 text-teal-500" />
-                        <h2 className="text-xs font-bold text-gray-500 tracking-widest uppercase">{language === 'en' ? 'ATTACHMENT SLOTS' : '配置槽位'}</h2>
+                        <h2 className="text-[10px] font-black text-gray-500 tracking-[0.2em] uppercase">{language === 'en' ? 'ATTACHMENT SLOTS' : '配置槽位清单'}</h2>
                     </div>
-                    {attachmentSlots.map(slotName => {
-                        const isSelected = selectedSlot === slotName;
-                        const rawEquipped = currentAttachments[slotName];
-                        const equippedAttachment = rawEquipped 
-                            ? translateAttachment(rawEquipped, '', language).name 
-                            : (language === 'en' ? 'None' : '无配件');
-                        return (
-                            <button
-                                key={slotName}
-                                onClick={() => setSelectedSlot(slotName)}
-                                className={`w-full p-4 rounded-lg text-left transition-all duration-200 ${isSelected ? 'bg-teal-500/10 border-l-4 border-teal-400 text-teal-100' : 'bg-gray-900 border-l-4 border-transparent hover:bg-gray-800 text-gray-400'}`}
-                            >
-                                <h3 className={`font-bold text-sm tracking-wider uppercase ${isSelected ? 'text-teal-300' : 'text-gray-300'}`}>{language === 'en' ? slotName : translateSlotName(slotName)}</h3>
-                                <p className={`text-xs mt-1 truncate ${isSelected ? 'text-teal-400' : 'text-gray-500'}`}>{equippedAttachment}</p>
-                            </button>
-                        );
-                    })}
+                    <div className="flex flex-col gap-2 max-h-[300px] lg:max-h-[600px] overflow-y-auto pr-1">
+                        {attachmentSlots.map(slotName => {
+                            const isSelected = selectedSlot === slotName;
+                            const rawEquipped = currentAttachments[slotName];
+                            const equippedAttachment = rawEquipped 
+                                ? translateAttachment(rawEquipped, '', language).name 
+                                : (language === 'en' ? 'None' : '标准出厂');
+                            return (
+                                <button
+                                    key={slotName}
+                                    onClick={() => setSelectedSlot(slotName)}
+                                    className={`w-full p-3.5 rounded-xl text-left transition-all duration-300 ${isSelected ? 'bg-teal-500/10 border border-teal-500/30 text-teal-100 shadow-lg shadow-teal-500/5' : 'bg-gray-900/50 border border-transparent hover:bg-gray-800 text-gray-400'}`}
+                                >
+                                    <h3 className={`font-black text-[10px] tracking-widest uppercase ${isSelected ? 'text-teal-300' : 'text-gray-500'}`}>{language === 'en' ? slotName : translateSlotName(slotName)}</h3>
+                                    <p className={`text-sm mt-0.5 truncate font-bold ${isSelected ? 'text-white' : 'text-gray-400'}`}>{equippedAttachment}</p>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
-
+ 
                 {/* Center Column: Exploded View */}
-                <div className="lg:col-span-3 bg-gray-950/50 border border-gray-800 rounded-xl flex flex-col p-6 relative min-h-[300px]">
-                    <div className="flex items-center gap-2 mb-6">
+                <div className="lg:col-span-3 bg-gray-950/40 border border-gray-800 rounded-2xl flex flex-col p-6 relative min-h-[350px] lg:min-h-[450px] backdrop-blur-sm shadow-xl overflow-hidden">
+                    <div className="flex items-center gap-2 mb-4">
                         <Crosshair className="h-4 w-4 text-teal-500" />
-                        <h2 className="text-xs font-bold text-gray-500 tracking-widest uppercase">{language === 'en' ? 'SCHEMATIC EXPLODED VIEW' : '结构透视视图'}</h2>
+                        <h2 className="text-[10px] font-black text-gray-500 tracking-[0.2em] uppercase">{language === 'en' ? 'SCHEMATIC EXPLODED VIEW' : '结构透视与模块拆解'}</h2>
                     </div>
-                    <div className="flex-grow flex items-center justify-center relative">
-                        <div className="relative w-full h-full flex items-center justify-center">
-                        <div className="relative" style={schematic.containerStyle}>
-                            {schematic.parts.map(part => {
-                                const isHighlighted = part.id === partIdToHighlight;
-                                const partStyle = {
-                                    ...part.style,
-                                    transition: 'all 0.3s ease-in-out',
-                                    filter: isHighlighted ? 'drop-shadow(0 0 12px #2dd4bf) brightness(1.6)' : 'brightness(1)',
-                                    transform: `${part.style.transform || ''} ${isHighlighted ? 'scale(1.05)' : 'scale(1)'}`,
-                                };
-                                const slotForThisPart = Object.keys(schematic.slotPartMap).find(slot => schematic.slotPartMap[slot] === part.id);
-                                return (
-                                    <button 
-                                        key={part.id} 
-                                        style={partStyle}
-                                        onClick={() => slotForThisPart && setSelectedSlot(slotForThisPart)}
-                                        className="absolute cursor-pointer"
-                                        aria-label={`Select ${part.id}`}
-                                    />
-                                );
-                            })}
+                    <div className="flex-grow flex items-center justify-center relative p-4 py-12">
+                        <div className="relative w-full h-64 flex items-center justify-center">
+                            <div className="relative" style={schematic.containerStyle}>
+                                {schematic.parts.map(part => {
+                                    const isHighlighted = part.id === partIdToHighlight;
+                                    const partStyle = {
+                                        ...part.style,
+                                        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        filter: isHighlighted ? 'drop-shadow(0 0 20px rgba(45, 212, 191, 0.4)) brightness(1.8)' : 'brightness(0.9) grayscale(0.2)',
+                                        transform: `${part.style.transform || ''} ${isHighlighted ? 'scale(1.08)' : 'scale(1)'}`,
+                                        opacity: isHighlighted ? 1 : 0.7,
+                                    };
+                                    const slotForThisPart = Object.keys(schematic.slotPartMap).find(slot => schematic.slotPartMap[slot] === part.id);
+                                    return (
+                                        <button 
+                                            key={part.id} 
+                                            style={partStyle}
+                                            onClick={() => slotForThisPart && setSelectedSlot(slotForThisPart)}
+                                            className="absolute cursor-pointer outline-none"
+                                        />
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-
+ 
                 {/* Right Column: Attachments */}
-                <div className="lg:col-span-1 bg-gray-950/50 border border-gray-800 p-4 rounded-xl flex flex-col">
-                    <div className="p-2 mb-4 flex items-center gap-2">
+                <div className="lg:col-span-1 bg-gray-950/40 border border-gray-800 p-4 rounded-2xl flex flex-col backdrop-blur-sm shadow-xl">
+                    <div className="p-2 mb-4 border-b border-gray-800/50 flex items-center gap-2">
                         <Sliders className="h-4 w-4 text-teal-500" />
-                        <h2 className="text-sm font-bold text-teal-300 tracking-wider uppercase">{selectedSlot ? (language === 'en' ? selectedSlot : translateSlotName(selectedSlot)) : (language === 'en' ? 'Select Slot' : '选择槽位')}</h2>
+                        <h2 className="text-[10px] font-black text-teal-300 tracking-[0.2em] uppercase">{selectedSlot ? (language === 'en' ? selectedSlot : translateSlotName(selectedSlot)) : (language === 'en' ? 'Select Slot' : '选择部位')}</h2>
                     </div>
-                    <div className="flex-grow space-y-4 overflow-y-auto">
+                    <div className="flex flex-col gap-3 max-h-[300px] lg:max-h-[600px] overflow-y-auto pr-1">
                         {selectedSlot && weaponDef.attachmentSlots && (
                             <>
                                 <button
                                     onClick={() => handleAttachmentSelect(selectedSlot, null)}
                                     onMouseEnter={() => setHoveredAttachment(null)}
                                     onMouseLeave={() => setHoveredAttachment(null)}
-                                    className={`w-full p-4 bg-gray-900 border rounded-lg text-left transition-all duration-200 ${!currentAttachments[selectedSlot] ? 'border-teal-500 ring-1 ring-teal-500/30' : 'border-gray-800 hover:border-gray-600'}`}
+                                    className={`w-full p-4 bg-gray-900/60 border rounded-xl text-left transition-all duration-300 ${!currentAttachments[selectedSlot] ? 'border-teal-500 ring-2 ring-teal-500/20 shadow-lg shadow-teal-500/5' : 'border-gray-800 hover:border-gray-700'}`}
                                 >
-                                    <h4 className="font-bold text-gray-300">{language === 'en' ? 'None' : '无配件'}</h4>
-                                    <p className="text-xs text-gray-500 mt-1">{language === 'en' ? 'Restore factory default configuration.' : '恢复至默认出厂配置。'}</p>
+                                    <h4 className="font-bold text-gray-300 text-sm">{language === 'en' ? 'None' : '标准出厂'}</h4>
+                                    <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">{language === 'en' ? 'Restore factory default configuration.' : '恢复至默认战术配置'}</p>
                                 </button>
                                 {weaponDef.attachmentSlots[selectedSlot]?.map((attachment, index) => {
                                     const tier = getTierInfo(index);
@@ -397,13 +401,13 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                                             onClick={() => handleAttachmentSelect(selectedSlot, attachment)}
                                             onMouseEnter={() => setHoveredAttachment(attachment)}
                                             onMouseLeave={() => setHoveredAttachment(null)}
-                                            className={`w-full p-4 bg-gray-900 border rounded-lg text-left transition-all duration-200 ${isSelected ? `${tier.color} ring-1 ${tier.color}/30` : `border-gray-800 hover:border-gray-600`}`}
+                                            className={`w-full p-4 bg-gray-900/60 border rounded-xl text-left transition-all duration-300 ${isSelected ? `${tier.color} ring-2 ${tier.color}/20 shadow-lg shadow-teal-500/5` : `border-gray-800 hover:border-gray-700`}`}
                                         >
                                             <div className="flex justify-between items-start mb-2">
-                                                <h4 className={`font-bold ${tier.textColor}`}>{trans.name}</h4>
-                                                <span className={`px-2 py-0.5 text-[10px] font-black rounded-sm ${tier.tagColor} ${tier.textColor}`}>{tier.name}</span>
+                                                <h4 className={`font-bold ${tier.textColor} text-sm`}>{trans.name}</h4>
+                                                <span className={`px-1.5 py-0.5 text-[8px] font-black rounded-sm ${tier.tagColor} ${tier.textColor} tracking-tighter`}>{tier.name}</span>
                                             </div>
-                                            <p className="text-xs text-gray-400 leading-relaxed">{trans.desc}</p>
+                                            <p className="text-[11px] text-gray-400 leading-relaxed font-sans">{trans.desc}</p>
                                         </button>
                                     );
                                 })}
@@ -412,34 +416,35 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                     </div>
                 </div>
             </div>
-
+ 
             {/* Bottom Row: Stats */}
-            <div className="w-full mt-8 bg-gray-950/50 border border-gray-800 p-6 rounded-xl">
-                <div className="flex items-center gap-2 mb-6 border-b border-gray-800 pb-4">
+            <div className="w-full bg-gray-950/40 border border-gray-800 p-8 rounded-2xl backdrop-blur-md shadow-2xl relative overflow-hidden mt-4">
+                <div className="absolute top-0 left-0 w-1.5 h-full bg-teal-500/60"></div>
+                <div className="flex items-center gap-2 mb-8 border-b border-gray-800/50 pb-4">
                     <Gauge className="h-5 w-5 text-teal-500" />
-                    <h3 className="text-xs font-bold text-gray-500 tracking-widest uppercase">{language === 'en' ? 'TACTICAL PERFORMANCE ANALYSIS' : '战术性能全维分析'}</h3>
+                    <h3 className="text-[11px] font-black text-gray-400 tracking-[0.3em] uppercase">{language === 'en' ? 'TACTICAL PERFORMANCE ANALYSIS' : '战术性能全维分析与载弹校准'}</h3>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-6">
-                    <StatBar label={language === 'en' ? 'DAMAGE' : '击中致伤力'} baseValue={weaponDef.damage} modifiedValue={modifiedStats.damage} previewValue={previewStats?.damage} format={v => v.toFixed(0)} />
-                    <StatBar label={language === 'en' ? 'FIRE RATE' : '循环攒射速'} baseValue={weaponDef.fireRate} modifiedValue={modifiedStats.fireRate} previewValue={previewStats?.fireRate} lowerIsBetter format={v => `${(1/v).toFixed(1)}/s`} />
-                    <StatBar label={language === 'en' ? 'RELOAD TIME' : '战术换弹时'} baseValue={weaponDef.reloadTime} modifiedValue={modifiedStats.reloadTime} previewValue={previewStats?.reloadTime} lowerIsBetter format={v => `${v.toFixed(1)}s`} />
-                    <StatBar label={language === 'en' ? 'SPREAD' : '弹道精密度'} baseValue={weaponDef.spread} modifiedValue={modifiedStats.spread} previewValue={previewStats?.spread} lowerIsBetter format={v => (100 - v * 100).toFixed(0)} />
-                    {weaponDef.pellets > 1 && <StatBar label={language === 'en' ? 'PELLETS' : '单发弹丸数'} baseValue={weaponDef.pellets} modifiedValue={modifiedStats.pellets} previewValue={previewStats?.pellets} format={v => v.toFixed(0)} />}
-                    <div>
-                        <div className="flex justify-between items-baseline text-gray-400 mb-2">
-                            <span className="font-bold tracking-widest uppercase text-xs">{language === 'en' ? 'FIRE MODES' : '击发选择'}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-12 gap-y-10">
+                    <StatBar label={language === 'en' ? 'DAMAGE' : '致伤力 (DAMAGE)'} baseValue={weaponDef.damage} modifiedValue={modifiedStats.damage} previewValue={previewStats?.damage} format={v => v.toFixed(0)} />
+                    <StatBar label={language === 'en' ? 'FIRE RATE' : '循环攒射 (CYCLE)'} baseValue={weaponDef.fireRate} modifiedValue={modifiedStats.fireRate} previewValue={previewStats?.fireRate} lowerIsBetter format={v => `${(1/v).toFixed(1)}/s`} />
+                    <StatBar label={language === 'en' ? 'RELOAD TIME' : '装填周期 (RELOAD)'} baseValue={weaponDef.reloadTime} modifiedValue={modifiedStats.reloadTime} previewValue={previewStats?.reloadTime} lowerIsBetter format={v => `${v.toFixed(1)}s`} />
+                    <StatBar label={language === 'en' ? 'SPREAD' : '散布精密度 (SPREAD)'} baseValue={weaponDef.spread} modifiedValue={modifiedStats.spread} previewValue={previewStats?.spread} lowerIsBetter format={v => (100 - v * 100).toFixed(0)} />
+                    {weaponDef.pellets > 1 && <StatBar label={language === 'en' ? 'PELLETS' : '弹丸分量 (PELLETS)'} baseValue={weaponDef.pellets} modifiedValue={modifiedStats.pellets} previewValue={previewStats?.pellets} format={v => v.toFixed(0)} />}
+                    <div className="pt-2">
+                        <div className="flex justify-between items-baseline text-gray-500 mb-2">
+                            <span className="font-black tracking-widest uppercase text-[9px]">{language === 'en' ? 'FIRE MODES' : '击发模式选择'}</span>
                         </div>
-                        <div className="flex flex-wrap gap-2 font-mono text-lg">
+                        <div className="flex flex-wrap gap-2">
                             {['semi', 'burst', 'auto'].map((mode) => {
                                 const isAvailable = displayStats.allowedFireModes.includes(mode as FireMode);
                                 const wasAvailable = modifiedStats.allowedFireModes.includes(mode as FireMode);
-                                let color = 'text-gray-700';
+                                let colorClass = 'bg-gray-900 border-gray-800 text-gray-700';
                                 if (isAvailable) {
-                                    color = wasAvailable ? 'text-gray-300' : 'text-teal-400';
+                                    colorClass = wasAvailable ? 'bg-gray-800 border-gray-700 text-gray-200' : 'bg-teal-500/20 border-teal-500/50 text-teal-300';
                                 } else if (wasAvailable) {
-                                    color = 'text-red-900';
+                                    colorClass = 'bg-red-950/20 border-red-900/50 text-red-900';
                                 }
-                                return <span key={mode} className={`px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-md text-sm ${color} transition-colors`}>{mode.toUpperCase()}</span>
+                                return <span key={mode} className={`px-2.5 py-1 border rounded-md text-[10px] font-black tracking-wider uppercase transition-all duration-300 ${colorClass}`}>{mode}</span>
                              })}
                         </div>
                     </div>

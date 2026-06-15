@@ -923,13 +923,15 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       
       const dotProd = relX * normalX + relY * normalY;
 
-      if (dotProd < 0) {
-          // Player is on the opposite side of the swing rotation (the opening direction/side)
-          // Interacting from this side always OPENS the door
+      const isClosed = Math.abs(doorToInteract.currentAngle - doorToInteract.closedAngle) < 0.1;
+
+      if (isClosed || dotProd < 0) {
+          // If door is closed, or player is on the opposite side of swing rotation (opening side)
+          // we always open the door in the swing direction.
           doorToInteract.angularVelocity = 1.8 * doorToInteract.swingDirection;
       } else {
-          // Player is on the swing rotation side (the closing direction/side)
-          // Interacting from this side always CLOSES the door
+          // Player is on the swing rotation side (closing side) and door is already open
+          // we push it towards the closed state.
           doorToInteract.angularVelocity = -1.8 * doorToInteract.swingDirection;
       }
   }, []);

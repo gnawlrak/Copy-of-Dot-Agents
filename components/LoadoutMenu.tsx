@@ -83,25 +83,29 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                     {categoryConfig.icon}
                     <h3 className="text-sm font-bold text-gray-500 tracking-widest uppercase">{categoryConfig.label}</h3>
                 </div>
-                <div className="p-4 bg-gray-900 border-2 border-gray-800 rounded-md text-left flex flex-col gap-4 shadow-sm relative group overflow-hidden hover:border-gray-700 transition-colors">
+                <div className="p-5 bg-gray-900 border-2 border-gray-800 rounded-xl text-left flex flex-col gap-4 shadow-sm relative group overflow-hidden hover:border-teal-900/30 transition-all duration-300">
                     <button
                         onClick={() => setSelectionPanel(category)}
-                        className="w-full text-left hover:bg-gray-800/40 -m-2 p-2 rounded-md transition-colors flex items-center justify-between cursor-pointer"
+                        className="w-full text-left hover:bg-white/5 p-2 -m-2 rounded-lg transition-colors flex items-center justify-between cursor-pointer"
                     >
-                        <div>
-                            <h4 className="text-xl font-bold text-teal-400 tracking-wider group-hover:text-teal-300 transition-colors">{weaponTrans.name}</h4>
-                            <p className="text-gray-400 text-sm mt-1">{weaponTrans.desc}</p>
+                        <div className="pr-4">
+                            <h4 className="text-xl font-bold text-teal-400 tracking-wider group-hover:text-teal-300 transition-colors uppercase leading-tight">{weaponTrans.name}</h4>
+                            <p className="text-gray-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{weaponTrans.desc}</p>
                         </div>
-                        <ChevronRight className="h-5 w-5 text-gray-600 group-hover:text-teal-400 transition-colors" />
+                        <div className="flex-shrink-0">
+                             <ChevronRight className="h-6 w-6 text-gray-700 group-hover:text-teal-400 transition-all transform group-hover:translate-x-1" />
+                        </div>
                     </button>
                     {hasAttachments && (
-                         <button 
-                            onClick={() => onModifyWeapon(category)}
-                            className="w-full px-6 py-2.5 bg-gray-800 text-teal-300 font-bold text-sm tracking-widest rounded-md border-2 border-gray-700 hover:bg-gray-750 hover:border-teal-500 hover:text-teal-200 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                         >
-                             <Wrench className="h-4 w-4" />
-                             {t('customize')}
-                         </button>
+                         <div className="pt-2 border-t border-gray-800/50">
+                            <button 
+                                onClick={() => onModifyWeapon(category)}
+                                className="w-full px-6 py-2.5 bg-teal-500/10 text-teal-300 font-black text-[10px] tracking-[0.2em] rounded-md border border-teal-500/20 hover:bg-teal-500/20 hover:border-teal-500/50 hover:text-teal-200 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-inner uppercase"
+                            >
+                                <Wrench className="h-3.5 w-3.5" />
+                                {t('customize')}
+                            </button>
+                         </div>
                     )}
                 </div>
             </div>
