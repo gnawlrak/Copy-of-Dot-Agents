@@ -517,14 +517,27 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const playerTeamRef = useRef<'red' | 'blue'>('red');
 
   // Multiplayer scoreboard state
-  const [roomScores, setRoomScores] = useState<Record<string, { kills: number; deaths: number }>>({});
-  const roomScoresRef = useRef<Record<string, { kills: number; deaths: number }>>({});
+  const [roomScores, setRoomScores] = useState<Record<string, { kills: number; deaths: number; name?: string; team?: 'red' | 'blue' }>>({});
+  const roomScoresRef = useRef<Record<string, { kills: number; deaths: number; name?: string; team?: 'red' | 'blue' }>>({});
   const [totalRoomKills, setTotalRoomKills] = useState(0);
+  const [teamScores, setTeamScores] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  const teamScoresRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [globalKillLeaderboard, setGlobalKillLeaderboard] = useState<Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>>([]);
   const [globalKDLeaderboard, setGlobalKDLeaderboard] = useState<Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>>([]);
   const [scoreboardTab, setScoreboardTab] = useState<'room' | 'kills' | 'kd'>('room');
+  const [showTeamSelect, setShowTeamSelect] = useState(true);
+  const [teamSelectError, setTeamSelectError] = useState<string | null>(null);
+  const [matchRemainingMs, setMatchRemainingMs] = useState<number | null>(null);
+  const [matchEnded, setMatchEnded] = useState<{ mode: 'tdm' | 'ffa' | '1v1'; winner: 'red' | 'blue' | 'draw' | null; teamScores?: { red: number; blue: number }; players: Array<{ id: string; name: string; team?: string; kills: number; deaths: number }> } | null>(null);
   
+  const formatMatchTime = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   // 本地玩家状态
   const playerRef = useRef<Player>({
       x: 100, y: 100, radius: 10, speed: 240, health: 100, maxHealth: 100, hitTimer: 0,
@@ -582,6 +595,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
           setPlayerTeam(localPlayer.team);
           playerTeamRef.current = localPlayer.team;
           playerRef.current.team = localPlayer.team;
+          setShowTeamSelect(prev => prev ? false : prev);
         }
       }
     };
@@ -611,6 +625,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const player = playerRef.current;
     const playerState: PlayerState = {
       id: networkClient?.ownId || 'local',
+      name: networkClient?.ownName || 'Anonymous',
       x: player.x,
       y: player.y,
       health: player.health,
@@ -749,7 +764,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
       ctx.font = `${10 * scale}px Arial`;
       ctx.textAlign = 'center';
-      ctx.fillText((player.playerId || player.id || 'UNKNOWN').substring(0, 8), x, y + 22 * scale);
+      ctx.fillText(player.name || player.playerId || player.id || 'UNKNOWN', x, y + 22 * scale);
 
       // 绘制盾牌（仅当当前武器是盾牌且耐久 > 0）
       const shieldName = player.shieldName;
@@ -783,42 +798,9 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     });
   }, [isMultiplayer]);
   
-  // 绘制团队信息
+  // 绘制团队信息（已禁用）
   const drawTeamInfo = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
-    if (!isMultiplayer || !gameRoomRef.current) return;
-    
-    const room = gameRoomRef.current;
-    const redPlayers = Object.values(room.players).filter((p: any) => p.team === 'red');
-    const bluePlayers = Object.values(room.players).filter((p: any) => p.team === 'blue');
-    
-    // 绘制团队信息面板
-    const panelWidth = 200 * scale * cameraScale;
-    const panelHeight = 100 * scale * cameraScale;
-    const panelX = 10 * scale * cameraScale;
-    const panelY = 10 * scale * cameraScale;
-    
-    // 背景
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
-    
-    // 边框
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.lineWidth = 2 * scale * cameraScale;
-    ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
-    
-    // 团队信息
-    ctx.fillStyle = 'rgba(255, 100, 100, 0.9)';
-    ctx.font = `${12 * scale * cameraScale}px Arial`;
-    ctx.textAlign = 'left';
-    ctx.fillText(`红队: ${redPlayers.length} 玩家`, panelX + 10 * scale * cameraScale, panelY + 20 * scale * cameraScale);
-    
-    ctx.fillStyle = 'rgba(100, 100, 255, 0.9)';
-    ctx.fillText(`蓝队: ${bluePlayers.length} 玩家`, panelX + 10 * scale * cameraScale, panelY + 40 * scale * cameraScale);
-    
-    // 房间状态
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.fillText(`房间: ${room.name || '未命名'}`, panelX + 10 * scale * cameraScale, panelY + 60 * scale * cameraScale);
-    ctx.fillText(`状态: ${room.status}`, panelX + 10 * scale * cameraScale, panelY + 80 * scale * cameraScale);
+    // Intentionally left empty; team/room info is shown in React HUD overlays instead.
   }, [isMultiplayer]);
 
   const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
@@ -1363,6 +1345,31 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                 }
             }
         }
+
+        // Shield bash damage / stun against remote players in multiplayer
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                if (rp.health <= 0) continue;
+                const dx = rp.x - player.x;
+                const dy = rp.y - player.y;
+                const dist = Math.hypot(dx, dy);
+                const rpRadius = rp.radius || 10;
+                if (dist < bashRange + rpRadius) {
+                    const angleToEnemy = Math.atan2(dy, dx);
+                    const angleDiff = Math.abs(normalizeAngle(angleToEnemy - playerDirection));
+                    if (angleDiff < Math.PI / 4) {
+                        (networkClient as any).send('player-hit', {
+                            targetId: rp.id,
+                            damage: currentMelee.damage,
+                            attackerId: networkClient.ownId,
+                            impact: { x: rp.x, y: rp.y },
+                            sourceDir: { x: ux, y: uy }
+                        });
+                    }
+                }
+            }
+        }
+
         shockwavesRef.current.push({ x: player.x + ux * 30, y: player.y + uy * 30, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
         soundWavesRef.current.push({ x: player.x, y: player.y, radius: 0, maxRadius: 100 * scale / cameraScaleRef.current, lifetime: 0.2, maxLifetime: 0.2, type: 'slash' });
     } else { // Combat Knife
@@ -1425,7 +1432,8 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                 if (killerId && killerId !== 'unknown') {
                     // Send kill notification action (for backward compat kill feed)
                     sendPlayerAction('player-killed', { victimId: ownId, attackerId: killerId });
-                    setPurchaseMessage(`ELIMINATED BY ${killerId.substring(0, 8).toUpperCase()}`);
+                    const killerName = remotePlayersRef.current.find(p => p.id === killerId)?.name || killerId;
+                    setPurchaseMessage(`ELIMINATED BY ${killerName}`);
                 } else {
                     setPurchaseMessage('YOU WERE ELIMINATED');
                 }
@@ -1482,6 +1490,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         timer: cookState.timer, // Already in seconds
         radius: 5 * scale,
         hasBounced: false,
+        ownerId: isMultiplayer ? networkClient?.ownId : undefined,
     });
 };
 
@@ -1868,6 +1877,10 @@ const startHealing = () => {
           if (def.durability) {
               weapon.durability = def.durability;
               weapon.maxDurability = def.durability;
+          } else if (def.name === 'Riot Shield') {
+              // Ensure shield always has durability even if base definition lacks it
+              weapon.durability = 100;
+              weapon.maxDurability = 100;
           }
 
           // Apply attachment modifiers
@@ -2100,6 +2113,12 @@ const startHealing = () => {
               player.weapons.forEach(w => {
                   w.ammoInMag = w.magSize;
               });
+
+              // Reset shield durability to full on respawn
+              const shield = player.weapons.find(w => w.name === 'Riot Shield');
+              if (shield && shield.maxDurability) {
+                  shield.durability = shield.maxDurability;
+              }
               
               sendPlayerAction('player-reset', { id: networkClient?.ownId || 'local' });
               setPurchaseMessage('RESPAWNED - ENGAGING HOSTILES');
@@ -2322,6 +2341,39 @@ const startHealing = () => {
                 affectUnit(e, false)
             }
         });
+
+        // Apply throwable effects to remote players in multiplayer
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                if (rp.health <= 0) continue;
+                const dist = Math.hypot(rp.x - n.x, rp.y - n.y);
+                if (dist > rad) continue;
+
+                let isObstructed = false;
+                for (const segment of dynamicSegments) {
+                    if (intersectSegSeg(n.x, n.y, rp.x, rp.y, segment)) {
+                        isObstructed = true;
+                        break;
+                    }
+                }
+
+                if (n.type === 'grenade') {
+                    if (isObstructed) continue;
+                    const damage = (1 - (dist / rad)) * 100;
+                    (networkClient as any).send('player-hit', {
+                        targetId: rp.id,
+                        damage,
+                        attackerId: n.ownerId || networkClient.ownId,
+                        impact: { x: rp.x, y: rp.y },
+                        sourceDir: { x: rp.x - n.x, y: rp.y - n.y }
+                    });
+                } else if (n.type === 'flashbang') {
+                    if (isObstructed) continue;
+                    // Flash effect is applied locally on the remote player's client via player-action
+                    sendPlayerAction('flashbang', { targetId: rp.id, x: n.x, y: n.y });
+                }
+            }
+        }
     };
 
     const createExplosion = (x: number, y: number, radius: number, maxDamage: number, dynamicSegments: Segment[]) => {
@@ -2439,6 +2491,8 @@ const startHealing = () => {
             const selfDetonation: Throwable = {
                 id: nextThrowableId++, type: cookState.type,
                 x: player.x, y: player.y, vx: 0, vy: 0, timer: 0, radius: 0,
+                hasBounced: false,
+                ownerId: isMultiplayer ? networkClient?.ownId : undefined,
             };
             // Detonate once and consume one throwable. Guard against double-detonation by clearing cook state first.
             cookingThrowableRef.current = null;
@@ -3280,6 +3334,29 @@ doorsRef.current.forEach(door => {
                         }
         }
 
+        // Knife slash against remote players in multiplayer
+        if (isMultiplayer && networkClient) {
+            for (const rp of remotePlayersRef.current) {
+                if (rp.health <= 0) continue;
+                const dx = rp.x - player.x, dy = rp.y - player.y; const dist=Math.hypot(dx,dy);
+                if (dist < slash.inner || dist > slash.range) continue;
+
+                const ang = Math.atan2(dy,dx);
+                if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
+
+                const dClear = raycast(player.x, player.y, ang, dist);
+                if (dClear < dist - 1e-3) continue;
+
+                (networkClient as any).send('player-hit', {
+                    targetId: rp.id,
+                    damage: 100, // Knife slash is instant kill
+                    attackerId: networkClient.ownId,
+                    impact: { x: rp.x, y: rp.y },
+                    sourceDir: { x: Math.cos(slash.curA), y: Math.sin(slash.curA) }
+                });
+            }
+        }
+
         if (castDist < slash.range - 0.5){
             const ix = player.x + Math.cos(slash.curA)*castDist; const iy = player.y + Math.sin(slash.curA)*castDist;
             soundWavesRef.current.push({ x: ix, y: iy, radius: 0, maxRadius: 150 * scale / cameraScale, lifetime: 0.25, maxLifetime: 0.25, type: 'impact' });
@@ -3358,23 +3435,38 @@ doorsRef.current.forEach(door => {
           });
       }
 
-       for (const patch of firePatchesRef.current) {
-        // Check player
-        if (!isEnded && Math.hypot(player.x - patch.x, player.y - patch.y) < player.radius + patch.radius) {
-            player.burnTimer = 1.0; // Refresh burn timer while in fire
-            player.burnDamage = patch.damagePerSecond;
-        }
-        // Check enemies
-        for (const enemy of enemiesRef.current) {
-            if (enemy.health > 0 && Math.hypot(enemy.x - patch.x, enemy.y - patch.y) < enemy.radius + patch.radius) {
-                enemy.burnTimer = 1.0;
-                enemy.burnDamage = patch.damagePerSecond;
-                if (!enemy.isAlert) {
-                     enemy.isAlert = true; // Make them react to being on fire
+        for (const patch of firePatchesRef.current) {
+            // Check player
+            if (!isEnded && Math.hypot(player.x - patch.x, player.y - patch.y) < player.radius + patch.radius) {
+                player.burnTimer = 1.0; // Refresh burn timer while in fire
+                player.burnDamage = patch.damagePerSecond;
+            }
+            // Check enemies
+            for (const enemy of enemiesRef.current) {
+                if (enemy.health > 0 && Math.hypot(enemy.x - patch.x, enemy.y - patch.y) < enemy.radius + patch.radius) {
+                    enemy.burnTimer = 1.0;
+                    enemy.burnDamage = patch.damagePerSecond;
+                    if (!enemy.isAlert) {
+                         enemy.isAlert = true; // Make them react to being on fire
+                    }
+                }
+            }
+            // Check remote players in multiplayer
+            if (isMultiplayer && networkClient) {
+                for (const rp of remotePlayersRef.current) {
+                    if (rp.health <= 0) continue;
+                    if (Math.hypot(rp.x - patch.x, rp.y - patch.y) < (rp.radius || 10) + patch.radius) {
+                        (networkClient as any).send('player-hit', {
+                            targetId: rp.id,
+                            damage: patch.damagePerSecond * 0.5, // tick damage scaled for server
+                            attackerId: networkClient.ownId,
+                            impact: { x: rp.x, y: rp.y },
+                            sourceDir: { x: 0, y: 0 }
+                        });
+                    }
                 }
             }
         }
-      }
 
       const activeEnemies: Enemy[] = [];
         for (const enemy of enemiesRef.current) {
@@ -5663,17 +5755,32 @@ doorsRef.current.forEach(door => {
                 if (p) {
                     p.health = 100;
                 }
+            } else if (action === 'flashbang') {
+                const ownId = networkClient?.ownId;
+                if (actionPayload?.targetId === ownId) {
+                    // Apply flashbang effect to local player
+                    const maxFlashDuration = 2.5;
+                    const minFlashDuration = 0.5;
+                    // Directional reduction: if facing away, shorter flash
+                    const dx = actionPayload.x - playerRef.current.x;
+                    const dy = actionPayload.y - playerRef.current.y;
+                    const angleToFlash = Math.atan2(dy, dx);
+                    const angleDiff = Math.abs(normalizeAngle(angleToFlash - playerDirectionRef.current));
+                    const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
+                    const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
+                    playerRef.current.flashTimer = Math.max(playerRef.current.flashTimer, flashDuration);
+                }
             } else if (action === 'player-killed') {
                 const { victimId, attackerId } = actionPayload;
                 // Generic kill feed only; rewards are now handled by authoritative score-update
                 const ownId = networkClient?.ownId;
                 if (attackerId === ownId) return;
-                const attackerName = attackerId ? String(attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-                const victimName = victimId ? String(victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
+                const attackerName = payload.attackerName || remotePlayersRef.current.find(p => p.id === attackerId)?.name || attackerId || 'UNKNOWN';
+                const victimName = payload.victimName || remotePlayersRef.current.find(p => p.id === victimId)?.name || victimId || 'UNKNOWN';
                 setPurchaseMessage(`${attackerName} ELIMINATED ${victimName}`);
                 setTimeout(() => setPurchaseMessage(null), 3000);
             }
-        } catch(e) {}
+        } catch (e) {}
     };
 
     networkClient.on('connect', handleConnect);
@@ -5683,17 +5790,21 @@ doorsRef.current.forEach(door => {
     networkClient.on('fire-weapon', handleFireWeapon);
     networkClient.on('player-action' as any, handlePlayerAction as any);
 
-    const handleScoreUpdate = (payload: { players: Array<{ id: string; kills: number; deaths: number }>; totalKills: number; mode: 'tdm' | 'ffa' | '1v1' }) => {
+    const handleScoreUpdate = (payload: { players: Array<{ id: string; name?: string; team?: 'red' | 'blue'; kills: number; deaths: number }>; totalKills: number; mode: 'tdm' | 'ffa' | '1v1'; teamScores?: { red: number; blue: number } }) => {
         try {
             const ownId = networkClient?.ownId;
             const previous = roomScoresRef.current;
-            const next: Record<string, { kills: number; deaths: number }> = {};
+            const next: Record<string, { kills: number; deaths: number; name?: string; team?: 'red' | 'blue' }> = {};
             payload.players.forEach(p => {
-                next[p.id] = { kills: p.kills, deaths: p.deaths };
+                next[p.id] = { kills: p.kills, deaths: p.deaths, name: p.name, team: p.team };
             });
             roomScoresRef.current = next;
             setRoomScores(next);
             setTotalRoomKills(payload.totalKills);
+            if (payload.teamScores) {
+                teamScoresRef.current = payload.teamScores;
+                setTeamScores(payload.teamScores);
+            }
 
             // Detect if our own kill count increased and reward the player
             if (ownId) {
@@ -5723,12 +5834,12 @@ doorsRef.current.forEach(door => {
         } catch (e) {}
     };
 
-    const handleKillFeed = (payload: { victimId: string; attackerId: string; timestamp: number }) => {
+    const handleKillFeed = (payload: { victimId: string; victimName?: string; attackerId: string; attackerName?: string; timestamp: number }) => {
         try {
             const ownId = networkClient?.ownId;
             if (payload.attackerId === ownId) return; // already handled by score-update reward
-            const attackerName = payload.attackerId ? String(payload.attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-            const victimName = payload.victimId ? String(payload.victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
+            const attackerName = payload.attackerName || remotePlayersRef.current.find(p => p.id === payload.attackerId)?.name || payload.attackerId || 'UNKNOWN';
+            const victimName = payload.victimName || remotePlayersRef.current.find(p => p.id === payload.victimId)?.name || payload.victimId || 'UNKNOWN';
             setPurchaseMessage(`${attackerName} ELIMINATED ${victimName}`);
             setTimeout(() => setPurchaseMessage(null), 3000);
         } catch (e) {}
@@ -5741,9 +5852,39 @@ doorsRef.current.forEach(door => {
         } catch (e) {}
     };
 
+    const handleMatchTimer = (payload: { remainingMs: number; totalMs: number }) => {
+        try {
+            setMatchRemainingMs(payload.remainingMs);
+        } catch (e) {}
+    };
+
+    const handleMatchEnded = (payload: { mode: 'tdm' | 'ffa' | '1v1'; winner: 'red' | 'blue' | 'draw' | null; teamScores?: { red: number; blue: number }; players: Array<{ id: string; name: string; team?: string; kills: number; deaths: number }> }) => {
+        try {
+            setMatchRemainingMs(0);
+            setMatchEnded(payload);
+        } catch (e) {}
+    };
+
     networkClient.on('score-update' as any, handleScoreUpdate as any);
     networkClient.on('kill-feed' as any, handleKillFeed as any);
     networkClient.on('leaderboard-update' as any, handleLeaderboardUpdate as any);
+    networkClient.on('match-timer' as any, handleMatchTimer as any);
+    networkClient.on('match-ended' as any, handleMatchEnded as any);
+
+    const handleTeamSelectionFailed = (payload: { team: 'red' | 'blue'; reason?: string }) => {
+        try {
+            setTeamSelectError(payload.reason || 'Team full');
+        } catch (e) {}
+    };
+
+    const handleSelectTeamResponse = (payload: { team: 'red' | 'blue' }) => {
+        try {
+            setTeamSelectError(null);
+        } catch (e) {}
+    };
+
+    networkClient.on('team-selection-failed' as any, handleTeamSelectionFailed as any);
+    networkClient.on('select-team' as any, handleSelectTeamResponse as any);
 
     const handlePlayerHit = (payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } }) => {
         try {
@@ -5792,6 +5933,10 @@ doorsRef.current.forEach(door => {
         networkClient.off('score-update' as any, handleScoreUpdate as any);
         networkClient.off('kill-feed' as any, handleKillFeed as any);
         networkClient.off('leaderboard-update' as any, handleLeaderboardUpdate as any);
+        networkClient.off('team-selection-failed' as any, handleTeamSelectionFailed as any);
+        networkClient.off('select-team' as any, handleSelectTeamResponse as any);
+        networkClient.off('match-timer' as any, handleMatchTimer as any);
+        networkClient.off('match-ended' as any, handleMatchEnded as any);
         clearInterval(intervalId);
     };
   }, [networkClient, isMultiplayer, agentSkinColor]);
@@ -6348,7 +6493,61 @@ doorsRef.current.forEach(door => {
                         TOTAL KILLS: <span className="font-bold text-teal-300">{totalRoomKills}</span>
                     </div>
                 )}
+                {typeof matchRemainingMs === 'number' && matchRemainingMs >= 0 && (
+                    <div className="text-xs mt-0.5 text-amber-300 font-bold">
+                        {language === 'zh' ? '剩余时间' : 'TIME'}: {formatMatchTime(matchRemainingMs)}
+                    </div>
+                )}
                 <div className="text-[10px] text-gray-500 mt-1">{language === 'zh' ? '按住 TAB 查看计分板' : 'HOLD TAB FOR SCOREBOARD'}</div>
+            </div>
+        )}
+
+        {/* Match ended overlay */}
+        {isMultiplayer && matchEnded && (
+            <div className="absolute inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
+                <div className="bg-gray-950 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/20 text-white text-center">
+                    <h2 className="text-3xl font-bold tracking-widest text-teal-300 mb-2">{language === 'zh' ? '对局结束' : 'MATCH ENDED'}</h2>
+                    {matchEnded.mode === 'tdm' && matchEnded.teamScores && (
+                        <div className="flex items-center justify-center gap-4 mb-4">
+                            <span className="text-red-400 font-bold text-xl">RED {matchEnded.teamScores.red}</span>
+                            <span className="text-gray-500 font-bold text-sm">VS</span>
+                            <span className="text-blue-400 font-bold text-xl">BLUE {matchEnded.teamScores.blue}</span>
+                        </div>
+                    )}
+                    {matchEnded.winner === 'draw' ? (
+                        <div className="text-2xl font-bold text-gray-300 mb-6">{language === 'zh' ? '平局' : 'DRAW'}</div>
+                    ) : (
+                        (() => {
+                            const isWinner = matchEnded.mode === 'tdm'
+                                ? matchEnded.winner === playerTeamRef.current
+                                : (matchEnded.players[0]?.id === networkClient?.ownId);
+                            return (
+                                <div className={`text-2xl font-bold mb-6 ${isWinner ? 'text-green-400' : 'text-red-400'}`}>
+                                    {isWinner ? (language === 'zh' ? '胜利' : 'VICTORY') : (language === 'zh' ? '失败' : 'DEFEAT')}
+                                </div>
+                            );
+                        })()
+                    )}
+                    <div className="space-y-2 mb-6">
+                        {matchEnded.players
+                            .sort((a, b) => b.kills - a.kills)
+                            .slice(0, 8)
+                            .map((p, idx) => (
+                                <div key={p.id} className="grid grid-cols-12 gap-2 items-center px-3 py-2 rounded border border-gray-800 bg-gray-900/30">
+                                    <div className="col-span-1 text-center font-bold text-gray-400">{idx + 1}</div>
+                                    <div className="col-span-5 font-mono text-sm truncate text-left">{p.name}</div>
+                                    <div className="col-span-3 text-center font-bold">{p.kills} / {p.deaths}</div>
+                                    <div className="col-span-3 text-center font-bold text-teal-300">{p.deaths === 0 ? p.kills : (p.kills / p.deaths).toFixed(2)}</div>
+                                </div>
+                            ))}
+                    </div>
+                    <button
+                        onClick={onMissionEnd}
+                        className="w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+                    >
+                        {language === 'zh' ? '返回大厅' : 'RETURN TO LOBBY'}
+                    </button>
+                </div>
             </div>
         )}
 
@@ -6385,6 +6584,13 @@ doorsRef.current.forEach(door => {
                     <div className="flex-grow overflow-y-auto">
                         {scoreboardTab === 'room' ? (
                             <div className="space-y-2">
+                                {gameRoom.mode === 'tdm' && (
+                                    <div className="mb-3 p-3 rounded border border-gray-800 bg-gray-900/50 flex items-center justify-center gap-4">
+                                        <span className="text-red-400 font-bold text-lg">RED {teamScores.red}</span>
+                                        <span className="text-gray-500 font-bold text-sm">VS</span>
+                                        <span className="text-blue-400 font-bold text-lg">BLUE {teamScores.blue}</span>
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold px-2">
                                     <div className="col-span-5">Player</div>
                                     <div className="col-span-2 text-center">Kills</div>
@@ -6395,15 +6601,16 @@ doorsRef.current.forEach(door => {
                                     .sort(([, a], [, b]) => (b as { kills: number }).kills - (a as { kills: number }).kills)
                                     .map(([id, stats]) => {
                                         const isMe = id === networkClient?.ownId;
-                                        const s = stats as { kills: number; deaths: number };
+                                        const s = stats as { kills: number; deaths: number; name?: string; team?: 'red' | 'blue' };
                                         const kd = s.deaths === 0 ? s.kills : (s.kills / s.deaths).toFixed(2);
+                                        const displayName = s.name || id;
                                         return (
                                             <div key={id} className={`grid grid-cols-12 gap-2 items-center px-3 py-2 rounded border ${
                                                 isMe ? 'bg-teal-950/40 border-teal-500/40' : 'bg-gray-900/30 border-gray-800'
                                             }`}>
                                                 <div className="col-span-5 font-mono text-sm truncate">
                                                     {isMe && <span className="text-teal-400 mr-1">●</span>}
-                                                    {id.substring(0, 8).toUpperCase()}
+                                                    {displayName}
                                                 </div>
                                                 <div className="col-span-2 text-center font-bold">{s.kills}</div>
                                                 <div className="col-span-2 text-center font-bold">{s.deaths}</div>
@@ -6464,6 +6671,58 @@ doorsRef.current.forEach(door => {
                             </div>
                         )}
                     </div>
+                </div>
+            </div>
+        )}
+
+        {isMultiplayer && gameRoom?.mode === 'tdm' && showTeamSelect && (
+            <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+                <div className="bg-gray-950 border-2 border-teal-500 rounded-lg p-6 w-full max-w-md shadow-lg shadow-teal-500/20 text-white">
+                    <h2 className="text-2xl font-bold tracking-widest text-teal-300 mb-2 text-center">SELECT TEAM</h2>
+                    <p className="text-center text-gray-400 text-sm mb-6">{language === 'zh' ? '选择你的队伍' : 'Choose your side'}</p>
+                    {(() => {
+                        const players = gameRoom?.players || {};
+                        const redCount = Object.values(players).filter((p: any) => p.team === 'red').length;
+                        const blueCount = Object.values(players).filter((p: any) => p.team === 'blue').length;
+                        const maxPerTeam = Math.max(1, Math.floor((gameRoom?.maxPlayers || 8) / 2));
+                        const redFull = redCount >= maxPerTeam;
+                        const blueFull = blueCount >= maxPerTeam;
+                        const selectTeam = (team: 'red' | 'blue') => {
+                            setTeamSelectError(null);
+                            if (networkClient) {
+                                (networkClient as any).send('select-team', { team });
+                            }
+                        };
+                        return (
+                            <div className="flex flex-col gap-4">
+                                <button
+                                    onClick={() => selectTeam('red')}
+                                    disabled={redFull}
+                                    className={`w-full py-4 rounded-md font-bold text-lg tracking-widest border-2 transition-colors duration-200 ${
+                                        redFull
+                                            ? 'bg-gray-800 text-gray-500 border-gray-700 cursor-not-allowed'
+                                            : 'bg-red-600 text-white border-red-500 hover:bg-red-500'
+                                    }`}
+                                >
+                                    RED TEAM
+                                </button>
+                                <button
+                                    onClick={() => selectTeam('blue')}
+                                    disabled={blueFull}
+                                    className={`w-full py-4 rounded-md font-bold text-lg tracking-widest border-2 transition-colors duration-200 ${
+                                        blueFull
+                                            ? 'bg-gray-800 text-gray-500 border-gray-700 cursor-not-allowed'
+                                            : 'bg-blue-600 text-white border-blue-500 hover:bg-blue-500'
+                                    }`}
+                                >
+                                    BLUE TEAM
+                                </button>
+                            </div>
+                        );
+                    })()}
+                    {teamSelectError && (
+                        <div className="mt-4 text-center text-red-400 text-sm font-bold">{teamSelectError}</div>
+                    )}
                 </div>
             </div>
         )}

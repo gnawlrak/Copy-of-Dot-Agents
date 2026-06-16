@@ -130,7 +130,8 @@ const BASTION_7: LevelDefinition = {
     // --- Sector C: Western Vault & Server Room ---
     { x: 0.05, y: 0.45, width: 0.25, height: 0.015 }, // Main horizontal separator
     { x: 0.20, y: 0.05, width: 0.015, height: 0.32 }, // Server room partition vertical 
-    { x: 0.05, y: 0.22, width: 0.15, height: 0.015 }, // Server room container A
+    { x: 0.05, y: 0.22, width: 0.05, height: 0.015 }, // Server room container A - left part (split for door)
+    { x: 0.15, y: 0.22, width: 0.05, height: 0.015 }, // Server room container A - right part (split for door)
     { x: 0.10, y: 0.33, width: 0.10, height: 0.02 }, // Server room rack B
 
     // --- Sector D: Eastern Armory & Storage ---
@@ -163,7 +164,7 @@ const BASTION_7: LevelDefinition = {
     { id: 205, hinge: { x: 0.20, y: 0.37 }, length: 0.08, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1, locked: true }, // LOCKED vault door
 
     // Sector D Doors
-    { id: 206, hinge: { x: 0.70, y: 0.45 }, length: 0.08, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 }, // Entrance to Armory bay
+    { id: 206, hinge: { x: 0.70, y: 0.45 }, length: 0.08, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, // Entrance to Armory bay (opening direction reversed)
     { id: 207, hinge: { x: 0.7875, y: 0.735 }, length: 0.105, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1, isBreachable: true }, // Back door of armory (Can be breached!)
 
     // Sector E Security Air-lock Double Doors
@@ -173,6 +174,9 @@ const BASTION_7: LevelDefinition = {
     // Side Access Security Doors
     { id: 210, hinge: { x: 0.3875, y: 0.55 }, length: 0.07, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, 
     { id: 211, hinge: { x: 0.6125, y: 0.55 }, length: 0.07, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, 
+
+    // New door in wall 19 (Server room container A)
+    { id: 212, hinge: { x: 0.10, y: 0.22 }, length: 0.05, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 }, // Door in split server room container wall
   ],
   enemies: [
     // Southern Checkpoint Patrols

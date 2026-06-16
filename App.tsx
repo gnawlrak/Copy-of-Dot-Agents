@@ -256,12 +256,12 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => {
+  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number, matchDuration?: number) => {
     if (networkClientRef.current) {
-      if (currentUser) {
-          networkClientRef.current.ownName = currentUser;
-      }
-      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name, maxPlayers);
+      const accountId = currentUser?.trim() || 'guest';
+      networkClientRef.current.ownId = accountId;
+      networkClientRef.current.ownName = accountId;
+      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name, maxPlayers, matchDuration);
     }
     setSelectedLevel(level);
     setIsMultiplayer(true);
