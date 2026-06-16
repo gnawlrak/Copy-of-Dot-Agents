@@ -121,14 +121,175 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
 
     const attachmentSlots = weaponDef.attachmentSlots ? Object.keys(weaponDef.attachmentSlots) : [];
 
-    // Define positions for slot nodes around the weapon visual
-    const slotPositions = [
-        { top: '25%', left: '20%' },
-        { top: '45%', left: '10%' },
-        { top: '65%', left: '20%' },
-        { top: '25%', right: '20%' },
-        { top: '45%', right: '10%' },
-    ];
+    // Weapon visual profiles: vary length and slot positions by gun type
+    interface WeaponProfile {
+        visualWidth: string;
+        slotPositions: { top: string; left?: string; right?: string }[];
+    }
+
+    const WEAPON_PROFILES: Record<string, WeaponProfile> = {
+        // Long rifles
+        'MK18 CQBR': {
+            visualWidth: '90%',
+            slotPositions: [
+                { top: '22%', left: '18%' },
+                { top: '42%', left: '8%' },
+                { top: '62%', left: '18%' },
+                { top: '22%', right: '18%' },
+                { top: '42%', right: '8%' },
+            ]
+        },
+        'HK416C': {
+            visualWidth: '88%',
+            slotPositions: [
+                { top: '22%', left: '18%' },
+                { top: '42%', left: '8%' },
+                { top: '62%', left: '18%' },
+                { top: '22%', right: '18%' },
+                { top: '42%', right: '8%' },
+            ]
+        },
+        'Assault Rifle': {
+            visualWidth: '90%',
+            slotPositions: [
+                { top: '22%', left: '18%' },
+                { top: '42%', left: '8%' },
+                { top: '62%', left: '18%' },
+                { top: '22%', right: '18%' },
+                { top: '42%', right: '8%' },
+            ]
+        },
+        // SMGs / compact
+        'SIG MPX': {
+            visualWidth: '72%',
+            slotPositions: [
+                { top: '24%', left: '16%' },
+                { top: '44%', left: '6%' },
+                { top: '64%', left: '16%' },
+                { top: '24%', right: '16%' },
+                { top: '44%', right: '6%' },
+            ]
+        },
+        'H&K MP7A1': {
+            visualWidth: '70%',
+            slotPositions: [
+                { top: '24%', left: '16%' },
+                { top: '44%', left: '6%' },
+                { top: '64%', left: '16%' },
+                { top: '24%', right: '16%' },
+                { top: '44%', right: '6%' },
+            ]
+        },
+        'MP5SD': {
+            visualWidth: '74%',
+            slotPositions: [
+                { top: '24%', left: '16%' },
+                { top: '44%', left: '6%' },
+                { top: '64%', left: '16%' },
+                { top: '24%', right: '16%' },
+                { top: '44%', right: '6%' },
+            ]
+        },
+        'P90': {
+            visualWidth: '68%',
+            slotPositions: [
+                { top: '24%', left: '15%' },
+                { top: '44%', left: '5%' },
+                { top: '64%', left: '15%' },
+                { top: '24%', right: '15%' },
+                { top: '44%', right: '5%' },
+            ]
+        },
+        'SMG': {
+            visualWidth: '70%',
+            slotPositions: [
+                { top: '24%', left: '16%' },
+                { top: '44%', left: '6%' },
+                { top: '64%', left: '16%' },
+                { top: '24%', right: '16%' },
+                { top: '44%', right: '6%' },
+            ]
+        },
+        // Shotguns
+        'Benelli M4': {
+            visualWidth: '80%',
+            slotPositions: [
+                { top: '24%', left: '17%' },
+                { top: '44%', left: '7%' },
+                { top: '64%', left: '17%' },
+                { top: '24%', right: '17%' },
+                { top: '44%', right: '7%' },
+            ]
+        },
+        'Shotgun': {
+            visualWidth: '78%',
+            slotPositions: [
+                { top: '24%', left: '17%' },
+                { top: '44%', left: '7%' },
+                { top: '64%', left: '17%' },
+                { top: '24%', right: '17%' },
+                { top: '44%', right: '7%' },
+            ]
+        },
+        // Pistols
+        'Glock 19': {
+            visualWidth: '45%',
+            slotPositions: [
+                { top: '26%', left: '12%' },
+                { top: '46%', left: '2%' },
+                { top: '66%', left: '12%' },
+                { top: '26%', right: '12%' },
+                { top: '46%', right: '2%' },
+            ]
+        },
+        'Glock 18C': {
+            visualWidth: '45%',
+            slotPositions: [
+                { top: '26%', left: '12%' },
+                { top: '46%', left: '2%' },
+                { top: '66%', left: '12%' },
+                { top: '26%', right: '12%' },
+                { top: '46%', right: '2%' },
+            ]
+        },
+        'Pistol': {
+            visualWidth: '42%',
+            slotPositions: [
+                { top: '26%', left: '10%' },
+                { top: '46%', left: '0%' },
+                { top: '66%', left: '10%' },
+                { top: '26%', right: '10%' },
+                { top: '46%', right: '0%' },
+            ]
+        },
+        'Heavy Pistol': {
+            visualWidth: '48%',
+            slotPositions: [
+                { top: '26%', left: '12%' },
+                { top: '46%', left: '2%' },
+                { top: '66%', left: '12%' },
+                { top: '26%', right: '12%' },
+                { top: '46%', right: '2%' },
+            ]
+        },
+    };
+
+    const profile = WEAPON_PROFILES[weaponName] || {
+        visualWidth: '70%',
+        slotPositions: [
+            { top: '25%', left: '15%' },
+            { top: '45%', left: '5%' },
+            { top: '65%', left: '15%' },
+            { top: '25%', right: '15%' },
+            { top: '45%', right: '5%' },
+        ]
+    };
+
+    // Safe fallback if weapon has fewer slots than positions
+    const slotPositions = profile.slotPositions.slice(0, attachmentSlots.length);
+    while (slotPositions.length < attachmentSlots.length) {
+        slotPositions.push({ top: '50%', left: '5%' });
+    }
 
     return (
         <div className="w-full max-w-7xl mx-auto p-4 h-full flex flex-col font-mono overflow-hidden">
@@ -157,10 +318,10 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                 <div className="md:col-span-2 bg-gray-900 border-2 border-gray-800 rounded-md flex min-h-0 relative overflow-hidden p-6 animate-fade-in" style={{animationDelay: '100ms'}}>
                      <div className="w-full h-full relative flex items-center justify-center flex-shrink-0 transition-all duration-300 ease-in-out" style={{ width: selectedSlot ? '50%' : '100%' }}>
                         {/* Abstract Weapon Visual */}
-                        <div className="absolute w-2/3 h-16 bg-gray-800 rounded-lg top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center p-4">
-                           <div className="w-24 h-full bg-gray-700 rounded-md"></div>
-                           <div className="flex-grow h-1/2 bg-gray-700 mx-4 rounded-sm"></div>
-                           <div className="w-8 h-full bg-gray-700 rounded-lg"></div>
+                        <div className="absolute h-16 bg-gray-800 rounded-lg top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center p-4 transition-all duration-300" style={{ width: profile.visualWidth }}>
+                           <div className="w-24 h-full bg-gray-700 rounded-md flex-shrink-0"></div>
+                           <div className="flex-grow h-1/2 bg-gray-700 mx-4 rounded-sm min-w-[40px]"></div>
+                           <div className="w-8 h-full bg-gray-700 rounded-lg flex-shrink-0"></div>
                         </div>
 
                         {/* Slot Nodes */}

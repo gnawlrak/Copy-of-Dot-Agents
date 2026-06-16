@@ -3,13 +3,13 @@ import { io, Socket } from 'socket.io-client';
 // Represents the state of a player to be sent over the network
 export interface PlayerState {
     id: string;
-    name?: string;
+    name: string;
     x: number;
     y: number;
     direction: number;
     health: number;
     skinColor: string;
-    team?: string;
+    team?: 'red' | 'blue';
     isReady?: boolean;
     kills?: number;
     deaths?: number;
@@ -54,9 +54,13 @@ export type NetworkEvent =
     | { type: 'buy-weapon'; payload: { playerId: string; weaponName: string; cost: number; attachments?: any } }
     | { type: 'player-hit'; payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } } }
     | { type: 'player-killed'; payload: { victimId: string; attackerId: string } }
-    | { type: 'score-update'; payload: { players: Array<{ id: string; kills: number; deaths: number }>; totalKills: number; mode: 'tdm' | 'ffa' | '1v1' } }
-    | { type: 'kill-feed'; payload: { victimId: string; attackerId: string; timestamp: number } }
+    | { type: 'score-update'; payload: { players: Array<{ id: string; name: string; kills: number; deaths: number; team?: string }>; teamScores?: { red: number; blue: number }; totalKills: number; mode: 'tdm' | 'ffa' | '1v1' } }
+    | { type: 'kill-feed'; payload: { victimId: string; victimName?: string; attackerId: string; attackerName?: string; timestamp: number } }
     | { type: 'leaderboard-update'; payload: { killLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>; kdLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }> } }
+    | { type: 'select-team'; payload: { team: 'red' | 'blue' } }
+    | { type: 'team-selection-failed'; payload: { team: 'red' | 'blue'; reason: string } }
+    | { type: 'match-timer'; payload: { remainingMs: number; totalMs: number } }
+    | { type: 'match-ended'; payload: { mode: 'tdm' | 'ffa' | '1v1'; winner: 'red' | 'blue' | 'draw' | null; teamScores?: { red: number; blue: number }; players: Array<{ id: string; name: string; team?: string; kills: number; deaths: number }> } }
     | { type: 'room-updated'; payload: any }
     | { type: 'player-action'; payload: { action: string; payload: any; playerId: string; timestamp: number } };
 
@@ -70,7 +74,7 @@ export class MockNetworkClient {
     private handlers: Map<string, EventHandler[]> = new Map();
     public connected = false;
     public ownId = `player_${Math.random().toString(36).substring(7)}`;
-    public ownName: string = 'Anonymous';
+    public ownName: string = this.ownId;
 
     // Room parameters configuration
     public roomId: string = 'default-room';
@@ -78,13 +82,15 @@ export class MockNetworkClient {
     public mode: 'tdm' | 'ffa' | '1v1' = 'tdm';
     public levelName: string = 'THE FACTORY';
     public maxPlayers: number = 8;
+    public matchDuration: number = 10; // minutes
 
-    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string, maxPlayers?: number) {
+    setRoomInfo(roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', levelName: string, maxPlayers?: number, matchDuration?: number) {
         this.roomId = roomId;
         this.roomName = roomName;
         this.mode = mode;
         this.levelName = levelName;
         this.maxPlayers = maxPlayers ?? this.getDefaultMaxPlayers(mode);
+        this.matchDuration = matchDuration ?? 10;
     }
 
     private getDefaultMaxPlayers(mode: 'tdm' | 'ffa' | '1v1') {
@@ -120,8 +126,9 @@ export class MockNetworkClient {
                 mode: this.mode,
                 levelName: this.levelName,
                 maxPlayers: this.maxPlayers,
+                matchDuration: this.matchDuration,
                 id: this.ownId,
-                name: this.ownName,
+                name: this.ownName || this.ownId,
                 x: playerStartState?.x || 400,
                 y: playerStartState?.y || 400,
                 skinColor: playerStartState?.skinColor || '#60a5fa',
@@ -153,7 +160,10 @@ export class MockNetworkClient {
             'leaderboard-update',
             'room-updated',
             'player-action',
-            'room-full'
+            'room-full',
+            'team-selection-failed',
+            'match-timer',
+            'match-ended'
         ];
 
         serverEvents.forEach(evt => {
@@ -161,6 +171,10 @@ export class MockNetworkClient {
                 this.emit(evt, payload);
             });
         });
+    }
+
+    selectTeam(team: 'red' | 'blue') {
+        this.send('select-team', { team });
     }
 
     disconnect() {

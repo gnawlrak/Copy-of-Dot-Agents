@@ -21,6 +21,7 @@ async function startServer() {
   interface ServerPlayer {
     id: string;
     name?: string;
+    team?: 'red' | 'blue';
     skinColor?: string;
     x: number;
     y: number;
@@ -43,8 +44,13 @@ async function startServer() {
     mode: 'tdm' | 'ffa' | '1v1';
     levelName: string;
     maxPlayers: number;
+    matchDuration: number; // minutes
     players: Map<string, ServerPlayer>;
     weaponDrops: Map<string, any>;
+    startTime?: number;
+    endTime?: number;
+    status: 'waiting' | 'playing' | 'ended';
+    timerInterval?: NodeJS.Timeout;
   }
 
   interface PersistentPlayerStats {
@@ -95,53 +101,149 @@ async function startServer() {
     }
   };
 
-  const getOrCreatePlayerStats = (playerId: string): PersistentPlayerStats => {
-    if (!persistentStats.players[playerId]) {
-      persistentStats.players[playerId] = { kills: 0, deaths: 0, lastSeen: new Date().toISOString() };
-    }
-    return persistentStats.players[playerId];
+  const getStatsKey = (player: { id: string; name?: string }) => {
+    const account = (player.name || player.id || '').trim();
+    if (account && account !== 'unknown' && account !== 'explosion' && account !== 'guest') return account;
+    return player.id;
   };
 
-  const recordKill = (attackerId?: string) => {
-    if (!attackerId || attackerId === 'unknown' || attackerId === 'explosion') return;
-    const stats = getOrCreatePlayerStats(attackerId);
+  const getOrCreatePlayerStats = (key: string): PersistentPlayerStats => {
+    if (!persistentStats.players[key]) {
+      persistentStats.players[key] = { kills: 0, deaths: 0, lastSeen: new Date().toISOString() };
+    }
+    return persistentStats.players[key];
+  };
+
+  const recordKill = (attacker?: { id: string; name?: string }) => {
+    if (!attacker) return;
+    const key = getStatsKey(attacker);
+    if (key === 'unknown' || key === 'explosion' || key === 'guest') return;
+    const stats = getOrCreatePlayerStats(key);
     stats.kills += 1;
+    stats.name = key;
     stats.lastSeen = new Date().toISOString();
   };
 
-  const recordDeath = (victimId?: string) => {
-    if (!victimId || victimId === 'unknown') return;
-    const stats = getOrCreatePlayerStats(victimId);
+  const recordDeath = (victim?: { id: string; name?: string }) => {
+    if (!victim) return;
+    const key = getStatsKey(victim);
+    if (key === 'unknown' || key === 'guest') return;
+    const stats = getOrCreatePlayerStats(key);
     stats.deaths += 1;
+    stats.name = key;
     stats.lastSeen = new Date().toISOString();
   };
 
   const computeLeaderboards = () => {
-    const players = Object.entries(persistentStats.players).map(([id, s]) => ({
-      id,
-      kills: s.kills,
-      deaths: s.deaths,
-      name: s.name || id.substring(0, 8).toUpperCase(),
-      kd: s.deaths === 0 ? s.kills : s.kills / s.deaths
-    }));
+    const players = Object.entries(persistentStats.players)
+      .filter(([key]) => key !== 'unknown' && key !== 'guest' && key !== 'explosion')
+      .map(([key, s]) => ({
+        id: key,
+        kills: s.kills,
+        deaths: s.deaths,
+        name: s.name || key,
+        kd: s.deaths === 0 ? s.kills : s.kills / s.deaths
+      }));
     const killLeaderboard = [...players].sort((a, b) => b.kills - a.kills).slice(0, 20);
     const kdLeaderboard = [...players].sort((a, b) => b.kd - a.kd).slice(0, 20);
     return { killLeaderboard, kdLeaderboard };
   };
 
+  const getTeamCounts = (room: ServerRoom) => {
+    const counts = { red: 0, blue: 0 };
+    room.players.forEach(p => {
+      if (p.team === 'red') counts.red += 1;
+      if (p.team === 'blue') counts.blue += 1;
+    });
+    return counts;
+  };
+
+  const getTeamMax = (room: ServerRoom) => Math.max(1, Math.floor(room.maxPlayers / 2));
+
+  const assignTeam = (room: ServerRoom, preferred?: 'red' | 'blue') => {
+    const maxPerTeam = getTeamMax(room);
+    const counts = getTeamCounts(room);
+    if (preferred && counts[preferred] < maxPerTeam) return preferred;
+    return counts.red <= counts.blue ? 'red' : 'blue';
+  };
+
+  const getTeamScores = (room: ServerRoom) => {
+    const scores = { red: 0, blue: 0 };
+    room.players.forEach(p => {
+      if (p.team === 'red') scores.red += p.kills;
+      if (p.team === 'blue') scores.blue += p.kills;
+    });
+    return scores;
+  };
+
   const buildScoreUpdate = (room: ServerRoom) => {
     const players = Array.from(room.players.values()).map(p => ({
       id: p.id,
+      name: p.name,
+      team: p.team,
       kills: p.kills,
       deaths: p.deaths
     }));
     const totalKills = players.reduce((sum, p) => sum + p.kills, 0);
-    return { players, totalKills, mode: room.mode };
+    const teamScores = room.mode === 'tdm' ? getTeamScores(room) : undefined;
+    return { players, totalKills, mode: room.mode, teamScores };
   };
 
   const broadcastScoreUpdate = (room: ServerRoom) => {
     const update = buildScoreUpdate(room);
     io.to(room.id).emit('score-update', update);
+  };
+
+  const startRoomTimer = (room: ServerRoom) => {
+    if (room.timerInterval) clearInterval(room.timerInterval);
+    room.timerInterval = setInterval(() => {
+      if (room.status !== 'playing' || !room.endTime) return;
+      const now = Date.now();
+      const remainingMs = Math.max(0, room.endTime - now);
+      io.to(room.id).emit('match-timer', { remainingMs, totalMs: room.matchDuration * 60 * 1000 });
+      if (remainingMs <= 0) {
+        endMatch(room);
+      }
+    }, 1000);
+  };
+
+  const endMatch = (room: ServerRoom) => {
+    if (room.status === 'ended') return;
+    room.status = 'ended';
+    if (room.timerInterval) {
+      clearInterval(room.timerInterval);
+      room.timerInterval = undefined;
+    }
+
+    let winner: 'red' | 'blue' | 'draw' | null = null;
+    if (room.mode === 'tdm') {
+      const scores = getTeamScores(room);
+      if (scores.red > scores.blue) winner = 'red';
+      else if (scores.blue > scores.red) winner = 'blue';
+      else winner = 'draw';
+    } else if (room.mode === 'ffa' || room.mode === '1v1') {
+      const sorted = Array.from(room.players.values()).sort((a, b) => b.kills - a.kills);
+      if (sorted.length >= 2 && sorted[0].kills === sorted[1].kills) {
+        winner = 'draw';
+      } else if (sorted.length > 0) {
+        winner = sorted[0].team || 'red';
+      } else {
+        winner = 'draw';
+      }
+    }
+
+    io.to(room.id).emit('match-ended', {
+      mode: room.mode,
+      winner,
+      teamScores: room.mode === 'tdm' ? getTeamScores(room) : undefined,
+      players: Array.from(room.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        team: p.team,
+        kills: p.kills,
+        deaths: p.deaths
+      }))
+    });
   };
 
   loadPersistentStats();
@@ -150,7 +252,7 @@ async function startServer() {
     console.log(`[Socket] Client connection: ${socket.id}`);
 
     socket.on('join-game', (payload: any) => {
-      const { roomId, roomName, mode, levelName, id, maxPlayers } = payload;
+      const { roomId, roomName, mode, levelName, id, name, team, maxPlayers, matchDuration } = payload;
       const finalRoomId = roomId || 'default-room';
 
       let room = rooms.get(finalRoomId);
@@ -173,23 +275,40 @@ async function startServer() {
           typeof maxPlayers === 'number' && maxPlayers >= 2 && maxPlayers <= 16
             ? maxPlayers
             : getDefaultMaxPlayers(resolvedMode);
+        const resolvedDuration =
+          typeof matchDuration === 'number' && matchDuration >= 1 && matchDuration <= 30
+            ? matchDuration
+            : 10;
         room = {
           id: finalRoomId,
           name: roomName || `Room ${finalRoomId}`,
           mode: resolvedMode,
           levelName: levelName || 'THE FACTORY',
           maxPlayers: resolvedMax,
+          matchDuration: resolvedDuration,
           players: new Map(),
-          weaponDrops: new Map()
+          weaponDrops: new Map(),
+          status: 'waiting'
         };
         rooms.set(finalRoomId, room);
       }
 
+      // Start the match timer once at least two players have joined
+      if (room.status === 'waiting' && room.players.size >= 1) {
+        room.status = 'playing';
+        room.startTime = Date.now();
+        room.endTime = room.startTime + room.matchDuration * 60 * 1000;
+        startRoomTimer(room);
+      }
+
       // Merge persistent stats into player state
-      const existingStats = getOrCreatePlayerStats(id);
+      const existingStats = getOrCreatePlayerStats(name || id);
+      const assignedTeam = room.mode === 'tdm' ? assignTeam(room, team) : undefined;
       const playerState: ServerPlayer = {
         ...payload,
         id,
+        name,
+        team: assignedTeam,
         kills: 0,
         deaths: 0,
         totalKills: existingStats.kills,
@@ -222,6 +341,8 @@ async function startServer() {
         mode: room.mode,
         levelName: room.levelName,
         maxPlayers: room.maxPlayers,
+        matchDuration: room.matchDuration,
+        status: room.status,
         players: Object.fromEntries(room.players)
       };
       io.to(finalRoomId).emit('room-updated', roomState);
@@ -258,41 +379,78 @@ async function startServer() {
       }
     });
 
-    socket.on('player-killed', (payload: any) => {
-      const roomId = (socket as any).roomId;
-      if (!roomId) return;
-      const room = rooms.get(roomId);
-      if (!room) return;
+      socket.on('player-killed', (payload: any) => {
+        const roomId = (socket as any).roomId;
+        if (!roomId) return;
+        const room = rooms.get(roomId);
+        if (!room) return;
 
-      const { victimId, attackerId } = payload || {};
-      if (!victimId) return;
+        const { victimId, attackerId } = payload || {};
+        if (!victimId) return;
 
-      const victim = room.players.get(victimId);
-      if (!victim) return;
+        const victim = room.players.get(victimId);
+        if (!victim) return;
 
-      victim.deaths += 1;
-      victim.totalDeaths += 1;
-      recordDeath(victimId);
+        victim.deaths += 1;
+        victim.totalDeaths += 1;
+        recordDeath({ id: victimId, name: victim.name });
 
-      if (attackerId && attackerId !== victimId && attackerId !== 'unknown' && attackerId !== 'explosion') {
-        const attacker = room.players.get(attackerId);
-        if (attacker) {
-          attacker.kills += 1;
-          attacker.totalKills += 1;
-          recordKill(attackerId);
+        if (attackerId && attackerId !== victimId && attackerId !== 'unknown' && attackerId !== 'explosion') {
+          const attacker = room.players.get(attackerId);
+          if (attacker) {
+            attacker.kills += 1;
+            attacker.totalKills += 1;
+            recordKill({ id: attackerId, name: attacker.name });
+          }
         }
-      }
 
-      savePersistentStats();
-      broadcastScoreUpdate(room);
+        savePersistentStats();
+        broadcastScoreUpdate(room);
 
-      // Broadcast kill feed event
-      io.to(roomId).emit('kill-feed', {
-        victimId,
-        attackerId: attackerId || 'unknown',
-        timestamp: Date.now()
+        // Broadcast kill feed event
+        io.to(roomId).emit('kill-feed', {
+          victimId,
+          victimName: victim.name,
+          attackerId: attackerId || 'unknown',
+          attackerName: attackerId && room.players.get(attackerId)?.name,
+          timestamp: Date.now()
+        });
       });
-    });
+
+      socket.on('select-team', (payload: any) => {
+        const roomId = (socket as any).roomId;
+        const playerId = (socket as any).playerId;
+        if (!roomId || !playerId) return;
+        const room = rooms.get(roomId);
+        if (!room || room.mode !== 'tdm') return;
+
+        const requestedTeam = payload?.team === 'blue' ? 'blue' : 'red';
+        const player = room.players.get(playerId);
+        if (!player) return;
+
+        // Allow if same team or team has space
+        const counts = getTeamCounts(room);
+        const maxPerTeam = getTeamMax(room);
+        if (player.team === requestedTeam) return;
+        if (counts[requestedTeam] >= maxPerTeam) {
+          socket.emit('team-selection-failed', { team: requestedTeam, reason: 'full' });
+          return;
+        }
+
+        player.team = requestedTeam;
+        const roomState = {
+          id: room.id,
+          name: room.name,
+          mode: room.mode,
+          levelName: room.levelName,
+          maxPlayers: room.maxPlayers,
+          matchDuration: room.matchDuration,
+          status: room.status,
+          players: Object.fromEntries(room.players)
+        };
+        io.to(roomId).emit('room-updated', roomState);
+        broadcastScoreUpdate(room);
+      });
 
     socket.on('request-leaderboard', () => {
       const leaderboards = computeLeaderboards();
@@ -348,6 +506,8 @@ async function startServer() {
               mode: room.mode,
               levelName: room.levelName,
               maxPlayers: room.maxPlayers,
+              matchDuration: room.matchDuration,
+              status: room.status,
               players: Object.fromEntries(room.players)
             };
             io.to(roomId).emit('room-updated', roomState);
@@ -365,7 +525,9 @@ async function startServer() {
       mode: r.mode,
       levelName: r.levelName,
       playersCount: r.players.size,
-      maxPlayers: r.maxPlayers
+      maxPlayers: r.maxPlayers,
+      matchDuration: r.matchDuration,
+      status: r.status
     }));
     res.json({ rooms: list });
   });

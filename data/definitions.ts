@@ -4,15 +4,16 @@ import { FireMode } from "./weapons";
 export type ThrowableType = 'grenade' | 'flashbang' | 'smoke' | 'molotov';
 
 export interface Throwable {
-  id: number;
-  type: ThrowableType;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  timer: number; // seconds
-  radius: number;
-  hasBounced?: boolean;
+    id: number;
+    type: ThrowableType;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    timer: number;
+    radius: number;
+    hasBounced: boolean;
+    ownerId?: string;
 }
 
 export interface Weapon {

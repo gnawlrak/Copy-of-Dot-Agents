@@ -4,7 +4,7 @@ import { Globe, Users, Gamepad2, Radio, Play, Plus, Shuffle, ArrowRight } from '
 import { useLanguage } from '../LanguageContext';
 
 interface MultiplayerLobbyProps {
-  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => void;
+  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number, matchDuration?: number) => void;
   missions: LevelDefinition[];
 }
 
@@ -42,6 +42,7 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
     const [selectedLevelIndex, setSelectedLevelIndex] = useState(0);
     const [selectedMode, setSelectedMode] = useState<'tdm' | 'ffa' | '1v1'>('tdm');
     const [maxPlayers, setMaxPlayers] = useState<number>(8);
+    const [matchDuration, setMatchDuration] = useState<number>(10); // minutes
 
     // Fetch live session info
     const fetchLobbyStats = async () => {
@@ -85,7 +86,8 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
         const randomId = `ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
         if (choiceLevel) {
             const resolvedMax = selectedMode === '1v1' ? 2 : Math.max(2, Math.min(16, maxPlayers));
-            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode, resolvedMax);
+            const resolvedDuration = Math.max(1, Math.min(30, matchDuration));
+            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode, resolvedMax, resolvedDuration);
         }
     };
 
@@ -105,8 +107,9 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
             const randomId = `ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
             const randomName = `${language === 'en' ? 'MATCH' : '战术特训'} #${Math.floor(100 + Math.random() * 900)}`;
             const randomMax = randomMode === '1v1' ? 2 : 8;
+            const randomDuration = 10;
             
-            onJoinGame(randomLevel, randomId, randomName, randomMode, randomMax);
+            onJoinGame(randomLevel, randomId, randomName, randomMode, randomMax, randomDuration);
         }
     };
 
@@ -226,6 +229,23 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                 </div>
               </div>
             )}
+
+            {/* Match Duration */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">{language === 'en' ? 'Match Duration' : '对局时长 (分钟)'}</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={30}
+                  step={1}
+                  value={matchDuration}
+                  onChange={(e) => setMatchDuration(parseInt(e.target.value))}
+                  className="flex-1 h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                />
+                <span className="text-sm font-bold text-teal-300 font-mono w-10 text-right">{matchDuration}m</span>
+              </div>
+            </div>
 
             {/* Select Map */}
             <div className="flex flex-col gap-1.5">
