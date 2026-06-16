@@ -12,10 +12,9 @@ interface MainMenuProps {
   syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
   totalScore?: number;
   highScore?: number;
-  currentUser?: string;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer, syncStatus, totalScore, highScore, currentUser }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEditor, onGoToMultiplayer, syncStatus, totalScore, highScore }) => {
   const { language, t } = useLanguage();
   const [displayTotal, setDisplayTotal] = useState<number>(totalScore ?? 0);
   const [displayHigh, setDisplayHigh] = useState<number>(highScore ?? 0);
@@ -26,7 +25,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
     let mounted = true;
     const load = async () => {
       try {
-        const data = await SaveSystem.loadGameData(currentUser || 'default');
+        const data = await SaveSystem.loadGameData();
         if (!mounted) return;
         const persistedTotal = (data && typeof data.totalScore === 'number') ? data.totalScore : 0;
         const persistedHigh = (data && typeof data.highScore === 'number') ? data.highScore : 0;

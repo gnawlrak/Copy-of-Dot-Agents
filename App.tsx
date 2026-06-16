@@ -309,7 +309,7 @@ const App: React.FC = () => {
         };
         // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
         const targetState = isMultiplayer ? previousState : 'main-menu';
-        SaveSystem.saveGameData(currentUser, gameData).then(() => {
+        SaveSystem.saveGameData(gameData).then(() => {
             setSyncStatus('synced');
             setTimeout(() => setSyncStatus('idle'), 1500);
             setGameState(targetState);
@@ -499,7 +499,6 @@ const App: React.FC = () => {
             syncStatus={syncStatus}
             totalScore={totalScore}
             highScore={highScore}
-            currentUser={currentUser}
         />;
     }
   };

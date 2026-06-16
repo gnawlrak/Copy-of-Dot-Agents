@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useLanguage } from '../LanguageContext';
 import { LevelDefinition } from '../levels/level-definitions';
 import { PlayerLoadout, CustomControls } from '../types';
 import { Weapon, ThrowableType, Throwable } from '../data/definitions';
@@ -7,8 +8,6 @@ import ControlCustomizer from './ControlCustomizer';
 import { Difficulty } from '../App';
 import { Operator } from '../data/operators';
 import { MockNetworkClient, RemotePlayer, PlayerState, FireEventPayload } from '../network';
-
-type BrightnessFn = (x: number, y: number, radius: number) => number;
 
 // Define types for geometry
 type Point = { x: number; y: number };
@@ -29,6 +28,10 @@ type Door = {
   isPlayerHolding: boolean;
   lastSoundTime?: number;
   locked?: boolean;
+  isBlownOpen?: boolean;
+  isBreachable?: boolean;
+  isBreachPlanted?: boolean;
+  breachTimer?: number;
 };
 type Bullet = {
   x: number;
@@ -265,7 +268,7 @@ const DIFFICULTY_MULTIPLIERS: { [key in import('../App').Difficulty]: number } =
   simple: 0.75,
   normal: 1.0,
   hard: 1.5,
-  test: 1.0,
+  test: 0.5,
 };
 
 // --- Manual Healing Constants ---
@@ -496,6 +499,7 @@ import 'react/jsx-runtime';
 import { JSX } from 'react';
 
 const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, agentSkinColor, customControls, aimSensitivity, onAimSensitivityChange, onCustomControlsChange, defaultControlsLayout, difficulty, isMultiplayer, networkClient, onScoreChange, initialRunScore, totalScore, highScore }: GameCanvasProps): JSX.Element => {
+  const { t, language } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const scaleRef = useRef(1);
@@ -511,15 +515,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const [isConnected, setIsConnected] = useState(false);
   const [playerTeam, setPlayerTeam] = useState<'red' | 'blue'>('red');
   const playerTeamRef = useRef<'red' | 'blue'>('red');
-
-  // 多人游戏计分板状态
-  const [roomScores, setRoomScores] = useState<Record<string, { kills: number; deaths: number }>>({});
-  const roomScoresRef = useRef<Record<string, { kills: number; deaths: number }>>({});
-  const [totalRoomKills, setTotalRoomKills] = useState(0);
-  const [showScoreboard, setShowScoreboard] = useState(false);
-  const [globalKillLeaderboard, setGlobalKillLeaderboard] = useState<Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>>([]);
-  const [globalKDLeaderboard, setGlobalKDLeaderboard] = useState<Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>>([]);
-  const [scoreboardTab, setScoreboardTab] = useState<'room' | 'kills' | 'kd'>('room');
   
   // 本地玩家状态
   const playerRef = useRef<Player>({
@@ -557,8 +552,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const handleConnect = () => {
       setIsConnected(true);
       console.log('Connected to multiplayer server');
-      // Request global leaderboards from server
-      (networkClient as any).send('request-leaderboard', {});
     };
     
     const handleDisconnect = () => {
@@ -611,7 +604,6 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       y: player.y,
       health: player.health,
       direction: player.direction || 0,
-      skinColor: agentSkinColor,
       team: player.team,
       isReady: player.isReady,
       kills: player.kills,
@@ -696,96 +688,57 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     };
   }, [networkClient, isMultiplayer, handleNetworkHit]);
   
-  // 绘制远程玩家（在 camera transform 内部调用，使用世界坐标）
-  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, playerRadius: number, getBrightness: BrightnessFn, visionRadius: number) => {
+  // 绘制远程玩家
+  const drawRemotePlayers = useCallback((ctx: CanvasRenderingContext2D, scale: number, cameraScale: number) => {
     if (!isMultiplayer) return;
-
+    
     const now = Date.now();
     const players = remotePlayersRef.current.filter(p => now - p.lastUpdate < 5000); // 只显示最近5秒内有更新的玩家
-
+    
     players.forEach(player => {
-      const { x, y, health, maxHealth, team, isReady, skinColor, shieldName, shieldDurability, shieldMaxDurability, currentWeaponIndex } = player;
-
-      const brightness = getBrightness(x, y, visionRadius);
-      if (brightness <= 0) return;
-
-      ctx.save();
-      ctx.globalAlpha = brightness;
-
+      const { x, y, health, maxHealth, team, isReady } = player;
+      
       // 绘制玩家身体
-      ctx.fillStyle = skinColor || (team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)');
+      ctx.fillStyle = team === 'red' ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 100, 255, 0.8)';
       ctx.beginPath();
-      ctx.arc(x, y, playerRadius, 0, Math.PI * 2);
+      ctx.arc(x * scale, y * scale, 10 * scale * cameraScale, 0, Math.PI * 2);
       ctx.fill();
-
+      
       // 绘制玩家轮廓
       ctx.strokeStyle = team === 'red' ? 'rgba(255, 50, 50, 0.9)' : 'rgba(50, 50, 255, 0.9)';
-      ctx.lineWidth = 2 * scale;
+      ctx.lineWidth = 2 * scale * cameraScale;
       ctx.stroke();
-
-      // 绘制盾牌（仅当当前武器是盾牌且耐久 > 0）
-      const shieldDurNum = typeof shieldDurability === 'number' ? shieldDurability : 0;
-      const shieldMaxNum = typeof shieldMaxDurability === 'number' ? shieldMaxDurability : 0;
-      const hasShield =
-        shieldName === 'Riot Shield' &&
-        shieldDurNum > 0 &&
-        shieldMaxNum > 0 &&
-        currentWeaponIndex === 2;
-      if (hasShield) {
-          const shieldDir = player.direction || 0;
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.rotate(shieldDir);
-          const shieldWidth = 16 * scale;
-          const shieldHeight = 28 * scale;
-          ctx.fillStyle = 'rgba(64, 64, 64, 0.85)';
-          ctx.strokeStyle = 'rgba(163, 163, 163, 0.9)';
-          ctx.lineWidth = 1.5 * scale;
-          ctx.beginPath();
-          ctx.moveTo(playerRadius + 2 * scale, -shieldHeight / 2);
-          ctx.lineTo(playerRadius + shieldWidth, -shieldHeight / 2);
-          ctx.lineTo(playerRadius + shieldWidth, shieldHeight / 2);
-          ctx.lineTo(playerRadius + 2 * scale, shieldHeight / 2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-      }
-
+      
       // 绘制血条
-      const currentHealth = health || 0;
-      const currentMaxHealth = maxHealth || 100;
-      const healthPercent = currentMaxHealth > 0 ? currentHealth / currentMaxHealth : 0;
-      const barWidth = 20 * scale;
-      const barHeight = 3 * scale;
-      const barX = x - barWidth / 2;
-      const barY = y - playerRadius - 8 * scale;
-
+      const healthPercent = health / maxHealth;
+      const barWidth = 20 * scale * cameraScale;
+      const barHeight = 3 * scale * cameraScale;
+      const barX = x * scale - barWidth / 2;
+      const barY = y * scale - 15 * scale * cameraScale;
+      
       // 背景
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(barX, barY, barWidth, barHeight);
-
+      
       // 血量
-      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' :
-                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' :
+      ctx.fillStyle = healthPercent > 0.7 ? 'rgba(100, 255, 100, 0.9)' : 
+                     healthPercent > 0.3 ? 'rgba(255, 255, 100, 0.9)' : 
                      'rgba(255, 100, 100, 0.9)';
       ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
-
+      
       // 绘制准备状态
       if (isReady) {
         ctx.fillStyle = 'rgba(100, 255, 100, 0.8)';
         ctx.beginPath();
-        ctx.arc(x, y - playerRadius - 16 * scale, 3 * scale, 0, Math.PI * 2);
+        ctx.arc(x * scale, y * scale - 25 * scale * cameraScale, 3 * scale * cameraScale, 0, Math.PI * 2);
         ctx.fill();
       }
-
+      
       // 绘制玩家ID
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.font = `${10 * scale}px Arial`;
+      ctx.font = `${10 * scale * cameraScale}px Arial`;
       ctx.textAlign = 'center';
-      ctx.fillText((player.playerId || player.id || '').substring(0, 8), x, y + playerRadius + 14 * scale);
-
-      ctx.restore();
+      ctx.fillText(player.playerId.substring(0, 8), x * scale, y * scale + 20 * scale * cameraScale);
     });
   }, [isMultiplayer]);
   
@@ -826,148 +779,16 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     ctx.fillText(`房间: ${room.name || '未命名'}`, panelX + 10 * scale * cameraScale, panelY + 60 * scale * cameraScale);
     ctx.fillText(`状态: ${room.status}`, panelX + 10 * scale * cameraScale, panelY + 80 * scale * cameraScale);
   }, [isMultiplayer]);
+
   const [runScore, setRunScore] = useState<number>(initialRunScore || 0);
-    const runScoreRef = useRef<number>(initialRunScore || 0);
-
-    // Round currency (1 score = 2 money)
-    const [roundMoney, setRoundMoney] = useState<number>(Math.floor((initialRunScore || 0) * 2));
-    const roundMoneyRef = useRef<number>(Math.floor((initialRunScore || 0) * 2));
-
-
-        // Round and shop state
-        const [isRoundActive, setIsRoundActive] = useState<boolean>(false);
-        const isRoundActiveRef = useRef<boolean>(false);
-        const [showShop, setShowShop] = useState<boolean>(false);
-
-        const createWeaponFromDef = (weaponName: string): Weapon | null => {
-                const def = WEAPONS[weaponName];
-                if (!def) return null;
-                const scale = scaleRef.current;
-                const cameraScale = cameraScaleRef.current || 1;
-                const w: any = { ...def };
-                w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
-                w.bulletRadius = def.bulletRadius * scale / cameraScale;
-                w.ammoInMag = def.magSize;
-                w.reserveAmmo = def.reserveAmmo;
-                w.allowedFireModes = [...def.allowedFireModes];
-                w.currentFireMode = def.defaultFireMode;
-                w.shake = (ux: number, uy: number) => {};
-                return w as Weapon;
-        };
-
-        // Create a full Weapon instance applying attachments (attachments: { slotName: attachmentName })
-        const createWeaponWithAttachments = (weaponName: string, attachments: { [slot: string]: string }): Weapon | null => {
-            const def = WEAPONS[weaponName];
-            if (!def) return null;
-            const scale = scaleRef.current;
-            const cameraScale = cameraScaleRef.current || 1;
-            const w: any = { ...def };
-            w.bulletSpeed = def.bulletSpeed * scale / cameraScale;
-            w.bulletRadius = def.bulletRadius * scale / cameraScale;
-            w.ammoInMag = def.magSize;
-            w.reserveAmmo = def.reserveAmmo;
-            w.allowedFireModes = [...def.allowedFireModes];
-            w.currentFireMode = def.defaultFireMode;
-            w.shake = (ux: number, uy: number) => {};
-
-            // Apply attachment modifiers if definitions exist
-            if (def.attachmentSlots && attachments) {
-                for (const slotName in attachments) {
-                    const attName = attachments[slotName];
-                    if (!attName) continue;
-                    const slotList = def.attachmentSlots[slotName];
-                    if (!slotList) continue;
-                    const att = slotList.find(a => a.name === attName);
-                    if (!att) continue;
-                    const mod = att.modifiers;
-                    if (mod.damage) w.damage = (w.damage || def.damage) * mod.damage;
-                    if (mod.soundRadius) w.soundRadius = (w.soundRadius || def.soundRadius) * mod.soundRadius;
-                    if (mod.fireRate) w.fireRate = (w.fireRate || def.fireRate) * mod.fireRate;
-                    if (mod.reloadTime) w.reloadTime = (w.reloadTime || def.reloadTime) * mod.reloadTime;
-                    if (mod.bulletRadius) w.bulletRadius = (w.bulletRadius || def.bulletRadius) + mod.bulletRadius * scale / cameraScale;
-                    if (mod.pellets) w.pellets = (w.pellets || def.pellets) + mod.pellets;
-                    if (mod.magSize) {
-                        w.magSize = Math.round((w.magSize || def.magSize) * mod.magSize);
-                        w.ammoInMag = w.magSize;
-                    }
-                    if (mod.spread) w.spread = (w.spread || def.spread) * mod.spread;
-                    if (mod.addFireModes) {
-                        mod.addFireModes.forEach((m: any) => { if (!w.allowedFireModes.includes(m)) w.allowedFireModes.push(m); });
-                    }
-                    if (mod.specialEffect) w.specialEffect = mod.specialEffect;
-                }
-            }
-            return w as Weapon;
-        };
-
-        // Shop state includes a 15s pre-round customization window
-        const [shopTimer, setShopTimer] = useState<number | null>(null);
-        const selectedAttachmentsRef = useRef<{ [weaponName: string]: { [slot: string]: string } }>({});
-    const [purchaseMessage, setPurchaseMessage] = useState<string | null>(null);
-        const openShopForRound = () => {
-            setShowShop(true);
-            // Start a 15s timer to auto-close shop
-            setShopTimer(15);
-        };
-
-        const startRound = () => {
-            setIsRoundActive(true);
-            isRoundActiveRef.current = true;
-            setShowShop(false);
-            setShopTimer(null);
-        };
-
-        // Shop timer countdown effect
-        useEffect(() => {
-            if (shopTimer == null) return;
-            if (shopTimer <= 0) {
-                startRound();
-                return;
-            }
-            const id = setInterval(() => {
-                setShopTimer(t => (t !== null ? t - 1 : null));
-            }, 1000);
-            return () => clearInterval(id);
-        }, [shopTimer]);
-
-        const buyWeapon = (weaponName: string, targetSlot: 'primary'|'secondary'|'melee'|'special'|'auto' = 'auto') => {
-            const def = WEAPONS[weaponName];
-            if (!def) return;
-            const cost = (def as any).cost || 0;
-            if (roundMoneyRef.current < cost) return; // not enough
-            const player = playerRef.current;
-            // Deduct money
-            const nextMoney = roundMoneyRef.current - cost;
-            roundMoneyRef.current = nextMoney;
-            setRoundMoney(nextMoney);
-            // Decide which slot to put the purchased weapon into based on weapon.category or explicit targetSlot
-            let slotIndex = player.currentWeaponIndex;
-            if (targetSlot !== 'auto') {
-                if (targetSlot === 'primary') slotIndex = 0;
-                else if (targetSlot === 'secondary') slotIndex = 1;
-                else if (targetSlot === 'melee') slotIndex = 2;
-                else if (targetSlot === 'special') slotIndex = 3;
-            } else {
-                switch (def.category) {
-                    case 'primary': slotIndex = 0; break;
-                    case 'secondary': slotIndex = 1; break;
-                    case 'melee': slotIndex = 2; break;
-                    case 'special': slotIndex = 3; break;
-                    default: slotIndex = player.currentWeaponIndex; break;
-                }
-            }
-            // Create weapon instance with attachments applied if present
-            const attachments = selectedAttachmentsRef.current[weaponName] || {};
-            const inst = createWeaponWithAttachments(weaponName, attachments) || createWeaponFromDef(weaponName);
-            if (inst) {
-                player.weapons[slotIndex] = inst;
-            }
-            // Broadcast buy
-            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName, cost, attachments }); } catch {}
-        };
+  const runScoreRef = useRef<number>(initialRunScore || 0);
 
   // Helper to increment score and notify parent (applies difficulty multiplier)
   const addScore = (amount: number) => {
+      if (difficulty === 'test') {
+          console.log(`[addScore] Test difficulty - score recording is disabled`);
+          return;
+      }
       const mult = DIFFICULTY_MULTIPLIERS[difficulty] ?? 1.0;
       const applied = Math.round(amount * mult);
 
@@ -1019,12 +840,14 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const interactingDoorIdRef = useRef<number | null>(null);
   const interactionHintDoorIdRef = useRef<number | null>(null);
   const lockedDoorHintIdRef = useRef<number | null>(null);
+  const breachableDoorHintIdRef = useRef<number | null>(null);
   const lastEKeyPressTimeRef = useRef<number>(0);
   const lastInteractedDoorIdRef = useRef<number | null>(null);
   const isShootingRef = useRef<boolean>(false); // For mouse input ONLY
   const isAimingThrowableRef = useRef<boolean>(false);
   const cookingThrowableRef = useRef<{ type: ThrowableType; timer: number; maxTimer: number; } | null>(null);
   let nextThrowableId = 0;
+  const resetGameOuterRef = useRef<(() => void) | null>(null);
   const isThrowableModeRef = useRef<boolean>(false);
   // Kunai charging refs
   const isChargingKunaiRef = useRef<boolean>(false);
@@ -1098,15 +921,30 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
       doorToInteract.isPlayerHolding = true;
       doorToInteract.targetAngle = null;
 
+      // Calculate door direction vector and normal vector pointing to the swing-open side
+      const doorVecX = Math.cos(doorToInteract.closedAngle);
+      const doorVecY = Math.sin(doorToInteract.closedAngle);
+      
+      // The side the door swings into
+      const normalX = -doorVecY * doorToInteract.swingDirection;
+      const normalY = doorVecX * doorToInteract.swingDirection;
+
       const relX = playerRef.current.x - doorToInteract.hinge.x;
       const relY = playerRef.current.y - doorToInteract.hinge.y;
-      const doorHingeVectorX = Math.cos(doorToInteract.closedAngle - Math.PI / 2);
-      const doorHingeVectorY = Math.sin(doorToInteract.closedAngle - Math.PI / 2);
-      const crossProduct = doorHingeVectorX * relY - doorHingeVectorY * relX;
       
-      const pushDirection = (crossProduct * doorToInteract.swingDirection > 0) ? 1 : -1;
-      
-      doorToInteract.angularVelocity = 1.8 * pushDirection;
+      const dotProd = relX * normalX + relY * normalY;
+
+      const isClosed = Math.abs(doorToInteract.currentAngle - doorToInteract.closedAngle) < 0.1;
+
+      if (isClosed || dotProd < 0) {
+          // If door is closed, or player is on the opposite side of swing rotation (opening side)
+          // we always open the door in the swing direction.
+          doorToInteract.angularVelocity = 1.8 * doorToInteract.swingDirection;
+      } else {
+          // Player is on the swing rotation side (closing side) and door is already open
+          // we push it towards the closed state.
+          doorToInteract.angularVelocity = -1.8 * doorToInteract.swingDirection;
+      }
   }, []);
 
   const stopDoorInteraction = useCallback(() => {
@@ -1115,6 +953,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
           if (door) {
               door.isPlayerHolding = false;
               door.angularVelocity = 0;
+              door.targetAngle = null;
           }
           interactingDoorIdRef.current = null;
       }
@@ -1166,6 +1005,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
 
   // Circle-Rotated Rectangle collision for doors
   const checkCollisionWithDoor = (circle: {x: number, y: number, radius: number}, door: Door) => {
+    if (door.isBlownOpen) return false;
     const angle = -door.currentAngle;
     const cosAngle = Math.cos(angle);
     const sinAngle = Math.sin(angle);
@@ -1176,8 +1016,9 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     const rotatedX = dx * cosAngle - dy * sinAngle;
     const rotatedY = dx * sinAngle + dy * cosAngle;
     
+    const hingeOffset = 0;
     const doorRect = {
-        x: 0, y: -door.thickness / 2, width: door.length, height: door.thickness
+        x: hingeOffset, y: -door.thickness / 2, width: door.length - hingeOffset, height: door.thickness
     };
     
     const closestX = Math.max(doorRect.x, Math.min(rotatedX, doorRect.x + doorRect.width));
@@ -1194,15 +1035,23 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
     circle: { x: number, y: number, radius: number },
     door: Door
   ): Point | null => {
+    if (door.isBlownOpen) return null;
     const doorRadius = door.thickness / 2;
     const totalRadius = circle.radius + doorRadius;
 
     // Get door segment endpoints
-    const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
-    const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
+    // OFFSET: Start the collision segment slightly away from the hinge (e.g., by thickness)
+    // to prevent the player from getting stuck on the hinge point at the corner of the wall frame.
+    const cosA = Math.cos(door.currentAngle);
+    const sinA = Math.sin(door.currentAngle);
+    const hingeOffset = 0;
+    const startX = door.hinge.x + hingeOffset * cosA;
+    const startY = door.hinge.y + hingeOffset * sinA;
+    const endX = door.hinge.x + door.length * cosA;
+    const endY = door.hinge.y + door.length * sinA;
 
     // Get closest point on door's centerline to circle's center
-    const { d2, cx, cy } = distPtSegSquared(circle.x, circle.y, door.hinge.x, door.hinge.y, endX, endY);
+    const { d2, cx, cy } = distPtSegSquared(circle.x, circle.y, startX, startY, endX, endY);
 
     // Check for penetration
     if (d2 >= totalRadius * totalRadius) {
@@ -1449,47 +1298,27 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
         const ux = Math.cos(playerDirection);
         const uy = Math.sin(playerDirection);
 
-        const tryBashUnit = (unit: Player | RemotePlayer | Enemy, isLocalPlayer: boolean) => {
-            if ('health' in unit && unit.health != null && unit.health <= 0) return;
-            const ur = 'radius' in unit ? (unit as any).radius : player.radius;
-            const dx = unit.x - player.x;
-            const dy = unit.y - player.y;
+        for (const enemy of enemiesRef.current) {
+            if (enemy.health <= 0) continue;
+            const dx = enemy.x - player.x;
+            const dy = enemy.y - player.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist < bashRange + ur) {
+            if (dist < bashRange + enemy.radius) {
                 const angleToEnemy = Math.atan2(dy, dx);
                 let angleDiff = Math.abs(normalizeAngle(angleToEnemy - playerDirection));
                 if (angleDiff < Math.PI / 4) { // 45 degree cone
-                    if ('id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId) {
-                        // Remote player: authoritative damage on target client
-                        (networkClient as any).send('player-hit', {
-                            targetId: unit.id,
-                            damage: currentMelee.damage,
-                            attackerId: networkClient.ownId,
-                            impact: { x: unit.x, y: unit.y },
-                            sourceDir: { x: ux, y: uy }
-                        });
-                    } else if (!isLocalPlayer) {
-                        // Enemy AI
-                        const enemy = unit as Enemy;
-                        const healthBefore = enemy.health;
-                        enemy.health -= currentMelee.damage;
-                        enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
-                        if (enemy.health <= 0 && healthBefore > 0) {
-                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                            try { addScore(SCORE_PER_KILL); } catch {}
-                        }
+                    const healthBefore = enemy.health;
+                    enemy.health -= currentMelee.damage;
+                    enemy.stunTimer = Math.max(enemy.stunTimer || 0, 1.5);
+                    if (enemy.health <= 0 && healthBefore > 0) {
+                        hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                        try { addScore(SCORE_PER_KILL); } catch {}
+                        try {
+                            // no drop
+                        } catch (e) {}
                     }
                 }
-            }
-        };
-
-        for (const enemy of enemiesRef.current) {
-            tryBashUnit(enemy, false);
-        }
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                tryBashUnit(rp as any, false);
             }
         }
         shockwavesRef.current.push({ x: player.x + ux * 30, y: player.y + uy * 30, radius: 0, maxRadius: 50 * scale, lifetime: 0.2, maxLifetime: 0.2 });
@@ -1501,6 +1330,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   };
 
   const applyDamageToPlayer = (damage: number, sourceDirection: { x: number, y: number }, impactPoint: { x: number, y: number }, attackerId?: string) => {
+    if (difficulty === 'test') return;
     const player = playerRef.current;
     if (isGameOverRef.current || (isMultiplayer && (player as any).isRespawning)) return;
 
@@ -1540,19 +1370,12 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
                 (player as any).isRespawning = true;
                 (player as any).respawnTimer = 4.0; // 4 seconds respawn time
                 player.deaths = (player.deaths || 0) + 1;
-
+                
                 // Track killer
                 const killerId = attackerId || 'unknown';
-                const ownId = networkClient?.ownId || 'local';
-
-                // Send authoritative kill event to server
-                if (networkClient && isMultiplayer && networkClient.connected) {
-                    (networkClient as any).send('player-killed', { victimId: ownId, attackerId: killerId });
-                }
-
                 if (killerId && killerId !== 'unknown') {
-                    // Send kill notification action (for backward compat kill feed)
-                    sendPlayerAction('player-killed', { victimId: ownId, attackerId: killerId });
+                    // Send kill notification action
+                    sendPlayerAction('player-killed', { victimId: networkClient?.ownId || 'local', attackerId: killerId });
                     setPurchaseMessage(`ELIMINATED BY ${killerId.substring(0, 8).toUpperCase()}`);
                 } else {
                     setPurchaseMessage('YOU WERE ELIMINATED');
@@ -1704,6 +1527,7 @@ const startHealing = () => {
         const player = playerRef.current;
         const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
         doorsRef.current.forEach(door => {
+            if (door.isBlownOpen) return;
             const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
             const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
             dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
@@ -1751,25 +1575,19 @@ const startHealing = () => {
         });
         
         level.doors.forEach(d => {
-            // Algorithmic length selection by aspect ratio:
-            // - portrait (aspect ~< 1): use canvas.height as base
-            // - square: interpolate between height and width
-            // - wide desktop: smoothly bias toward canvas.width but cap to avoid excessive length
-            const aspect = canvas.width / canvas.height;
-            // map aspect 1.0..2.0 to t 0..1, clamp
-            const tRaw = (aspect - 1.0) / (2.0 - 1.0);
-            const t = Math.max(0, Math.min(1, tRaw));
-            // smoothstep for nicer transition
-            const smooth = t * t * (3 - 2 * t);
-            const base = canvas.height + (canvas.width - canvas.height) * smooth; // lerp(height, width, smooth)
-
-            // Scale down doors slightly to avoid visually oversized doors across modes.
-            const DOOR_LENGTH_SCALE = 0.7; // Reduce by ~30% (adjustable)
-            let lengthPixels = d.length * base * DOOR_LENGTH_SCALE;
-            // Cap: do not exceed 65% of the longer canvas side
-            const maxLen = Math.max(canvas.width, canvas.height) * 0.65;
-            const minLen = Math.min(canvas.width, canvas.height) * 0.06; // ensure not vanishingly small
-            lengthPixels = Math.max(minLen, Math.min(lengthPixels, maxLen));
+            // Precise orientation-locked door scale:
+            // Horizontal doors span X gaps of walls (scaled by canvas.width),
+            // vertical doors span Y gaps of walls (scaled by canvas.height).
+            // This maintains perfect gap closure and scale alignment across ALL resolutions & aspect ratios.
+            const cosAngle = Math.abs(Math.cos(d.closedAngle));
+            const sinAngle = Math.abs(Math.sin(d.closedAngle));
+            
+            let lengthPixels = 0;
+            if (cosAngle > sinAngle) {
+                lengthPixels = d.length * canvas.width;
+            } else {
+                lengthPixels = d.length * canvas.height;
+            }
 
             doorsRef.current.push({
               ...d,
@@ -2039,7 +1857,6 @@ const startHealing = () => {
           return weapon;
       }
       
-      // Initialize full loadout for both singleplayer and multiplayer
       try {
           player.weapons = [
               createWeaponInstance(loadout.primary, loadout.primaryAttachments),
@@ -2047,7 +1864,6 @@ const startHealing = () => {
               createWeaponInstance(loadout.melee, {}),
               createWeaponInstance(loadout.special, loadout.specialAttachments)
           ];
-          // Default to primary
           player.currentWeaponIndex = 0;
       } catch (e) {
           // fallback safe state
@@ -2132,6 +1948,8 @@ const startHealing = () => {
       takedownHintEnemyRef.current = null;
       takedownEffectsRef.current = [];
     };
+    
+    resetGameOuterRef.current = resetGame;
 
     resetGame();
     
@@ -2229,16 +2047,9 @@ const startHealing = () => {
               player.y = spawnY;
               player.health = player.maxHealth;
               
-              // Reset magazines, reserves, and shield durability on spawn
+              // Reset magazines to full stock on spawn
               player.weapons.forEach(w => {
-                  const def = WEAPONS[w.name];
                   w.ammoInMag = w.magSize;
-                  if (def) {
-                      w.reserveAmmo = def.reserveAmmo;
-                  }
-                  if (w.name === 'Riot Shield' && w.maxDurability != null) {
-                      w.durability = w.maxDurability;
-                  }
               });
               
               sendPlayerAction('player-reset', { id: networkClient?.ownId || 'local' });
@@ -2279,6 +2090,7 @@ const startHealing = () => {
 
       const dynamicSegments = [...wallSegmentsRef.current];
       doorsRef.current.forEach(door => {
+          if (door.isBlownOpen) return;
           const endX = door.hinge.x + door.length * Math.cos(door.currentAngle);
           const endY = door.hinge.y + door.length * Math.sin(door.currentAngle);
           dynamicSegments.push({ a: door.hinge, b: { x: endX, y: endY } });
@@ -2344,7 +2156,7 @@ const startHealing = () => {
         }
 
 
-        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
             const dist = Math.hypot(unit.x - n.x, unit.y - n.y);
             if (dist > rad) return;
 
@@ -2356,16 +2168,14 @@ const startHealing = () => {
                 }
             }
 
-            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
-
             if (n.type === 'grenade') {
                 if (isObstructed) return;
-                const damage = (1 - (dist / rad)) * (isLocalPlayer ? 100 : 999);
-                if (isLocalPlayer) {
+                const damage = (1 - (dist / rad)) * (isPlayer ? 100 : 999);
+                if(isPlayer) {
                     const player = unit as Player;
-                    if (isEnded) return;
+                    if(isEnded) return;
 
-                    let damageToApply = damage;
+                    let damageToApply = difficulty === 'test' ? 0 : damage;
                     const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
                     if (shield) {
                         const angleToExplosion = Math.atan2(n.y - player.y, n.x - player.x);
@@ -2375,17 +2185,17 @@ const startHealing = () => {
                         if (isEquipped && angleDiff < Math.PI / 2) {
                             shield.durability! -= damageToApply;
                             damageToApply = 0;
-                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) {
+                        } else if (!isEquipped && angleDiff > Math.PI * 0.75) { // Back protection
                             shield.durability! -= damage * 0.8;
                             damageToApply *= 0.2;
                         }
                     }
-
+                    
                     if (damageToApply > 0) {
                         player.health -= damageToApply;
                         player.hitTimer = 0.17;
                     }
-
+                    
                     const dx = player.x - n.x;
                     const dy = player.y - n.y;
                     const impactDist = Math.hypot(dx, dy) || 1;
@@ -2399,31 +2209,24 @@ const startHealing = () => {
                     });
 
                     if (player.health <= 0) {
-                        player.health = 1;
+                        player.health = 1; // leave 1 hp and let applyDamageToPlayer finish it and process respawn
                         applyDamageToPlayer(10, {x: dx / impactDist, y: dy / impactDist}, {x: player.x, y: player.y}, 'explosion');
                     }
-                } else if (isRemotePlayer) {
-                    (networkClient as any).send('player-hit', {
-                        targetId: unit.id,
-                        damage: damage,
-                        attackerId: networkClient.ownId,
-                        impact: { x: unit.x, y: unit.y },
-                        sourceDir: { x: (unit.x - n.x) / dist, y: (unit.y - n.y) / dist }
-                    });
                 } else {
                     const enemy = unit as Enemy;
                     const healthBefore = enemy.health;
                     enemy.health -= damage;
-                    if (enemy.health <= 0 && healthBefore > 0) {
-                        hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                        try { addScore(SCORE_PER_KILL); } catch {}
-                    }
+                                        if (enemy.health <= 0 && healthBefore > 0) {
+                                            hitEffectsRef.current.push({ x: unit.x, y: unit.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                                            try { addScore(SCORE_PER_KILL); } catch {}
+                                        }
                 }
-            } else if (n.type === 'flashbang') {
-                if (isLocalPlayer) {
+            } else { // flashbang
+                if (isPlayer) {
                     const player = unit as Player;
                     const viewPoly = getVisionPolygon(player, dynamicSegments, {width: canvas.width, height: canvas.height});
                     if (pointInPoly(n.x, n.y, viewPoly)) {
+                        // Explosion is visible, check direction for flash effect reduction.
                         const mouse = mousePosRef.current;
                         const angleToMouse = Math.atan2(mouse.y - player.y, mouse.x - player.x);
                         const angleToFlash = Math.atan2(n.y - player.y, n.x - player.x);
@@ -2433,30 +2236,31 @@ const startHealing = () => {
                             angleDiff = 2 * Math.PI - angleDiff;
                         }
 
-                        const maxFlashDuration = 2.5;
-                        const minFlashDuration = 0.5;
+                        // angleDiff is now between 0 (front) and PI (behind)
+                        const maxFlashDuration = 2.5; // seconds
+                        const minFlashDuration = 0.5; // seconds
+
+                        // Calculate flash intensity based on angle. 1.0 for front, 0.0 for back.
                         const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
+                        
                         const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
                         player.flashTimer = Math.max(player.flashTimer, flashDuration);
                     }
-                } else if (isRemotePlayer) {
-                    // Remote players handle flashbang visuals locally; only notify if you want synced stun.
-                    // For now, we rely on the visual on the victim client, so no network packet needed.
-                } else {
+                } else { // is enemy
                     if (isObstructed) return;
                     const enemy = unit as Enemy;
                     const angleToFlash = Math.atan2(n.y - enemy.y, n.x - enemy.x);
-
+                    
                     let angleDiff = Math.abs(enemy.direction - angleToFlash);
                     if (angleDiff > Math.PI) {
                         angleDiff = 2 * Math.PI - angleDiff;
                     }
-
-                    const maxFlashDuration = 2.5;
-                    const minFlashDuration = 0.5;
+            
+                    const maxFlashDuration = 2.5; // seconds
+                    const minFlashDuration = 0.5; // seconds
                     const flashFactor = Math.max(0, 1 - (angleDiff / Math.PI));
                     const flashDuration = minFlashDuration + (maxFlashDuration - minFlashDuration) * flashFactor;
-
+                    
                     enemy.stunTimer = Math.max(enemy.stunTimer || 0, flashDuration);
                     enemy.isAlert = false;
                 }
@@ -2464,9 +2268,6 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
-        if (isMultiplayer && networkClient) {
-            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
-        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -2485,7 +2286,7 @@ const startHealing = () => {
         explosionsRef.current.push({ x, y, radius: 0, maxRadius: radius, lifetime: 0.5, maxLifetime: 0.5, type: 'grenade' });
         soundWavesRef.current.push({ x, y, radius: 0, maxRadius: 800 * scale / cameraScale, lifetime: 0.67, maxLifetime: 0.67, type: 'explosion' });
 
-        const affectUnit = (unit: Player | Enemy | RemotePlayer, isLocalPlayer: boolean) => {
+        const affectUnit = (unit: Player | Enemy, isPlayer: boolean) => {
             const dist = Math.hypot(unit.x - x, unit.y - y);
             if (dist > radius) return;
 
@@ -2498,14 +2299,12 @@ const startHealing = () => {
             }
             if (isObstructed) return;
 
-            const isRemotePlayer = 'id' in unit && isMultiplayer && networkClient && unit.id !== networkClient.ownId;
             const damage = (1 - (dist / radius)) * maxDamage;
-
-            if (isLocalPlayer) {
+            if (isPlayer) {
                 const player = unit as Player;
                 if (isEnded) return;
 
-                let damageToApply = damage;
+                let damageToApply = difficulty === 'test' ? 0 : damage;
                 const shield = player.weapons.find(w => w.name === 'Riot Shield' && w.durability && w.durability > 0);
                 if (shield) {
                     const angleToExplosion = Math.atan2(y - player.y, x - player.x);
@@ -2520,24 +2319,16 @@ const startHealing = () => {
                         damageToApply *= 0.2;
                     }
                 }
-
+                
                 if (damageToApply > 0) {
                     player.health -= damageToApply;
                     player.hitTimer = 0.17;
                 }
-
+                
                 if (player.health <= 0) {
                     player.health = 1;
                     applyDamageToPlayer(10, {x: 0, y: 0}, {x: player.x, y: player.y}, 'explosion');
                 }
-            } else if (isRemotePlayer) {
-                (networkClient as any).send('player-hit', {
-                    targetId: unit.id,
-                    damage: damage,
-                    attackerId: networkClient.ownId,
-                    impact: { x: unit.x, y: unit.y },
-                    sourceDir: { x: (unit.x - x) / dist, y: (unit.y - y) / dist }
-                });
             } else {
                 const enemy = unit as Enemy;
                 const healthBefore = enemy.health;
@@ -2549,9 +2340,6 @@ const startHealing = () => {
         };
 
         affectUnit(playerRef.current, true);
-        if (isMultiplayer && networkClient) {
-            remotePlayersRef.current.forEach(rp => affectUnit(rp as any, false));
-        }
         enemiesRef.current.forEach(e => {
             if (e.health > 0) {
                 affectUnit(e, false)
@@ -2678,6 +2466,53 @@ const startHealing = () => {
       }
       
 doorsRef.current.forEach(door => {
+    if (door.isBreachPlanted && door.breachTimer !== undefined) {
+        door.breachTimer -= dt;
+        if (door.breachTimer <= 0) {
+            door.isBreachPlanted = false;
+            door.isBlownOpen = true;
+            
+            const midX = door.hinge.x + (door.length / 2) * Math.cos(door.closedAngle);
+            const midY = door.hinge.y + (door.length / 2) * Math.sin(door.closedAngle);
+            
+            shakerRef.current.addImpulse({ amp: 36 * scaleRef.current, rotAmp: 0.08, freq: 40, decay: 8, dirx: 0, diry: 0 });
+            
+            const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
+            doorsRef.current.forEach(d => {
+                if (d.isBlownOpen || d.id === door.id) return;
+                const endX = d.hinge.x + d.length * Math.cos(d.currentAngle);
+                const endY = d.hinge.y + d.length * Math.sin(d.currentAngle);
+                dynamicSegments.push({ a: d.hinge, b: { x: endX, y: endY } });
+            });
+            
+            createExplosion(midX, midY, 300 * scaleRef.current, 200, dynamicSegments);
+            
+            for (let i = 0; i < 24; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = Math.random() * 40 * scaleRef.current;
+                smokeCloudsRef.current.push({
+                    x: midX + Math.cos(angle) * dist,
+                    y: midY + Math.sin(angle) * dist,
+                    vx: (Math.random() - 0.5) * 120 * scaleRef.current,
+                    vy: (Math.random() - 0.5) * 120 * scaleRef.current,
+                    radius: (20 + Math.random() * 20) * scaleRef.current,
+                    lifetime: 1.0 + Math.random() * 0.8,
+                    maxLifetime: 1.8,
+                });
+            }
+            
+            soundWavesRef.current.push({
+                x: midX,
+                y: midY,
+                radius: 0,
+                maxRadius: 1200 * scaleRef.current / cameraScaleRef.current,
+                lifetime: 0.8,
+                maxLifetime: 0.8,
+                type: 'explosion'
+            });
+        }
+    }
+    if (door.isBlownOpen) return;
     const previousAngle = door.currentAngle;
     let newAngle = door.currentAngle;
     let deltaAngle = 0;
@@ -2724,12 +2559,20 @@ doorsRef.current.forEach(door => {
     // --- NEW: Check for door-wall collision first ---
     const c = Math.cos(tempDoor.currentAngle);
     const s = Math.sin(tempDoor.currentAngle);
-    const midPoint = { x: tempDoor.hinge.x + (tempDoor.length * 0.5) * c, y: tempDoor.hinge.y + (tempDoor.length * 0.5) * s };
-    const endPoint = { x: tempDoor.hinge.x + tempDoor.length * c, y: tempDoor.hinge.y + tempDoor.length * s };
+    
+    // Skip the first 40% of the door to prevent getting stuck on the door frame/hinge wall.
+    // Also skip the very tip center to avoid getting stuck on the opposite wall frame.
+    const collisionStartOffset = tempDoor.length * 0.4; 
+    const collisionEndOffset = 0.002;
+    
+    const collisionPoints = [
+        { x: tempDoor.hinge.x + (tempDoor.length * 0.7) * c, y: tempDoor.hinge.y + (tempDoor.length * 0.7) * s },
+        { x: tempDoor.hinge.x + (tempDoor.length - collisionEndOffset) * c, y: tempDoor.hinge.y + (tempDoor.length - collisionEndOffset) * s }
+    ];
 
     for (const wall of wallsRef.current) {
         const pointInWall = (p: Point, w: Wall) => p.x >= w.x && p.x <= w.x + w.width && p.y >= w.y && p.y <= w.y + w.height;
-        if (pointInWall(midPoint, wall) || pointInWall(endPoint, wall)) {
+        if (collisionPoints.some(p => pointInWall(p, wall))) {
             isBlocked = true;
             break;
         }
@@ -2791,12 +2634,14 @@ doorsRef.current.forEach(door => {
 });
       interactionHintDoorIdRef.current = null;
       lockedDoorHintIdRef.current = null;
+      breachableDoorHintIdRef.current = null;
       if (interactingDoorIdRef.current === null) {
           const interactionRadius = 50 * scale / cameraScale;
           let closestDist = interactionRadius;
           let closestDoor: Door | null = null;
 
           for (const door of doorsRef.current) {
+              if (door.isBlownOpen || door.isBreachPlanted) continue;
               const endPoint = { x: door.hinge.x + door.length * Math.cos(door.currentAngle), y: door.hinge.y + door.length * Math.sin(door.currentAngle) };
               const dist = pointToSegmentDistance({ x: player.x, y: player.y }, door.hinge, endPoint);
               if (dist < closestDist) {
@@ -2806,7 +2651,9 @@ doorsRef.current.forEach(door => {
           }
 
           if (closestDoor) {
-              if (closestDoor.locked) {
+              if (closestDoor.isBreachable) {
+                  breachableDoorHintIdRef.current = closestDoor.id;
+              } else if (closestDoor.locked) {
                   lockedDoorHintIdRef.current = closestDoor.id;
               } else {
                   interactionHintDoorIdRef.current = closestDoor.id;
@@ -3373,34 +3220,15 @@ doorsRef.current.forEach(door => {
 
             const healthBefore = enemy.health;
             enemy.health = 0; // Slash is an instant kill
-            if (healthBefore > 0) {
-                slashHitThisSwingRef.current.add(enemy);
-                hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
-                shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
-                try { addScore(SCORE_PER_KILL); } catch {}
-            }
-        }
-
-        // Check remote players in multiplayer for slash hits
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                if (slashHitThisSwingRef.current.has(rp as any)) continue;
-                const dx = rp.x - player.x, dy = rp.y - player.y; const dist = Math.hypot(dx, dy);
-                if (dist < slash.inner || dist > slash.range) continue;
-                const ang = Math.atan2(dy, dx);
-                if (!isAngleBetween(sweepStart, sweepEnd, ang)) continue;
-                const dClear = raycast(player.x, player.y, ang, dist);
-                if (dClear < dist - 1e-3) continue;
-
-                slashHitThisSwingRef.current.add(rp as any);
-                (networkClient as any).send('player-hit', {
-                    targetId: rp.id,
-                    damage: 150,
-                    attackerId: networkClient.ownId,
-                    impact: { x: rp.x, y: rp.y },
-                    sourceDir: { x: dx / dist, y: dy / dist }
-                });
-            }
+                            if (healthBefore > 0) {
+                            slashHitThisSwingRef.current.add(enemy);
+                            hitEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 40 * scale, lifetime: 0.33, maxLifetime: 0.33 });
+                            shakerRef.current.addImpulse({ amp: 2 * scale, rotAmp: 0.005, freq: 100, decay: 20, dirx: dx/dist, diry: dy/dist });
+                                                        try { addScore(SCORE_PER_KILL); } catch {}
+                                                        try {
+                                                                // no drop
+                                                        } catch (e) {}
+                        }
         }
 
         if (castDist < slash.range - 0.5){
@@ -3494,21 +3322,6 @@ doorsRef.current.forEach(door => {
                 enemy.burnDamage = patch.damagePerSecond;
                 if (!enemy.isAlert) {
                      enemy.isAlert = true; // Make them react to being on fire
-                }
-            }
-        }
-
-        // Check remote players standing in fire
-        if (isMultiplayer && networkClient) {
-            for (const rp of remotePlayersRef.current) {
-                if (Math.hypot(rp.x - patch.x, rp.y - patch.y) < player.radius + patch.radius) {
-                    (networkClient as any).send('player-hit', {
-                        targetId: rp.id,
-                        damage: patch.damagePerSecond * dt,
-                        attackerId: networkClient.ownId,
-                        impact: { x: rp.x, y: rp.y },
-                        sourceDir: { x: 0, y: 0 }
-                    });
                 }
             }
         }
@@ -3971,14 +3784,25 @@ doorsRef.current.forEach(door => {
         context.fillStyle = '#374151'; // A solid, dark gray
         context.strokeStyle = '#4b5563'; // A slightly lighter gray for borders
         context.lineWidth = 1 * scale;
-        wallsRef.current.forEach(wall => {
+        wallsRef.current.forEach((wall, index) => {
             context.fillRect(wall.x, wall.y, wall.width, wall.height);
             context.strokeRect(wall.x, wall.y, wall.width, wall.height);
+            
+            // Temporary debugging labels
+            if (difficulty === 'test' && index >= 4) {
+                context.save();
+                context.fillStyle = '#fde047'; // yellow-300
+                context.font = `bold ${Math.max(12, 10 * scale)}px Inter`;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText((index - 4).toString(), wall.x + wall.width / 2, wall.y + wall.height / 2);
+                context.restore();
+            }
         });
         context.shadowBlur = 0;
   
         // Draw Door Frames (the opening in the wall)
-        context.fillStyle = '#374151'; // Match the wall color for a "cutout" look
+        context.fillStyle = 'black'; // Clear cutout representing the opening in the wall
         doorsRef.current.forEach(door => {
             const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
             if (brightness <= 0) return;
@@ -4012,8 +3836,84 @@ doorsRef.current.forEach(door => {
         });
         context.globalAlpha = 1.0; // Reset alpha
 
-        doorsRef.current.forEach(door => {
+        doorsRef.current.forEach((door, index) => {
           const brightness = getBrightnessByDistance(door.hinge.x, door.hinge.y, visionRadius);
+          
+          if (door.isBlownOpen) {
+              // Draw a highly stylized, broken, blown-open look!
+              // Draw explosion soot/burn marks first (drawn directly in global coordinates)
+              context.save();
+              const grad = context.createRadialGradient(door.hinge.x, door.hinge.y, 2 * scale, door.hinge.x, door.hinge.y, door.length * 1.5);
+              grad.addColorStop(0, `rgba(15, 12, 10, ${0.85 * brightness})`);
+              grad.addColorStop(0.3, `rgba(35, 25, 20, ${0.55 * brightness})`);
+              grad.addColorStop(0.7, `rgba(20, 20, 20, ${0.25 * brightness})`);
+              grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              context.fillStyle = grad;
+              context.beginPath();
+              context.arc(door.hinge.x, door.hinge.y, door.length * 1.5, 0, Math.PI * 2);
+              context.fill();
+              context.restore();
+
+              // Draw Shard 1: Hanging broken piece attached to the hinge, slightly bent and jagged
+              context.save();
+              context.translate(door.hinge.x, door.hinge.y);
+              context.rotate(door.closedAngle + 0.2); // slightly warped angle
+              
+              const borderWidth = 2 * scale;
+              const fill = `rgba(64, 64, 64, ${brightness})`; // darker, charred-looking fill
+              const border = `rgba(100, 100, 100, ${brightness})`; // charred gray border
+              
+              context.fillStyle = border;
+              context.fillRect(0, -door.thickness / 2, door.length * 0.35, door.thickness);
+              context.fillStyle = fill;
+              context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length * 0.35 - borderWidth, door.thickness - borderWidth * 2);
+              
+              // Draw jagged jagged teeth/rips on the broken end of Shard 1
+              context.fillStyle = border;
+              context.beginPath();
+              context.moveTo(door.length * 0.35, -door.thickness / 2);
+              context.lineTo(door.length * 0.39, -door.thickness / 6);
+              context.lineTo(door.length * 0.34, 0);
+              context.lineTo(door.length * 0.38, door.thickness / 3);
+              context.lineTo(door.length * 0.35, door.thickness / 2);
+              context.closePath();
+              context.fill();
+              context.restore();
+
+              // Draw Shard 2: Blown on the floor nearby, twisted and rotated
+              context.save();
+              // Position it offset slightly to the left and forward, as if blown by explosion
+              context.translate(
+                  door.hinge.x + door.length * 0.55 * Math.cos(door.closedAngle - 0.5), 
+                  door.hinge.y + door.length * 0.55 * Math.sin(door.closedAngle - 0.5)
+              );
+              context.rotate(door.closedAngle + 1.35); // Blown away angle on the ground
+              
+              context.fillStyle = border;
+              context.fillRect(0, -door.thickness / 2, door.length * 0.45, door.thickness);
+              context.fillStyle = fill;
+              context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length * 0.45 - borderWidth * 2, door.thickness - borderWidth * 2);
+              
+              // Jagged end on Shard 2 (where it tore off)
+              context.fillStyle = border;
+              context.beginPath();
+              context.moveTo(0, -door.thickness / 2);
+              context.lineTo(door.length * 0.05, -door.thickness / 6);
+              context.lineTo(0, 0);
+              context.lineTo(door.length * 0.04, door.thickness / 6);
+              context.lineTo(0, door.thickness / 2);
+              context.closePath();
+              context.fill();
+              
+              // Add simple debris details (three tiny metal scraps around it)
+              context.fillStyle = border;
+              context.fillRect(-5 * scale, 12 * scale, 4 * scale, 1.5 * scale);
+              context.fillRect(8 * scale, -14 * scale, 3 * scale, 2 * scale);
+              
+              context.restore();
+              return;
+          }
+
           const isLocked = door.locked;
           context.save();
           context.translate(door.hinge.x, door.hinge.y);
@@ -4025,6 +3925,58 @@ doorsRef.current.forEach(door => {
           context.fillRect(0, -door.thickness / 2, door.length, door.thickness);
           context.fillStyle = doorFillColor;
           context.fillRect(borderWidth, (-door.thickness / 2) + borderWidth, door.length - (borderWidth * 2), door.thickness - (borderWidth * 2));
+          
+          if (door.isBreachPlanted && door.breachTimer !== undefined) {
+              context.save();
+              context.translate(door.length / 2, 0);
+              
+              const flashFreq = door.breachTimer > 2.0 ? 3 : 6;
+              const phase = (performance.now() / 1000) * Math.PI * flashFreq;
+              const flashAlpha = 0.4 + 0.6 * Math.sin(phase);
+              const lightColor = `rgba(239, 68, 68, ${flashAlpha})`;
+              
+              context.fillStyle = '#1e293b';
+              context.strokeStyle = '#64748b';
+              context.lineWidth = 1 * scale;
+              const chargeW = 16 * scale;
+              const chargeH = door.thickness + 4 * scale;
+              context.fillRect(-chargeW / 2, -chargeH / 2, chargeW, chargeH);
+              context.strokeRect(-chargeW / 2, -chargeH / 2, chargeW, chargeH);
+              
+              context.strokeStyle = '#f59e0b';
+              context.lineWidth = 1 * scale;
+              context.beginPath();
+              context.moveTo(-chargeW / 2 + 2 * scale, -chargeH / 4);
+              context.lineTo(chargeW / 2 - 2 * scale, chargeH / 4);
+              context.stroke();
+              
+              context.fillStyle = lightColor;
+              context.beginPath();
+              context.arc(0, -chargeH / 3, 3 * scale, 0, Math.PI * 2);
+              context.fill();
+              
+              context.rotate(-door.currentAngle);
+              context.shadowColor = 'black';
+              context.shadowBlur = 4 * scale;
+              context.fillStyle = '#ef4444';
+              context.font = `bold ${11 * scale}px mono`;
+              context.textAlign = 'center';
+              context.textBaseline = 'middle';
+              
+              const secsLeft = Math.max(0, door.breachTimer).toFixed(1);
+              context.fillText(`${secsLeft}s`, 0, -chargeH - 4 * scale);
+              context.restore();
+          }
+
+          // Temporary labels
+          if (difficulty === 'test') {
+              context.fillStyle = '#fde047';
+              context.font = `bold ${Math.max(10, 8 * scale)}px Inter`;
+              context.textAlign = 'center';
+              context.textBaseline = 'middle';
+              context.fillText(`d${door.id}`, door.length / 2, 0);
+          }
+          
           context.restore();
         });
   
@@ -4208,14 +4160,45 @@ doorsRef.current.forEach(door => {
               
               context.restore();
           }
+
+          // Render remote players
+          if (isMultiplayer) {
+              remotePlayersRef.current.forEach(p => {
+                  const brightness = getBrightnessByDistance(p.x, p.y, visionRadius);
+                  if (brightness <= 0) return;
+
+                  // Draw name tag
+                  if (p.name) {
+                      context.save();
+                      const drawPx = p.x;
+                      const drawPy = p.y - 15 * scale;
+                      context.font = `bold ${8 * scale}px mono`;
+                      context.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                      context.textAlign = 'center';
+                      context.fillText(p.name, drawPx, drawPy);
+                      context.restore();
+                  }
+
+                  context.save();
+                  context.globalAlpha = brightness;
+                  context.beginPath();
+                  context.arc(p.x, p.y, player.radius, 0, Math.PI * 2);
+                  context.fillStyle = p.skinColor;
+                  context.shadowColor = p.skinColor;
+                  context.shadowBlur = 15 * scale;
+                  context.fill();
+                  context.shadowBlur = 0;
+                  context.restore();
+              });
+          }
         }
 
         // Draw multiplayer elements
         if (isMultiplayer) {
-            drawRemotePlayers(context, scale, player.radius, getBrightnessByDistance, visionRadius);
+            drawRemotePlayers(context, scale, cameraScaleRef.current || 1);
             drawTeamInfo(context, scale, cameraScaleRef.current || 1);
         }
-      };
+      }
 
       // Render Start
       context.fillStyle = 'black';
@@ -4252,11 +4235,22 @@ doorsRef.current.forEach(door => {
           context.shadowColor = 'rgba(100, 116, 139, 0.5)';
           context.shadowBlur = 8 * scale;
 
-          wallsRef.current.forEach(wall => {
+          wallsRef.current.forEach((wall, index) => {
               context.strokeRect(wall.x, wall.y, wall.width, wall.height);
+              
+              // Temporary debugging labels
+              if (difficulty === 'test' && index >= 4) {
+                  context.save();
+                  context.fillStyle = 'rgba(253, 224, 71, 0.6)'; // yellow-300 @ 60%
+                  context.font = `${Math.max(10, 8 * scale)}px Inter`;
+                  context.textAlign = 'center';
+                  context.textBaseline = 'middle';
+                  context.fillText((index - 4).toString(), wall.x + wall.width / 2, wall.y + wall.height / 2);
+                  context.restore();
+              }
           });
 
-          doorsRef.current.forEach(door => {
+          doorsRef.current.forEach((door, index) => {
             context.save();
             context.translate(door.hinge.x, door.hinge.y);
             context.rotate(door.currentAngle);
@@ -4264,6 +4258,16 @@ doorsRef.current.forEach(door => {
             context.moveTo(0,0);
             context.lineTo(door.length, 0);
             context.stroke();
+            
+            // Temporary labels
+            if (difficulty === 'test') {
+                context.fillStyle = 'rgba(253, 224, 71, 0.6)';
+                context.font = `${Math.max(8, 6 * scale)}px Inter`;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(`d${door.id}`, door.length / 2, 0);
+            }
+            
             context.restore();
           });
 
@@ -4666,7 +4670,7 @@ doorsRef.current.forEach(door => {
         context.textAlign = 'center';
         context.shadowColor = 'black';
         context.shadowBlur = 10 * scale;
-        context.fillText('EXTRACT', zone.x + zone.width / 2, zone.y + zone.height / 2 + 8 * scale);
+        context.fillText(t('extraction').toUpperCase(), zone.x + zone.width / 2, zone.y + zone.height / 2 + 8 * scale);
         context.shadowBlur = 0;
       }
 
@@ -4678,8 +4682,87 @@ doorsRef.current.forEach(door => {
           context.font = `bold ${18 * scale}px mono`;
           context.fillStyle = 'rgba(255, 255, 255, 0.95)';
           context.textAlign = 'center';
-          context.fillText(`Enemy density: ${rangeInfo}`, canvas.width / 2, 40 * scale);
+          context.fillText(`${t('enemyDensity')}: ${rangeInfo}`, canvas.width / 2, 40 * scale);
           context.restore();
+      }
+
+      // Test mode big header debugging info box
+      if (difficulty === 'test') {
+          let testMessages: string[] = [];
+          
+          if (interactionHintDoorIdRef.current !== null) {
+              testMessages.push(`INTERACT DOOR: d${interactionHintDoorIdRef.current}`);
+          } else if (lockedDoorHintIdRef.current !== null) {
+              testMessages.push(`LOCKED DOOR: d${lockedDoorHintIdRef.current}`);
+          }
+          
+          // Nearest door
+          let closestDoorId = -1;
+          let minDoorDist = Infinity;
+          doorsRef.current.forEach(door => {
+              const midX = door.hinge.x + (door.length / 2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length / 2) * Math.sin(door.currentAngle);
+              const d = Math.hypot(player.x - midX, player.y - midY);
+              if (d < minDoorDist) {
+                  minDoorDist = d;
+                  closestDoorId = door.id;
+              }
+          });
+          if (closestDoorId !== -1 && minDoorDist < 120 * scale) {
+              testMessages.push(`CLOSEST DOOR: d${closestDoorId}`);
+          }
+
+          // Nearest Wall
+          let closestWallIdx = -1;
+          let minWallDist = Infinity;
+          wallsRef.current.forEach((wall, idx) => {
+              if (idx < 4) return; // ignore outer borders
+              const cenX = wall.x + wall.width / 2;
+              const cenY = wall.y + wall.height / 2;
+              const d = Math.hypot(player.x - cenX, player.y - cenY);
+              if (d < minWallDist) {
+                  minWallDist = d;
+                  closestWallIdx = idx - 4;
+              }
+          });
+          if (closestWallIdx !== -1 && minWallDist < 100 * scale) {
+              testMessages.push(`CLOSEST WALL: #${closestWallIdx}`);
+          }
+
+          if (testMessages.length > 0) {
+              const displayStr = testMessages.join('  |  ');
+              context.save();
+              context.font = `bold ${Math.max(16, 20 * scale)}px mono`;
+              context.textBaseline = 'middle';
+              context.textAlign = 'center';
+              
+              const textWidth = context.measureText(displayStr).width || 300 * scale;
+              const padX = 24 * scale;
+              const padY = 12 * scale;
+              const bgWidth = textWidth + padX * 2;
+              const bgHeight = Math.max(16, 20 * scale) + padY * 2;
+              const bgX = (canvas.width - bgWidth) / 2;
+              const bgY = 40 * scale;
+              
+              // Draw rounded background
+              context.fillStyle = 'rgba(15, 23, 42, 0.95)'; // dark slate
+              context.strokeStyle = 'rgba(253, 224, 71, 0.8)'; // bright yellow
+              context.lineWidth = 2 * scale;
+              
+              context.beginPath();
+              if (typeof (context as any).roundRect === 'function') {
+                  (context as any).roundRect(bgX, bgY, bgWidth, bgHeight, 8 * scale);
+              } else {
+                  context.rect(bgX, bgY, bgWidth, bgHeight);
+              }
+              context.fill();
+              context.stroke();
+              
+              // Draw text
+              context.fillStyle = '#fde047'; // yellow-300
+              context.fillText(displayStr, canvas.width / 2, bgY + bgHeight / 2);
+              context.restore();
+          }
       }
 
       if (player.hitTimer > 0) {
@@ -4770,7 +4853,7 @@ doorsRef.current.forEach(door => {
           context.fillStyle = '#cbd5e1';
           context.textAlign = 'left';
           context.textBaseline = 'middle';
-          context.fillText(`HP: ${Math.round(player.health)}/${player.maxHealth}`, leftX, drawY - 6 * scale);
+          context.fillText(`${t('health')}: ${Math.round(player.health)}/${player.maxHealth}`, leftX, drawY - 6 * scale);
 
           // Shield block or Armor block
           drawY = dockY + 38 * scale;
@@ -4784,14 +4867,14 @@ doorsRef.current.forEach(door => {
               
               context.font = `bold ${9 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText(`SHIELD: ${Math.round(shield.durability)}/${shield.maxDurability}`, leftX, drawY - 6 * scale);
+              context.fillText(`${t('shield')}: ${Math.round(shield.durability)}/${shield.maxDurability}`, leftX, drawY - 6 * scale);
           } else {
               context.fillStyle = 'rgba(148, 163, 184, 0.05)';
               context.fillRect(leftX, drawY, barW, barH);
               
               context.font = `bold ${9 * scale}px mono`;
               context.fillStyle = '#64748b'; // Slate 500
-              context.fillText(`ARMOR RETAINED`, leftX, drawY - 6 * scale);
+              context.fillText(t('armor').toUpperCase(), leftX, drawY - 6 * scale);
           }
 
           // Medkits counter
@@ -4834,12 +4917,12 @@ doorsRef.current.forEach(door => {
           // Ammo status text
           let ammoText = '';
           if (player.isReloading) {
-              ammoText = 'RELOADING...';
+              ammoText = t('reload').toUpperCase() + '...';
               context.fillStyle = '#f59e0b';
           } else if (currentWeapon) {
               if (currentWeapon.category === 'melee') {
                   const isReady = player.shootCooldown <= 0;
-                  ammoText = isReady ? 'READY' : `COOLDOWN: ${player.shootCooldown.toFixed(1)}s`;
+                  ammoText = isReady ? t('readyBtn').toUpperCase() : `${t('reload').toUpperCase()}: ${player.shootCooldown.toFixed(1)}s`;
                   context.fillStyle = isReady ? 'white' : '#94a3b8';
               } else {
                   if (level.name === 'TRAINING GROUND' || isMultiplayer) {
@@ -4894,7 +4977,7 @@ doorsRef.current.forEach(door => {
                 context.textAlign = 'center';
                 context.shadowColor = 'black';
                 context.shadowBlur = 5 * scale;
-                context.fillText('[E] TAKEDOWN', enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
+                context.fillText(t('takedown'), enemyScreenPos.x, enemyScreenPos.y - enemy.radius * 2);
                 context.shadowBlur = 0;
             }
           } else if (interactionHintDoorIdRef.current !== null) {
@@ -4902,30 +4985,39 @@ doorsRef.current.forEach(door => {
             if (door) {
               const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
               const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
-              if (pointInPoly(midX, midY, viewPoly)) {
-                context.font = `bold ${14 * scale}px mono`;
-                context.fillStyle = 'white';
-                context.textAlign = 'center';
-                context.shadowColor = 'black';
-                context.shadowBlur = 5 * scale;
-                context.fillText('[E] INTERACT', midX, midY - 20 * scale);
-                context.shadowBlur = 0;
-              }
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = 'white';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText(t('interact'), midX, midY - 20 * scale);
+              context.shadowBlur = 0;
+            }
+          } else if (breachableDoorHintIdRef.current) {
+            const door = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+            if (door) {
+              const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
+              const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = '#f97316';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText('[E] BREACH / 贴上炸药', midX, midY - 20 * scale);
+              context.shadowBlur = 0;
             }
           } else if (lockedDoorHintIdRef.current) {
             const door = doorsRef.current.find(d => d.id === lockedDoorHintIdRef.current);
              if (door) {
               const midX = door.hinge.x + (door.length/2) * Math.cos(door.currentAngle);
               const midY = door.hinge.y + (door.length/2) * Math.sin(door.currentAngle);
-              if (pointInPoly(midX, midY, viewPoly)) {
-                context.font = `bold ${14 * scale}px mono`;
-                context.fillStyle = 'red';
-                context.textAlign = 'center';
-                context.shadowColor = 'black';
-                context.shadowBlur = 5 * scale;
-                context.fillText('LOCKED', midX, midY - 20 * scale);
-                context.shadowBlur = 0;
-              }
+              context.font = `bold ${14 * scale}px mono`;
+              context.fillStyle = 'red';
+              context.textAlign = 'center';
+              context.shadowColor = 'black';
+              context.shadowBlur = 5 * scale;
+              context.fillText(t('locked'), midX, midY - 20 * scale);
+              context.shadowBlur = 0;
             }
           }
       }
@@ -4977,10 +5069,10 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${36 * scale}px mono`;
               if (isMissionCompleteRef.current) {
                   context.fillStyle = '#10b981';
-                  context.fillText('MISSION COMPLETE', cx, py + 52 * scale);
+                  context.fillText(t('missionSuccess').toUpperCase(), cx, py + 52 * scale);
               } else {
                   context.fillStyle = '#ef4444';
-                  context.fillText('MISSION FAILED', cx, py + 52 * scale);
+                  context.fillText(t('died').toUpperCase(), cx, py + 52 * scale);
               }
               context.shadowBlur = 0;
 
@@ -4993,7 +5085,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'left';
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Mission Time:', leftX, rowY);
+              context.fillText(`${t('missionTime')}:`, leftX, rowY);
               context.font = `${18 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${missionTimeRef.current.toFixed(2)}s`, leftX + 160 * scale, rowY);
@@ -5001,7 +5093,7 @@ doorsRef.current.forEach(door => {
               rowY += rowGap;
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Kills:', leftX, rowY);
+              context.fillText(`${t('kills')}:`, leftX, rowY);
               context.font = `${18 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${kills} / ${totalEnemies}`, leftX + 160 * scale, rowY);
@@ -5011,7 +5103,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'left';
               context.font = `bold ${18 * scale}px mono`;
               context.fillStyle = '#cbd5e1';
-              context.fillText('Run Score:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('score')}:`, rightX - 80 * scale, rowY);
               context.font = `bold ${22 * scale}px mono`;
               context.fillStyle = '#34d399';
               context.fillText(`${runScoreRef.current}`, rightX + 40 * scale, rowY);
@@ -5020,7 +5112,7 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${16 * scale}px mono`;
               context.fillStyle = '#94a3b8';
               const projectedTotal = (typeof totalScore === 'number' ? totalScore : 0) + (level.isTrainingGround ? 0 : runScoreRef.current);
-              context.fillText('Projected Total:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('projectedTotal')}:`, rightX - 80 * scale, rowY);
               context.font = `${16 * scale}px mono`;
               context.fillStyle = 'white';
               context.fillText(`${projectedTotal}`, rightX + 40 * scale, rowY);
@@ -5029,7 +5121,7 @@ doorsRef.current.forEach(door => {
               context.font = `bold ${16 * scale}px mono`;
               context.fillStyle = '#94a3b8';
               const globalHigh = typeof highScore !== 'undefined' ? highScore : 0;
-              context.fillText('High Score:', rightX - 80 * scale, rowY);
+              context.fillText(`${t('highScore')}:`, rightX - 80 * scale, rowY);
               context.font = `${16 * scale}px mono`;
               context.fillStyle = (runScore > globalHigh) ? '#f59e0b' : 'white';
               context.fillText(`${globalHigh}`, rightX + 40 * scale, rowY);
@@ -5038,7 +5130,7 @@ doorsRef.current.forEach(door => {
               context.textAlign = 'center';
               context.font = `${18 * scale}px mono`;
               context.fillStyle = '#94a3b8';
-              context.fillText('Tap or press Space to continue', cx, py + panelH - 32 * scale);
+              context.fillText(t('pressToRespawn'), cx, py + panelH - 32 * scale);
           }
       }
       
@@ -5401,34 +5493,65 @@ doorsRef.current.forEach(door => {
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      resetGameOuterRef.current = null;
       // Clear end auto-close timer if component unmounts
       if (endAutoCloseTimerRef.current) { clearTimeout(endAutoCloseTimerRef.current); endAutoCloseTimerRef.current = null; }
     };
   }, [level, difficulty, loadout, customControls, aimSensitivity, agentSkinColor, isMultiplayer]);
 
   useEffect(() => {
-    // Prevent dual-finger pinch-to-zoom on the entire window natively using non-passive event listeners
-    const preventZoom = (e: TouchEvent) => {
-      if (e.touches.length > 1) {
+    const canvas = canvasRef.current;
+
+    // Prevent default touch gestures (pinch-to-zoom, swipe-to-scroll, bounce, pull-to-refresh)
+    // ONLY on the game canvas itself to preserve interactive menus and options outside!
+    const preventDefaultTouch = (e: TouchEvent) => {
+      if (e.cancelable) {
         e.preventDefault();
       }
     };
 
-    // Prevent Safari/iOS gesture-based zooming gestures
+    // Prevent browser zoom wheel gestures (especially with Ctrl/Pinch on trackpad)
+    const preventWheelZoom = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
+    };
+
+    // Prevent iOS/Safari desktop gestures zooming
     const preventGesture = (e: Event) => {
       e.preventDefault();
     };
 
-    window.addEventListener('touchstart', preventZoom, { passive: false });
-    window.addEventListener('touchmove', preventZoom, { passive: false });
+    // Prevent context menu (long press gesture or right click)
+    const preventCtxMenu = (e: Event) => {
+      e.preventDefault();
+    };
+
+    if (canvas) {
+      canvas.addEventListener('touchstart', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchend', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchcancel', preventDefaultTouch, { passive: false });
+    }
+
+    window.addEventListener('wheel', preventWheelZoom, { passive: false });
     window.addEventListener('gesturestart', preventGesture, { passive: false });
     window.addEventListener('gesturechange', preventGesture, { passive: false });
+    window.addEventListener('gestureend', preventGesture, { passive: false });
+    window.addEventListener('contextmenu', preventCtxMenu, { passive: false });
 
     return () => {
-      window.removeEventListener('touchstart', preventZoom);
-      window.removeEventListener('touchmove', preventZoom);
+      if (canvas) {
+        canvas.removeEventListener('touchstart', preventDefaultTouch);
+        canvas.removeEventListener('touchmove', preventDefaultTouch);
+        canvas.removeEventListener('touchend', preventDefaultTouch);
+        canvas.removeEventListener('touchcancel', preventDefaultTouch);
+      }
+      window.removeEventListener('wheel', preventWheelZoom);
       window.removeEventListener('gesturestart', preventGesture);
       window.removeEventListener('gesturechange', preventGesture);
+      window.removeEventListener('gestureend', preventGesture);
+      window.removeEventListener('contextmenu', preventCtxMenu);
     };
   }, []);
 
@@ -5472,10 +5595,6 @@ doorsRef.current.forEach(door => {
             p.targetX = payload.x; p.targetY = payload.y; p.direction = payload.direction; p.health = payload.health; p.isShooting = payload.isShooting; p.lastUpdateTime = performance.now();
             p.lastUpdate = Date.now();
             p.playerId = payload.id;
-            p.currentWeaponIndex = payload.currentWeaponIndex;
-            p.shieldName = payload.shieldName;
-            p.shieldDurability = payload.shieldDurability;
-            p.shieldMaxDurability = payload.shieldMaxDurability;
         } else {
             handlePlayerJoined(payload);
         }
@@ -5505,35 +5624,12 @@ doorsRef.current.forEach(door => {
                 reserveAmmo: weaponDef.reserveAmmo,
             };
             const dynamicSegments: Segment[] = [...wallSegmentsRef.current];
-            doorsRef.current.forEach(d => dynamicSegments.push({ a: d.hinge, b: { x: d.hinge.x + d.length * Math.cos(d.currentAngle), y: d.hinge.y + d.length * Math.sin(d.currentAngle) } }));
+            doorsRef.current.forEach(d => {
+                if (d.isBlownOpen) return;
+                dynamicSegments.push({ a: d.hinge, b: { x: d.hinge.x + d.length * Math.cos(d.currentAngle), y: d.hinge.y + d.length * Math.sin(d.currentAngle) } });
+            });
             createFireEffects(p.x, p.y, playerRef.current.radius, payload.baseAngle, remoteWeapon, 'enemy', dynamicSegments);
         }
-    };
-    const handleStartRound = (payload: { roundId: string }) => {
-        // Only open shop on THE_FACTORY
-        if (level.name === 'THE FACTORY') {
-            // Convert current runScore to money for the round (already done in addScore), show shop
-            openShopForRound();
-        }
-    };
-    const handleBuyWeapon = (payload: { playerId: string; weaponName: string; cost: number; attachments?: any }) => {
-        // Could display notifications; if payload.playerId === ownId we already processed purchase locally
-        console.log('[Network] buy-weapon', payload);
-        try {
-            const { playerId, weaponName, attachments } = payload;
-            if (playerId !== (networkClient && networkClient.ownId)) {
-                // Find remote player and apply purchased weapon instance
-                const rp = remotePlayersRef.current.find(p => p.id === playerId);
-                const created = createWeaponWithAttachments(weaponName, attachments || {});
-                if (rp) {
-                    (rp as any)['weapons'] = (rp as any)['weapons'] || [];
-                    (rp as any)['weapons'].push(created || { name: weaponName });
-                }
-                // show small on-screen message
-                setPurchaseMessage(`${playerId} bought ${weaponName}`);
-                setTimeout(() => setPurchaseMessage(null), 2000);
-            }
-        } catch (e) { console.error(e); }
     };
 
     const handlePlayerAction = (payload: any) => {
@@ -5546,13 +5642,17 @@ doorsRef.current.forEach(door => {
                 }
             } else if (action === 'player-killed') {
                 const { victimId, attackerId } = actionPayload;
-                // Generic kill feed only; rewards are now handled by authoritative score-update
-                const ownId = networkClient?.ownId;
-                if (attackerId === ownId) return;
-                const attackerName = attackerId ? String(attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-                const victimName = victimId ? String(victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-                setPurchaseMessage(`${attackerName} ELIMINATED ${victimName}`);
-                setTimeout(() => setPurchaseMessage(null), 3000);
+                if (attackerId === (networkClient && networkClient.ownId)) {
+                    playerRef.current.kills = (playerRef.current.kills || 0) + 1;
+                    addScore(50); // Provide 50 points
+                    setPurchaseMessage('YOU ELIMINATED AN OPERATOR! [+50]');
+                    setTimeout(() => setPurchaseMessage(null), 3000);
+                } else {
+                    const attackerName = attackerId ? String(attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
+                    const victimName = victimId ? String(victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
+                    setPurchaseMessage(`${attackerName} ELIMINATED ${victimName}`);
+                    setTimeout(() => setPurchaseMessage(null), 3000);
+                }
             }
         } catch(e) {}
     };
@@ -5562,72 +5662,8 @@ doorsRef.current.forEach(door => {
     networkClient.on('player-left', handlePlayerLeft);
     networkClient.on('player-update', handlePlayerUpdate);
     networkClient.on('fire-weapon', handleFireWeapon);
-    networkClient.on('start-round', handleStartRound as any);
-    networkClient.on('buy-weapon', handleBuyWeapon as any);
     networkClient.on('player-action' as any, handlePlayerAction as any);
-
-    const handleScoreUpdate = (payload: { players: Array<{ id: string; kills: number; deaths: number }>; totalKills: number; mode: 'tdm' | 'ffa' | '1v1' }) => {
-        try {
-            const ownId = networkClient?.ownId;
-            const previous = roomScoresRef.current;
-            const next: Record<string, { kills: number; deaths: number }> = {};
-            payload.players.forEach(p => {
-                next[p.id] = { kills: p.kills, deaths: p.deaths };
-            });
-            roomScoresRef.current = next;
-            setRoomScores(next);
-            setTotalRoomKills(payload.totalKills);
-
-            // Detect if our own kill count increased and reward the player
-            if (ownId) {
-                const prevOwn = previous[ownId];
-                const nextOwn = next[ownId];
-                if (prevOwn && nextOwn && nextOwn.kills > prevOwn.kills) {
-                    playerRef.current.kills = nextOwn.kills;
-                    addScore(50);
-                    setPurchaseMessage('YOU ELIMINATED AN OPERATOR! [+50]');
-                    setTimeout(() => setPurchaseMessage(null), 3000);
-
-                    // Replenish ammo for current weapon on player elimination
-                    const currentWeapon = playerRef.current.weapons[playerRef.current.currentWeaponIndex];
-                    if (currentWeapon && currentWeapon.magSize !== -1) {
-                        const magRefill = currentWeapon.magSize;
-                        currentWeapon.ammoInMag = Math.min(currentWeapon.magSize, currentWeapon.ammoInMag + magRefill);
-                        const def = WEAPONS[currentWeapon.name];
-                        const reserveRefill = def ? Math.ceil(def.reserveAmmo * 0.5) : Math.ceil(currentWeapon.reserveAmmo * 0.5);
-                        currentWeapon.reserveAmmo += reserveRefill;
-                    }
-                }
-                if (nextOwn) {
-                    playerRef.current.kills = nextOwn.kills;
-                    playerRef.current.deaths = nextOwn.deaths;
-                }
-            }
-        } catch (e) {}
-    };
-
-    const handleKillFeed = (payload: { victimId: string; attackerId: string; timestamp: number }) => {
-        try {
-            const ownId = networkClient?.ownId;
-            if (payload.attackerId === ownId) return; // already handled by score-update reward
-            const attackerName = payload.attackerId ? String(payload.attackerId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-            const victimName = payload.victimId ? String(payload.victimId).substring(0, 8).toUpperCase() : 'UNKNOWN';
-            setPurchaseMessage(`${attackerName} ELIMINATED ${victimName}`);
-            setTimeout(() => setPurchaseMessage(null), 3000);
-        } catch (e) {}
-    };
-
-    const handleLeaderboardUpdate = (payload: { killLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }>; kdLeaderboard: Array<{ id: string; name: string; kills: number; deaths: number; kd: number }> }) => {
-        try {
-            setGlobalKillLeaderboard(payload.killLeaderboard || []);
-            setGlobalKDLeaderboard(payload.kdLeaderboard || []);
-        } catch (e) {}
-    };
-
-    networkClient.on('score-update' as any, handleScoreUpdate as any);
-    networkClient.on('kill-feed' as any, handleKillFeed as any);
-    networkClient.on('leaderboard-update' as any, handleLeaderboardUpdate as any);
-
+    
     const handlePlayerHit = (payload: { targetId: string; damage: number; attackerId: string; impact?: { x: number; y: number }; sourceDir?: { x: number; y: number } }) => {
         try {
             if (!networkClient) return;
@@ -5646,21 +5682,7 @@ doorsRef.current.forEach(door => {
             if (networkClient.connected) {
             const player = playerRef.current;
             const isShooting = isShootingRef.current || touchStateRef.current.fire.id !== null || touchStateRef.current.fixedFire.id !== null;
-            const shield = player.weapons.find(w => w.name === 'Riot Shield');
-            const hasShield = shield && shield.durability != null && shield.durability > 0;
-            (networkClient as any).send('player-update', {
-                id: networkClient.ownId,
-                x: player.x,
-                y: player.y,
-                direction: playerDirectionRef.current,
-                health: player.health,
-                skinColor: agentSkinColor,
-                isShooting,
-                currentWeaponIndex: player.currentWeaponIndex,
-                shieldName: hasShield ? 'Riot Shield' : undefined,
-                shieldDurability: hasShield ? shield.durability : 0,
-                shieldMaxDurability: hasShield ? shield.maxDurability : 0
-            });
+            (networkClient as any).send('player-update', { id: networkClient.ownId, x: player.x, y: player.y, direction: playerDirectionRef.current, health: player.health, skinColor: agentSkinColor, isShooting });
         }
     }, 100);
 
@@ -5670,13 +5692,8 @@ doorsRef.current.forEach(door => {
         networkClient.off('player-left', handlePlayerLeft);
         networkClient.off('player-update', handlePlayerUpdate);
         networkClient.off('fire-weapon', handleFireWeapon);
-        networkClient.off('start-round', handleStartRound);
-        networkClient.off('buy-weapon', handleBuyWeapon);
         networkClient.off('player-hit', handlePlayerHit);
         networkClient.off('player-action', handlePlayerAction);
-        networkClient.off('score-update' as any, handleScoreUpdate as any);
-        networkClient.off('kill-feed' as any, handleKillFeed as any);
-        networkClient.off('leaderboard-update' as any, handleLeaderboardUpdate as any);
         clearInterval(intervalId);
     };
   }, [networkClient, isMultiplayer, agentSkinColor]);
@@ -5697,7 +5714,6 @@ doorsRef.current.forEach(door => {
             }
       if (isMultiplayer && (playerRef.current as any).isRespawning) return;
       if (e.key.toLowerCase() === 'p') { setIsPaused(p => !p); setShowInGameSettings(false); return; }
-      if (e.key === 'Tab') { e.preventDefault(); setShowScoreboard(true); return; }
       if (isPausedRef.current) return;
       keysPressedRef.current.add(e.key.toLowerCase());
       const player = playerRef.current;
@@ -5713,21 +5729,49 @@ doorsRef.current.forEach(door => {
                     takedownEffectsRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 60 * scaleRef.current, lifetime: 0.4, maxLifetime: 0.4 });
                     soundWavesRef.current.push({ x: enemy.x, y: enemy.y, radius: 0, maxRadius: 150 * scaleRef.current / cameraScaleRef.current, lifetime: 0.25, maxLifetime: 0.25, type: 'slash' });
                 }
+            } else if (breachableDoorHintIdRef.current !== null) {
+                const doorToInteract = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+                if (doorToInteract && !playerRef.current.isHealing) {
+                    doorToInteract.isBreachPlanted = true;
+                    doorToInteract.breachTimer = 5.0;
+                    
+                    const midX = doorToInteract.hinge.x + (doorToInteract.length / 2) * Math.cos(doorToInteract.closedAngle);
+                    const midY = doorToInteract.hinge.y + (doorToInteract.length / 2) * Math.sin(doorToInteract.closedAngle);
+                    
+                    soundWavesRef.current.push({
+                        x: midX,
+                        y: midY,
+                        radius: 0,
+                        maxRadius: 150 * scaleRef.current / cameraScaleRef.current,
+                        lifetime: 0.3,
+                        maxLifetime: 0.3,
+                        type: 'door'
+                    });
+                }
             } else if (interactionHintDoorIdRef.current !== null) {
-                if (now - lastEKeyPressTimeRef.current < 300 && lastInteractedDoorIdRef.current === interactionHintDoorIdRef.current) {
-                    const door = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
-                    if (door) door.targetAngle = Math.abs(door.currentAngle - door.closedAngle) < 0.1 ? (door.closedAngle + door.maxOpenAngle * door.swingDirection) : door.closedAngle;
-                } else {
-                    startDoorInteraction();
+                const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
+                    const isDoubleClick = (now - lastEKeyPressTimeRef.current < 300) && (lastInteractedDoorIdRef.current === doorToInteract.id);
+                    
+                    const doorVecX = Math.cos(doorToInteract.closedAngle);
+                    const doorVecY = Math.sin(doorToInteract.closedAngle);
+                    const normalX = -doorVecY * doorToInteract.swingDirection;
+                    const normalY = doorVecX * doorToInteract.swingDirection;
+                    const relX = playerRef.current.x - doorToInteract.hinge.x;
+                    const relY = playerRef.current.y - doorToInteract.hinge.y;
+                    const dotProd = relX * normalX + relY * normalY;
+
+                    if (isDoubleClick && dotProd < 0) {
+                        doorToInteract.targetAngle = doorToInteract.closedAngle;
+                        doorToInteract.angularVelocity = 0;
+                        doorToInteract.isPlayerHolding = false;
+                        interactingDoorIdRef.current = null;
+                    } else {
+                        startDoorInteraction();
+                    }
                 }
                 lastEKeyPressTimeRef.current = now;
                 lastInteractedDoorIdRef.current = interactionHintDoorIdRef.current;
-            }
-            break;
-        case 'b':
-            // Open shop (local test) only on factory
-            if (level.name === 'THE FACTORY') {
-                openShopForRound();
             }
             break;
         case '1': if (!player.isReloading) { previousWeaponIndexRef.current = player.currentWeaponIndex; player.currentWeaponIndex = 0; } break;
@@ -5758,13 +5802,17 @@ doorsRef.current.forEach(door => {
         case 'g': switchFireMode(); break;
         case 't': switchThrowable(); break;
         case 'h': startHealing(); break;
+        case 'v':
+            if (difficulty === 'test') {
+                resetGameOuterRef.current?.();
+            }
+            break;
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       // When in end screen, ignore keyup events (only Space keydown is handled to skip)
       if (isGameOverRef.current || isMissionCompleteRef.current) return;
       keysPressedRef.current.delete(e.key.toLowerCase());
-      if (e.key === 'Tab') { setShowScoreboard(false); return; }
       if (e.key.toLowerCase() === 'e') stopDoorInteraction();
       if (e.key.toLowerCase() === 'f') {
         if (isAimingThrowableRef.current && cookingThrowableRef.current) {
@@ -5962,8 +6010,51 @@ doorsRef.current.forEach(door => {
                 touchState.fire.lastX = touch.clientX;
                 touchState.fire.lastY = touch.clientY;
             } else if (controlKey === 'interact') {
-                if (!takedownHintEnemyRef.current && interactionHintDoorIdRef.current !== null) {
-                    startDoorInteraction(); // Hold to interact with doors
+                if (breachableDoorHintIdRef.current !== null) {
+                    const doorToInteract = doorsRef.current.find(d => d.id === breachableDoorHintIdRef.current);
+                    if (doorToInteract && !playerRef.current.isHealing) {
+                        doorToInteract.isBreachPlanted = true;
+                        doorToInteract.breachTimer = 5.0;
+                        
+                        const midX = doorToInteract.hinge.x + (doorToInteract.length / 2) * Math.cos(doorToInteract.closedAngle);
+                        const midY = doorToInteract.hinge.y + (doorToInteract.length / 2) * Math.sin(doorToInteract.closedAngle);
+                        
+                        soundWavesRef.current.push({
+                            x: midX,
+                            y: midY,
+                            radius: 0,
+                            maxRadius: 150 * scaleRef.current / cameraScaleRef.current,
+                            lifetime: 0.3,
+                            maxLifetime: 0.3,
+                            type: 'door'
+                        });
+                    }
+                } else if (!takedownHintEnemyRef.current && interactionHintDoorIdRef.current !== null) {
+                    const doorToInteract = doorsRef.current.find(d => d.id === interactionHintDoorIdRef.current);
+                    if (doorToInteract && !doorToInteract.locked && !playerRef.current.isHealing) {
+                        const now = performance.now();
+                        const isDoubleClick = (now - lastEKeyPressTimeRef.current < 300) && (lastInteractedDoorIdRef.current === doorToInteract.id);
+                        
+                        const doorVecX = Math.cos(doorToInteract.closedAngle);
+                        const doorVecY = Math.sin(doorToInteract.closedAngle);
+                        const normalX = -doorVecY * doorToInteract.swingDirection;
+                        const normalY = doorVecX * doorToInteract.swingDirection;
+                        const relX = playerRef.current.x - doorToInteract.hinge.x;
+                        const relY = playerRef.current.y - doorToInteract.hinge.y;
+                        const dotProd = relX * normalX + relY * normalY;
+
+                        if (isDoubleClick && dotProd < 0) {
+                            doorToInteract.targetAngle = doorToInteract.closedAngle;
+                            doorToInteract.angularVelocity = 0;
+                            doorToInteract.isPlayerHolding = false;
+                            interactingDoorIdRef.current = null;
+                        } else {
+                            startDoorInteraction();
+                        }
+                        
+                        lastEKeyPressTimeRef.current = now;
+                        lastInteractedDoorIdRef.current = doorToInteract.id;
+                    }
                 }
             } else if (controlKey === 'throwableSelect') { // Repurposed as throw button
                  isAimingThrowableRef.current = true;
@@ -6119,140 +6210,29 @@ doorsRef.current.forEach(door => {
 
   return (
     <div className="relative w-full h-full font-mono">
-        {/* HUD: score display */}
-        <div className="absolute top-4 left-4 z-40 bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300 font-mono">
-            <div className="text-sm">
-                {level.isTrainingGround ? 'Practice Score' : 'Score'}: <span className="font-bold">{runScore}</span>
-            </div>
+        {/* HUD: score display & test mode tools */}
+        <div className="absolute top-4 left-4 z-40 flex flex-col gap-2 font-mono">
+            {difficulty !== 'test' ? (
+                <div className="bg-black/50 px-3 py-1 rounded-md border border-teal-500 text-teal-300">
+                    <div className="text-sm">
+                        {level.isTrainingGround ? 'Practice Score' : 'Score'}: <span className="font-bold">{runScore}</span>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                    <div className="bg-amber-950/80 border border-amber-600 px-3 py-1.5 rounded-md text-amber-200 text-xs font-bold tracking-wide shadow-md">
+                        {language === 'zh' ? '测试模式 (不计积分)' : 'TEST MODE (NO SCORE)'}
+                    </div>
+                    <button 
+                        onClick={() => resetGameOuterRef.current?.()}
+                        className="bg-red-950/85 hover:bg-red-900 border border-red-500 text-red-200 px-3 py-1.5 rounded-md font-bold text-xs tracking-wider cursor-pointer shadow-lg shadow-red-950/50 flex items-center gap-1.5 transition-all active:scale-95 select-none"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-rotate-ccw"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        {language === 'zh' ? '一键还原地图 (按V)' : 'RESTORE MAP (Press V)'}
+                    </button>
+                </div>
+            )}
         </div>
-
-        {/* HUD: multiplayer score display */}
-        {isMultiplayer && gameRoom && (
-            <div className="absolute top-4 right-4 z-40 bg-black/60 px-4 py-2 rounded-md border border-teal-500/50 text-teal-300 font-mono">
-                <div className="text-xs text-gray-400 uppercase tracking-wider">{gameRoom.mode} 模式</div>
-                <div className="text-sm mt-0.5">
-                    KILLS: <span className="font-bold text-white">{playerRef.current.kills || 0}</span>
-                    <span className="mx-1.5 text-gray-500">/</span>
-                    DEATHS: <span className="font-bold text-white">{playerRef.current.deaths || 0}</span>
-                </div>
-                {gameRoom.mode === 'tdm' && (
-                    <div className="text-xs mt-0.5 text-gray-300">
-                        TOTAL KILLS: <span className="font-bold text-teal-300">{totalRoomKills}</span>
-                    </div>
-                )}
-                <div className="text-[10px] text-gray-500 mt-1">HOLD TAB FOR SCOREBOARD</div>
-            </div>
-        )}
-
-        {/* Scoreboard overlay */}
-        {isMultiplayer && showScoreboard && gameRoom && (
-            <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-                <div className="bg-gray-950 border-2 border-teal-500 rounded-lg p-6 w-full max-w-2xl shadow-lg shadow-teal-500/20 text-white max-h-[80vh] flex flex-col">
-                    <div className="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
-                        <h2 className="text-2xl font-bold tracking-widest text-teal-300">SCOREBOARD</h2>
-                        <div className="flex gap-1">
-                            {(['room', 'kills', 'kd'] as const).map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setScoreboardTab(tab)}
-                                    className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded border ${
-                                        scoreboardTab === tab
-                                            ? 'bg-teal-600 text-black border-teal-500'
-                                            : 'bg-gray-900 text-gray-400 border-gray-800 hover:border-gray-600'
-                                    }`}
-                                >
-                                    {tab === 'room' ? 'Room' : tab === 'kills' ? 'Kills Top' : 'KD Top'}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="flex-grow overflow-y-auto">
-                        {scoreboardTab === 'room' ? (
-                            <div className="space-y-2">
-                                <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold px-2">
-                                    <div className="col-span-5">Player</div>
-                                    <div className="col-span-2 text-center">Kills</div>
-                                    <div className="col-span-2 text-center">Deaths</div>
-                                    <div className="col-span-3 text-center">K/D</div>
-                                </div>
-                                {Object.entries(roomScores)
-                                    .sort(([, a], [, b]) => (b as { kills: number }).kills - (a as { kills: number }).kills)
-                                    .map(([id, stats]) => {
-                                        const isMe = id === networkClient?.ownId;
-                                        const s = stats as { kills: number; deaths: number };
-                                        const kd = s.deaths === 0 ? s.kills : (s.kills / s.deaths).toFixed(2);
-                                        return (
-                                            <div key={id} className={`grid grid-cols-12 gap-2 items-center px-3 py-2 rounded border ${
-                                                isMe ? 'bg-teal-950/40 border-teal-500/40' : 'bg-gray-900/30 border-gray-800'
-                                            }`}>
-                                                <div className="col-span-5 font-mono text-sm truncate">
-                                                    {isMe && <span className="text-teal-400 mr-1">●</span>}
-                                                    {id.substring(0, 8).toUpperCase()}
-                                                </div>
-                                                <div className="col-span-2 text-center font-bold">{s.kills}</div>
-                                                <div className="col-span-2 text-center font-bold">{s.deaths}</div>
-                                                <div className="col-span-3 text-center font-bold text-teal-300">{kd}</div>
-                                            </div>
-                                        );
-                                    })}
-                                {gameRoom.mode === 'tdm' && (
-                                    <div className="mt-4 pt-3 border-t border-gray-800 text-center">
-                                        <span className="text-sm text-gray-400 uppercase tracking-wider">Total Kills: </span>
-                                        <span className="text-xl font-bold text-teal-300 ml-2">{totalRoomKills}</span>
-                                    </div>
-                                )}
-                            </div>
-                        ) : scoreboardTab === 'kills' ? (
-                            <div className="space-y-2">
-                                <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold px-2">
-                                    <div className="col-span-1 text-center">#</div>
-                                    <div className="col-span-6">Player</div>
-                                    <div className="col-span-2 text-center">Kills</div>
-                                    <div className="col-span-3 text-center">K/D</div>
-                                </div>
-                                {globalKillLeaderboard.map((entry, idx) => (
-                                    <div key={entry.id} className={`grid grid-cols-12 gap-2 items-center px-3 py-2 rounded border ${
-                                        entry.id === networkClient?.ownId ? 'bg-teal-950/40 border-teal-500/40' : 'bg-gray-900/30 border-gray-800'
-                                    }`}>
-                                        <div className="col-span-1 text-center font-bold text-gray-400">{idx + 1}</div>
-                                        <div className="col-span-6 font-mono text-sm truncate">{entry.name}</div>
-                                        <div className="col-span-2 text-center font-bold">{entry.kills}</div>
-                                        <div className="col-span-3 text-center font-bold text-teal-300">{entry.kd.toFixed(2)}</div>
-                                    </div>
-                                ))}
-                                {globalKillLeaderboard.length === 0 && (
-                                    <div className="text-center text-gray-500 py-8 text-sm">NO DATA YET</div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
-                                <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold px-2">
-                                    <div className="col-span-1 text-center">#</div>
-                                    <div className="col-span-6">Player</div>
-                                    <div className="col-span-2 text-center">K/D</div>
-                                    <div className="col-span-3 text-center">Kills</div>
-                                </div>
-                                {globalKDLeaderboard.map((entry, idx) => (
-                                    <div key={entry.id} className={`grid grid-cols-12 gap-2 items-center px-3 py-2 rounded border ${
-                                        entry.id === networkClient?.ownId ? 'bg-teal-950/40 border-teal-500/40' : 'bg-gray-900/30 border-gray-800'
-                                    }`}>
-                                        <div className="col-span-1 text-center font-bold text-gray-400">{idx + 1}</div>
-                                        <div className="col-span-6 font-mono text-sm truncate">{entry.name}</div>
-                                        <div className="col-span-2 text-center font-bold text-teal-300">{entry.kd.toFixed(2)}</div>
-                                        <div className="col-span-3 text-center font-bold">{entry.kills}</div>
-                                    </div>
-                                ))}
-                                {globalKDLeaderboard.length === 0 && (
-                                    <div className="text-center text-gray-500 py-8 text-sm">NO DATA YET</div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-        )}
-
         <canvas ref={canvasRef} onTouchStart={handleTouch} onTouchMove={handleTouch} onTouchEnd={handleTouch} className="w-full h-full" />
         {isPortrait && (
              <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-center p-4">
@@ -6318,73 +6298,6 @@ doorsRef.current.forEach(door => {
                         </div>
                     )}
                  </div>
-            </div>
-        )}
-        {showShop && level.name === 'THE FACTORY' && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-                <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-3xl shadow-lg text-white">
-                    <h2 className="text-3xl font-bold text-teal-300 mb-4">ROUND SHOP</h2>
-                    <div className="flex items-center justify-between mb-4">
-                        <p className="text-sm text-gray-300">Round Money: <span className="font-mono text-teal-300">{roundMoney}</span></p>
-                        <p className="text-sm text-gray-300">Shop timer: <span className="font-mono text-teal-300">{shopTimer ?? 0}s</span></p>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto">
-                        {Object.keys(WEAPONS).map((wName) => {
-                            const def = WEAPONS[wName];
-                            const cost = (def as any).cost || 0;
-                            // Only show weapons that are not training-only and that map to a valid slot
-                            return (
-                                <div key={wName} className="p-3 bg-gray-800 rounded-md border border-gray-700">
-                                    <div className="font-bold text-lg">{def.name} <span className="text-sm text-gray-400 ml-2">({def.category})</span></div>
-                                    <div className="text-sm text-gray-400">{def.description}</div>
-                                    {/* Attachment selectors */}
-                                    {def.attachmentSlots && Object.keys(def.attachmentSlots).length > 0 && (
-                                        <div className="mt-2">
-                                            {Object.keys(def.attachmentSlots).map(slotName => (
-                                                <div key={slotName} className="text-sm text-gray-300 mt-1">
-                                                    <label className="mr-2">{slotName}:</label>
-                                                    <select className="bg-gray-700 text-white p-1 rounded" value={(selectedAttachmentsRef.current[wName] && selectedAttachmentsRef.current[wName][slotName]) || ''} onChange={(e) => {
-                                                        const cur = selectedAttachmentsRef.current[wName] || {};
-                                                        const next = { ...cur, [slotName]: e.target.value };
-                                                        selectedAttachmentsRef.current = { ...selectedAttachmentsRef.current, [wName]: next };
-                                                        // force update UI by toggling a state
-                                                        setRoundMoney(r => r);
-                                                    }}>
-                                                        <option value="">--</option>
-                                                        {def.attachmentSlots[slotName].map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
-                                                    </select>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <div className="mt-2 flex items-center justify-between">
-                                        <div className="text-teal-300 font-mono">{cost}</div>
-                                        <button onClick={() => {
-                                            const attachments = selectedAttachmentsRef.current[wName] || {};
-                                            // Attempt purchase: check funds
-                                            if (roundMoneyRef.current < cost) {
-                                                setPurchaseMessage('Not enough money');
-                                                setTimeout(() => setPurchaseMessage(null), 2000);
-                                                return;
-                                            }
-                                            // Apply purchase locally
-                                            buyWeapon(wName);
-                                            try { networkClient && (networkClient as any).send('buy-weapon', { playerId: networkClient.ownId, weaponName: wName, cost, attachments }); } catch {}
-                                            setPurchaseMessage('Purchased ' + def.name);
-                                            setTimeout(() => setPurchaseMessage(null), 2000);
-                                        }} className="px-3 py-1 bg-teal-600 text-black rounded-md font-bold">BUY</button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div className="mt-6 flex justify-end">
-                        <div className="flex items-center gap-4">
-                            {purchaseMessage && <div className="text-sm text-teal-300">{purchaseMessage}</div>}
-                            <button onClick={() => { setShowShop(false); startRound(); }} className="px-6 py-3 bg-teal-600 text-black font-bold rounded-md">START ROUND</button>
-                        </div>
-                    </div>
-                </div>
             </div>
         )}
         {isCustomizingInGame && (
