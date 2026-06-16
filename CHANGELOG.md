@@ -5,7 +5,13 @@
 ## [2026-06-16]
 
 ### Changes
-- 鍥為€€闄や簡鑱旀満閮藉畬缇庣殑鐗堟湰 
+- feat: update game canvas, lobby UI, networking and server logic
+- 回退除了联机都完美的版本
 
-### Stats
- App.tsx                         |    3 +-  README.md                       |    3 +-  components/GameCanvas.tsx       | 1491 ++++++++++++++++++---------------------  components/MainMenu.tsx         |    5 +-  components/MultiplayerLobby.tsx |  188 ++---  network.ts                      |   18 -  server.ts                       |  228 +-----  7 files changed, 775 insertions(+), 1161 deletions(-)
+### Stats (Latest Commit)
+- App.tsx, components/GameCanvas.tsx, components/MainMenu.tsx, components/MultiplayerLobby.tsx, network.ts, server.ts, .server-stats.json
+- 7 files changed, 747 insertions(+), 159 deletions(-)
+
+### Stats (Previous Commit)
+- App.tsx, README.md, components/GameCanvas.tsx, components/MainMenu.tsx, components/MultiplayerLobby.tsx, network.ts, server.ts
+- 8 files changed, 786 insertions(+), 1161 deletions(-)

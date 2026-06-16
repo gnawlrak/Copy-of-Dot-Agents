@@ -4,7 +4,7 @@ import { Globe, Users, Gamepad2, Radio, Play, Plus, Shuffle, ArrowRight } from '
 import { useLanguage } from '../LanguageContext';
 
 interface MultiplayerLobbyProps {
-  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => void;
+  onJoinGame: (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => void;
   missions: LevelDefinition[];
 }
 
@@ -14,6 +14,15 @@ interface ActiveRoom {
   mode: 'tdm' | 'ffa' | '1v1';
   levelName: string;
   playersCount: number;
+  maxPlayers: number;
+}
+
+interface LeaderboardEntry {
+  id: string;
+  name: string;
+  kills: number;
+  deaths: number;
+  kd: number;
 }
 
 const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, missions }) => {
@@ -24,11 +33,15 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
     const [livePlayersCount, setLivePlayersCount] = useState<number>(0);
     const [activeRooms, setActiveRooms] = useState<ActiveRoom[]>([]);
     const [isLoadingRooms, setIsLoadingRooms] = useState(true);
+    const [leaderboardTab, setLeaderboardTab] = useState<'kills' | 'kd'>('kills');
+    const [killLeaderboard, setKillLeaderboard] = useState<LeaderboardEntry[]>([]);
+    const [kdLeaderboard, setKDLeaderboard] = useState<LeaderboardEntry[]>([]);
 
     // Custom Room Form State
     const [customRoomName, setCustomRoomName] = useState('ALPHA SQUADRON');
     const [selectedLevelIndex, setSelectedLevelIndex] = useState(0);
     const [selectedMode, setSelectedMode] = useState<'tdm' | 'ffa' | '1v1'>('tdm');
+    const [maxPlayers, setMaxPlayers] = useState<number>(8);
 
     // Fetch live session info
     const fetchLobbyStats = async () => {
@@ -43,6 +56,15 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
             const dataRooms = await resRooms.json();
             if (Array.isArray(dataRooms.rooms)) {
                 setActiveRooms(dataRooms.rooms);
+            }
+
+            const resLeaderboards = await fetch('/api/leaderboards');
+            const dataLeaderboards = await resLeaderboards.json();
+            if (Array.isArray(dataLeaderboards.killLeaderboard)) {
+                setKillLeaderboard(dataLeaderboards.killLeaderboard);
+            }
+            if (Array.isArray(dataLeaderboards.kdLeaderboard)) {
+                setKDLeaderboard(dataLeaderboards.kdLeaderboard);
             }
         } catch (e) {
             console.error('[Lobby] Failed to synchronize live multiplayer states:', e);
@@ -62,14 +84,15 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
         const choiceLevel = availableLevels[selectedLevelIndex] || availableLevels[0];
         const randomId = `ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
         if (choiceLevel) {
-            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode);
+            const resolvedMax = selectedMode === '1v1' ? 2 : Math.max(2, Math.min(16, maxPlayers));
+            onJoinGame(choiceLevel, randomId, customRoomName.trim() || 'TACTICAL SQUAD', selectedMode, resolvedMax);
         }
     };
 
     // Quick matchmaking trigger (Quick Play)
     const handleQuickMatchmaking = () => {
-        // Look for any existing room that has space (e.g. fewer than 8 players)
-        const joinableRoom = activeRooms.find(r => r.playersCount < 8);
+        // Look for any existing room that has space
+        const joinableRoom = activeRooms.find(r => r.playersCount < r.maxPlayers);
         
         if (joinableRoom) {
             // Find corresponding level definition by name to join
@@ -81,8 +104,9 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
             const randomMode: 'tdm' | 'ffa' | '1v1' = (['tdm', 'ffa', '1v1'] as const)[Math.floor(Math.random() * 3)];
             const randomId = `ROOM_${Math.floor(1000 + Math.random() * 9000)}`;
             const randomName = `${language === 'en' ? 'MATCH' : '战术特训'} #${Math.floor(100 + Math.random() * 900)}`;
+            const randomMax = randomMode === '1v1' ? 2 : 8;
             
-            onJoinGame(randomLevel, randomId, randomName, randomMode);
+            onJoinGame(randomLevel, randomId, randomName, randomMode, randomMax);
         }
     };
 
@@ -165,7 +189,12 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                   <button
                     key={m.value}
                     type="button"
-                    onClick={() => setSelectedMode(m.value as any)}
+                    onClick={() => {
+                      setSelectedMode(m.value as any);
+                      if (m.value === '1v1') {
+                        setMaxPlayers(2);
+                      }
+                    }}
                     className={`p-2.5 rounded border-2 text-center transition-all cursor-pointer ${
                       selectedMode === m.value 
                         ? 'border-teal-500 bg-teal-950/40 text-teal-300 font-bold' 
@@ -178,6 +207,25 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
                 ))}
               </div>
             </div>
+
+            {/* Max Players */}
+            {selectedMode !== '1v1' && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">{language === 'en' ? 'Max Players' : '最大人数 / Max Players'}</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={2}
+                    max={16}
+                    step={1}
+                    value={maxPlayers}
+                    onChange={(e) => setMaxPlayers(parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                  />
+                  <span className="text-sm font-bold text-teal-300 font-mono w-8 text-right">{maxPlayers}</span>
+                </div>
+              </div>
+            )}
 
             {/* Select Map */}
             <div className="flex flex-col gap-1.5">
@@ -208,70 +256,124 @@ const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({ onJoinGame, mission
 
         </div>
 
-        {/* Right column: Live Session List */}
-        <div className="lg:col-span-7 bg-gray-950/40 p-6 rounded-lg border-2 border-gray-800 shadow-sm flex flex-col h-[520px]">
-          <div className="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
-            <div className="flex items-center gap-2">
-              <Radio className="h-5 w-5 text-teal-400 animate-pulse" />
-              <h3 className="text-sm font-bold tracking-widest text-gray-300 uppercase font-mono">{language === 'en' ? 'ACTIVE SECTOR LOBBIES' : '当前活跃战网房间'}</h3>
+        {/* Right column: Live Session List & Leaderboards */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="bg-gray-950/40 p-6 rounded-lg border-2 border-gray-800 shadow-sm flex flex-col h-[420px]">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <Radio className="h-5 w-5 text-teal-400 animate-pulse" />
+                <h3 className="text-sm font-bold tracking-widest text-gray-300 uppercase font-mono">{language === 'en' ? 'ACTIVE SECTOR LOBBIES' : '当前活跃战网房间'}</h3>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1 bg-teal-950/40 border border-teal-500/20 rounded text-xs font-bold text-teal-300 font-mono">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-[ping_1.5s_infinite_alternate]" />
+                {livePlayersCount} {language === 'en' ? 'Operators Online' : '特工在线联络'}
+              </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1 bg-teal-950/40 border border-teal-500/20 rounded text-xs font-bold text-teal-300 font-mono">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-[ping_1.5s_infinite_alternate]" />
-              {livePlayersCount} {language === 'en' ? 'Operators Online' : '特工在线联络'}
+
+            <div className="flex-grow overflow-y-auto pr-1 space-y-3">
+              {isLoadingRooms ? (
+                <div className="h-full flex items-center justify-center text-gray-500 font-bold tracking-wider text-sm animate-pulse">
+                  {language === 'en' ? 'SYNCING ACTIVE ROOM SIGNALS...' : '正在同步当前活跃战场信号...'}
+                </div>
+              ) : activeRooms.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-dashed border-gray-800 rounded bg-gray-900/10">
+                  <Radio className="h-8 w-8 text-gray-700 mb-2" />
+                  <p className="text-sm font-bold text-gray-600 uppercase tracking-widest font-mono">{language === 'en' ? 'NO ACTIVE LOBBIES IN SECTOR' : '当前战区暂无活跃房间'}</p>
+                  <p className="text-xs text-gray-500 mt-1">{language === 'en' ? 'Use the command panel on the left or Quick Play to launch the first battle!' : '利用左侧命令面板创建或使用一键自动匹配开启首个近战战区！'}</p>
+                </div>
+              ) : (
+                activeRooms.map((room) => {
+                  const targetLvl = availableLevels.find(l => l.name === room.levelName);
+                  return (
+                    <div key={room.id} className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 p-4 bg-gray-950 border-2 border-gray-850 rounded-md hover:border-teal-500/30 transition-all">
+                        <div className="flex-grow min-w-0">
+                             <div className="flex items-center gap-2.5 flex-wrap">
+                               <h4 className="text-base font-bold text-teal-400 tracking-wider truncate max-w-[200px]">
+                                  {room.name}
+                               </h4>
+                               <span className="px-2 py-0.5 bg-gray-900 border border-gray-800 text-[10px] font-mono font-bold text-sky-400 rounded-sm uppercase">
+                                 {room.mode.toUpperCase()} {language === 'en' ? 'MODE' : '模式'}
+                               </span>
+                             </div>
+                             <p className="text-gray-400 text-xs mt-1 uppercase tracking-wider font-mono">
+                               {language === 'en' ? 'MAP' : '演练地图'}: <span className="text-gray-300 font-extrabold">{getLevelDisplayName(room.levelName)}</span>
+                             </p>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-md min-w-[80px]">
+                              <Users className="h-4 w-4 text-sky-400/80" />
+                              <div>
+                                  <p className="text-[9px] text-gray-500 font-bold uppercase leading-tight leading-none">{language === 'en' ? 'MEMBERS' : '在线干员'}</p>
+                                  <p className="text-xs font-bold text-white font-mono leading-none mt-1">{room.playersCount} / {room.maxPlayers}</p>
+                              </div>
+                          </div>
+
+                          <button
+                              onClick={() => targetLvl && onJoinGame(targetLvl, room.id, room.name, room.mode)}
+                              disabled={!targetLvl || room.playersCount >= room.maxPlayers}
+                              className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white font-bold text-sm rounded transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed uppercase"
+                          >
+                              {language === 'en' ? 'ENGAGE' : '参战突入'} <ArrowRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto pr-1 space-y-3">
-            {isLoadingRooms ? (
-              <div className="h-full flex items-center justify-center text-gray-500 font-bold tracking-wider text-sm animate-pulse">
-                {language === 'en' ? 'SYNCING ACTIVE ROOM SIGNALS...' : '正在同步当前活跃战场信号...'}
+          {/* Leaderboards */}
+          <div className="bg-gray-950/40 p-6 rounded-lg border-2 border-gray-800 shadow-sm">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <Gamepad2 className="h-5 w-5 text-sky-400" />
+                <h3 className="text-sm font-bold tracking-widest text-gray-300 uppercase font-mono">{language === 'en' ? 'GLOBAL LEADERBOARDS' : '全球排行榜 (LEADERBOARDS)'}</h3>
               </div>
-            ) : activeRooms.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-dashed border-gray-800 rounded bg-gray-900/10">
-                <Radio className="h-8 w-8 text-gray-700 mb-2" />
-                <p className="text-sm font-bold text-gray-600 uppercase tracking-widest font-mono">{language === 'en' ? 'NO ACTIVE LOBBIES IN SECTOR' : '当前战区暂无活跃房间'}</p>
-                <p className="text-xs text-gray-500 mt-1">{language === 'en' ? 'Use the command panel on the left or Quick Play to launch the first battle!' : '利用左侧命令面板创建或使用一键自动匹配开启首个近战战区！'}</p>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setLeaderboardTab('kills')}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${
+                    leaderboardTab === 'kills'
+                      ? 'bg-teal-600 text-black border-teal-500'
+                      : 'bg-gray-900 text-gray-400 border-gray-800 hover:border-gray-600'
+                  }`}
+                >
+                  Kills
+                </button>
+                <button
+                  onClick={() => setLeaderboardTab('kd')}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${
+                    leaderboardTab === 'kd'
+                      ? 'bg-teal-600 text-black border-teal-500'
+                      : 'bg-gray-900 text-gray-400 border-gray-800 hover:border-gray-600'
+                  }`}
+                >
+                  K/D
+                </button>
               </div>
-            ) : (
-              activeRooms.map((room) => {
-                const targetLvl = availableLevels.find(l => l.name === room.levelName);
-                return (
-                  <div key={room.id} className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 p-4 bg-gray-950 border-2 border-gray-850 rounded-md hover:border-teal-500/30 transition-all">
-                      <div className="flex-grow min-w-0">
-                           <div className="flex items-center gap-2.5 flex-wrap">
-                             <h4 className="text-base font-bold text-teal-400 tracking-wider truncate max-w-[200px]">
-                                {room.name}
-                             </h4>
-                             <span className="px-2 py-0.5 bg-gray-900 border border-gray-800 text-[10px] font-mono font-bold text-sky-400 rounded-sm uppercase">
-                               {room.mode.toUpperCase()} {language === 'en' ? 'MODE' : '模式'}
-                             </span>
-                           </div>
-                           <p className="text-gray-400 text-xs mt-1 uppercase tracking-wider font-mono">
-                             {language === 'en' ? 'MAP' : '演练地图'}: <span className="text-gray-300 font-extrabold">{getLevelDisplayName(room.levelName)}</span>
-                           </p>
-                      </div>
+            </div>
 
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-md min-w-[80px]">
-                            <Users className="h-4 w-4 text-sky-400/80" />
-                            <div>
-                                <p className="text-[9px] text-gray-500 font-bold uppercase leading-tight leading-none">{language === 'en' ? 'MEMBERS' : '在线干员'}</p>
-                                <p className="text-xs font-bold text-white font-mono leading-none mt-1">{room.playersCount} / 8</p>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={() => targetLvl && onJoinGame(targetLvl, room.id, room.name, room.mode)}
-                            disabled={!targetLvl}
-                            className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white font-bold text-sm rounded transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed uppercase"
-                        >
-                            {language === 'en' ? 'ENGAGE' : '参战突入'} <ArrowRight className="h-4 w-4" />
-                        </button>
-                      </div>
-                  </div>
-                );
-              })
-            )}
+            <div className="max-h-[220px] overflow-y-auto pr-1 space-y-2">
+              <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold px-2">
+                <div className="col-span-1 text-center">#</div>
+                <div className="col-span-6">Player</div>
+                <div className="col-span-2 text-center">{leaderboardTab === 'kills' ? 'Kills' : 'K/D'}</div>
+                <div className="col-span-3 text-center">{leaderboardTab === 'kills' ? 'K/D' : 'Kills'}</div>
+              </div>
+              {(leaderboardTab === 'kills' ? killLeaderboard : kdLeaderboard).map((entry, idx) => (
+                <div key={entry.id} className="grid grid-cols-12 gap-2 items-center px-3 py-2 rounded bg-gray-900/30 border border-gray-800">
+                  <div className="col-span-1 text-center font-bold text-gray-400">{idx + 1}</div>
+                  <div className="col-span-6 font-mono text-sm truncate text-gray-200">{entry.name}</div>
+                  <div className="col-span-2 text-center font-bold">{leaderboardTab === 'kills' ? entry.kills : entry.kd.toFixed(2)}</div>
+                  <div className="col-span-3 text-center font-bold text-teal-300">{leaderboardTab === 'kills' ? entry.kd.toFixed(2) : entry.kills}</div>
+                </div>
+              ))}
+              {(leaderboardTab === 'kills' ? killLeaderboard : kdLeaderboard).length === 0 && (
+                <div className="text-center text-gray-500 py-6 text-sm">NO DATA YET</div>
+              )}
+            </div>
           </div>
         </div>
 

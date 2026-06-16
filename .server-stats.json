@@ -1,0 +1,24 @@
+{
+  "players": {
+    "player_xa39ge": {
+      "kills": 0,
+      "deaths": 1,
+      "lastSeen": "2026-06-16T09:15:59.127Z"
+    },
+    "player_1ztokq": {
+      "kills": 1,
+      "deaths": 0,
+      "lastSeen": "2026-06-16T09:15:59.127Z"
+    },
+    "player_w1b0dj": {
+      "kills": 0,
+      "deaths": 1,
+      "lastSeen": "2026-06-16T09:45:07.202Z"
+    },
+    "player_umu44d": {
+      "kills": 1,
+      "deaths": 0,
+      "lastSeen": "2026-06-16T09:45:07.202Z"
+    }
+  }
+}

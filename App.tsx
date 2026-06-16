@@ -256,12 +256,12 @@ const App: React.FC = () => {
     setGameState('in-game');
   };
 
-  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1') => {
+  const handleJoinMultiplayerGame = (level: LevelDefinition, roomId: string, roomName: string, mode: 'tdm' | 'ffa' | '1v1', maxPlayers?: number) => {
     if (networkClientRef.current) {
       if (currentUser) {
           networkClientRef.current.ownName = currentUser;
       }
-      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name);
+      networkClientRef.current.setRoomInfo(roomId, roomName, mode, level.name, maxPlayers);
     }
     setSelectedLevel(level);
     setIsMultiplayer(true);
@@ -309,7 +309,7 @@ const App: React.FC = () => {
         };
         // Persist and then return to main menu (singleplayer) or previous state (multiplayer)
         const targetState = isMultiplayer ? previousState : 'main-menu';
-        SaveSystem.saveGameData(gameData).then(() => {
+        SaveSystem.saveGameData(currentUser || 'guest', gameData).then(() => {
             setSyncStatus('synced');
             setTimeout(() => setSyncStatus('idle'), 1500);
             setGameState(targetState);
@@ -499,6 +499,7 @@ const App: React.FC = () => {
             syncStatus={syncStatus}
             totalScore={totalScore}
             highScore={highScore}
+            currentUser={currentUser || undefined}
         />;
     }
   };
