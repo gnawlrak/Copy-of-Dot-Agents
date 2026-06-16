@@ -481,6 +481,7 @@ const App: React.FC = () => {
                 weaponName={weaponName}
                 currentAttachments={currentAttachments}
                 onAttachmentsChange={handleAttachmentsChange}
+                onBack={handleBackToLoadout}
             />
           );
       }
