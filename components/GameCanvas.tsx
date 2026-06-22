@@ -5580,15 +5580,17 @@ doorsRef.current.forEach(door => {
     };
 
     const resizeHandler = () => {
-        if (!canvasRef.current) return;
-        const canvas = canvasRef.current;
-        const parent = canvas.parentElement;
-        if (parent) {
-            canvas.width = parent.clientWidth;
-            canvas.height = parent.clientHeight;
-            scaleRef.current = canvas.height / BASE_LOGICAL_HEIGHT;
-            resetGame();
-        }
+        requestAnimationFrame(() => {
+            if (!canvasRef.current) return;
+            const canvas = canvasRef.current;
+            const parent = canvas.parentElement;
+            if (parent) {
+                canvas.width = parent.clientWidth;
+                canvas.height = parent.clientHeight;
+                scaleRef.current = canvas.height / BASE_LOGICAL_HEIGHT;
+                resetGame();
+            }
+        });
     };
 
     const handleResize = () => {
@@ -5596,7 +5598,10 @@ doorsRef.current.forEach(door => {
         resizeHandler();
     };
 
-    resizeHandler();
+    // Delay initial resize to ensure parent container has finished layout
+    requestAnimationFrame(() => {
+        resizeHandler();
+    });
     gameLoop();
 
     window.addEventListener('resize', handleResize);

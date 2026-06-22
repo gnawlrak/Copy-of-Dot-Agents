@@ -406,32 +406,30 @@ const App: React.FC = () => {
           const skinColor = AGENT_SKINS.find(s => s.name === agentSkin)?.color || '#FFFFFF';
           const operator = OPERATORS[operatorClassId];
           return (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              <div className="w-full h-full max-h-[calc(100vh-2rem)] aspect-video bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
-                <GameCanvas 
-                    level={selectedLevel} 
-                    loadout={playerLoadout} 
-                    operator={operator}
-                    onMissionEnd={handleMissionEnd} 
-                    showSoundWaves={showSoundWaves} 
-                    agentSkinColor={skinColor}
-                    customControls={customControls}
-                    aimSensitivity={aimSensitivity}
-                    onAimSensitivityChange={setAimSensitivity}
-                    onCustomControlsChange={setCustomControls}
-                    defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
-                    difficulty={difficulty}
-                    isMultiplayer={isMultiplayer}
-                    networkClient={networkClientRef.current}
-                    initialRunScore={0}
-                    onScoreChange={(newRunScore: number) => {
-                        console.log(`[App] onScoreChange called with: ${newRunScore}`);
-                        runScoreRef.current = newRunScore;
-                    }}
-                    totalScore={totalScore}
-                    highScore={highScore}
-                />
-              </div>
+            <div className="fixed inset-0 z-50 bg-black">
+              <GameCanvas 
+                  level={selectedLevel} 
+                  loadout={playerLoadout} 
+                  operator={operator}
+                  onMissionEnd={handleMissionEnd} 
+                  showSoundWaves={showSoundWaves} 
+                  agentSkinColor={skinColor}
+                  customControls={customControls}
+                  aimSensitivity={aimSensitivity}
+                  onAimSensitivityChange={setAimSensitivity}
+                  onCustomControlsChange={setCustomControls}
+                  defaultControlsLayout={DEFAULT_CONTROLS_LAYOUT}
+                  difficulty={difficulty}
+                  isMultiplayer={isMultiplayer}
+                  networkClient={networkClientRef.current}
+                  initialRunScore={0}
+                  onScoreChange={(newRunScore: number) => {
+                      console.log(`[App] onScoreChange called with: ${newRunScore}`);
+                      runScoreRef.current = newRunScore;
+                  }}
+                  totalScore={totalScore}
+                  highScore={highScore}
+              />
             </div>
           );
         }

@@ -247,7 +247,7 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     { x: 0.57, y: 0.45, width: 0.18, height: 0.015 }, // Inner segment (starts after hallway 0.555)
     { x: 0.83, y: 0.45, width: 0.105, height: 0.015 }, // Outer segment (ends at right wall 0.935)
     // Internal partition walls (Laboratory & server rooms)
-    { x: 0.18, y: 0.15, width: 0.025, height: 0.12 }, // Server Rack cover
+    { x: 0.18, y: 0.08, width: 0.025, height: 0.12 }, // Server Rack cover (moved toward top wall to clear D112)
     { x: 0.28, y: 0.22, width: 0.025, height: 0.12 }, // Server Rack cover 2
     { x: 0.05, y: 0.3, width: 0.08, height: 0.02 }, // Table cover
     { x: 0.27, y: 0.12, width: 0.06, height: 0.02 }, // Lab table (optimized to stay left of x:0.35)
@@ -269,7 +269,7 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     { x: 0.05, y: 0.2, width: 0.1, height: 0.015 }, // Lab Ceiling part A
     { x: 0.25, y: 0.2, width: 0.1, height: 0.015 }, // Lab Ceiling part B
     { x: 0.65, y: 0.2, width: 0.1, height: 0.02 },  // Admin Ceiling part A
-    { x: 0.85, y: 0.2, width: 0.1, height: 0.02 },  // Admin Ceiling part B
+    { x: 0.82, y: 0.2, width: 0.13, height: 0.02 },  // Admin Ceiling part B (extended to far edge of console wall)
     { x: 0.82, y: 0.22, width: 0.02, height: 0.15 }, // Computer Console Group
     { x: 0.7, y: 0.35, width: 0.12, height: 0.03 }, // System Mainframe
 
@@ -297,24 +297,28 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     { id: 105, hinge: { x: 0.43, y: 0.45 }, length: 0.062, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
     { id: 106, hinge: { x: 0.555, y: 0.45 }, length: 0.062, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
-    // Sector 1-2 Horizontal Divider Door
-    { id: 107, hinge: { x: 0.2, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    // Sector 1-2 Horizontal Divider Door (double)
+    { id: 107, hinge: { x: 0.2, y: 0.45 }, length: 0.04, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 207, hinge: { x: 0.28, y: 0.45 }, length: 0.04, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
-    // Sector 3-4 Horizontal Divider Door
-    { id: 108, hinge: { x: 0.75, y: 0.45 }, length: 0.08, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    // Sector 3-4 Horizontal Divider Door (double)
+    { id: 108, hinge: { x: 0.75, y: 0.45 }, length: 0.04, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 208, hinge: { x: 0.83, y: 0.45 }, length: 0.04, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
 
     // Left Lobby Entry (Lab <-> Lobby)
     { id: 109, hinge: { x: 0.35, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
     // Right Lobby Entry (Control <-> Lobby)
-    { id: 110, hinge: { x: 0.65, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    { id: 110, hinge: { x: 0.65, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.75, swingDirection: -1 },
 
     // Central Locked Secure Command Room door
     { id: 111, hinge: { x: 0.457, y: 0.22 }, length: 0.086, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1, locked: true },
 
-    // New doors in ceiling walls
-    { id: 112, hinge: { x: 0.15, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
-    { id: 113, hinge: { x: 0.75, y: 0.2 }, length: 0.1, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    // New doors in ceiling walls (double)
+    { id: 112, hinge: { x: 0.15, y: 0.2 }, length: 0.05, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
+    { id: 212, hinge: { x: 0.25, y: 0.2 }, length: 0.05, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.95, swingDirection: -1 },
+    { id: 113, hinge: { x: 0.75, y: 0.2 }, length: 0.035, closedAngle: 0, maxOpenAngle: Math.PI * 0.9, swingDirection: -1 },
+    { id: 213, hinge: { x: 0.82, y: 0.2 }, length: 0.035, closedAngle: Math.PI, maxOpenAngle: Math.PI * 0.9, swingDirection: 1 },
   ],
   enemies: [
     // Bottom entry guards
