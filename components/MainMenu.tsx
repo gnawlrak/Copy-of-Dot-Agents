@@ -41,93 +41,92 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStart, onGoToLoadout, onGoToEdito
     load();
     return () => { mounted = false; };
   }, [totalScore, highScore]);
-  const getSyncText = () => {
-    switch (syncStatus) {
-        case 'syncing': return t('syncing');
-        case 'synced': return t('savedLocally');
-        case 'error': return t('saveError');
-        default: return 'INTDGYISGOD + gnaWlraK';
-    }
-  };
-  
+
   return (
-    <div className="text-center flex flex-col items-center justify-center w-full min-h-full my-auto">
-      <div className="mb-12">
-        <h1 className="text-6xl lg:text-8xl font-bold tracking-widest text-teal-300 animate-pulse">{t('appName')}</h1>
-        <p className="text-gray-400 mt-2 text-lg">{t('subTitle')}</p>
+    <div className="text-center flex flex-col items-center justify-center w-full min-h-full my-auto menu-in">
+      <div className="mb-10 flex flex-col items-center">
+        <h1 className="font-display text-6xl lg:text-8xl tracking-wide text-bone leading-none">
+          {t('appName')}
+        </h1>
+        <div className="hazard h-1.5 w-48 lg:w-72 mt-4" aria-hidden="true" />
+        <p className="text-dim mt-4 text-[11px] lg:text-xs uppercase tracking-[0.3em] font-mono">
+          {t('subTitle')}
+        </p>
       </div>
-      <div className="mb-6 flex gap-4 justify-center">
-        <div className="bg-gray-900/60 border border-gray-700/80 text-teal-300 px-5 py-3 rounded-md flex items-center gap-3">
-          <Award className="h-6 w-6 text-yellow-400/80" />
+
+      <div className="mb-10 flex gap-3 justify-center">
+        <div className="bg-panel border border-line px-5 py-3 flex items-center gap-3">
+          <Award className="h-5 w-5 text-signal" />
           <div className="text-left">
-            <div className="text-[10px] uppercase tracking-wider text-gray-500">{t('totalScore')}</div>
-            <div className="font-mono font-bold text-xl leading-none">{displayTotal}</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-dim font-mono">{t('totalScore')}</div>
+            <div className="font-mono font-bold text-xl leading-none text-bone tabular-nums">{displayTotal}</div>
           </div>
         </div>
-        <div className="bg-gray-900/60 border border-gray-700/80 text-teal-300 px-5 py-3 rounded-md flex items-center gap-3">
-          <Trophy className="h-6 w-6 text-teal-400/80" />
+        <div className="bg-panel border border-line px-5 py-3 flex items-center gap-3">
+          <Trophy className="h-5 w-5 text-signal" />
           <div className="text-left">
-            <div className="text-[10px] uppercase tracking-wider text-gray-500">{t('highScore')}</div>
-            <div className="font-mono font-bold text-xl leading-none">{displayHigh}</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-dim font-mono">{t('highScore')}</div>
+            <div className="font-mono font-bold text-xl leading-none text-bone tabular-nums">{displayHigh}</div>
           </div>
         </div>
       </div>
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col sm:flex-row justify-center gap-4">
+
+      <div className="flex flex-col gap-5 items-center">
+        <div className="flex flex-col sm:flex-row justify-center gap-3">
             <button
               onClick={onStart}
-              className="px-8 py-4 bg-teal-500 text-black font-bold text-xl tracking-widest rounded-md border-2 border-teal-300 shadow-lg shadow-teal-500/30 hover:bg-teal-400 hover:shadow-teal-400/50 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-3 cursor-pointer"
+              className="group px-10 py-4 bg-signal text-ink font-cond font-bold text-xl tracking-[0.2em] uppercase hover:bg-teal-400 transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-3 cursor-pointer"
             >
               <Play className="h-5 w-5 fill-current" />
               {t('startMission')}
             </button>
             <button
               onClick={onGoToMultiplayer}
-              className="px-8 py-4 bg-sky-500 text-black font-bold text-xl tracking-widest rounded-md border-2 border-sky-300 shadow-lg shadow-sky-500/30 hover:bg-sky-400 hover:shadow-sky-400/50 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-3 cursor-pointer"
+              className="px-10 py-4 bg-panel2 text-bone font-cond font-bold text-xl tracking-[0.2em] uppercase border border-line hover:border-signal hover:text-signal transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-3 cursor-pointer"
             >
-              <Users className="h-5 w-5 fill-current" />
+              <Users className="h-5 w-5" />
               {t('multiplayer')}
             </button>
         </div>
-        <div className="flex justify-center gap-4">
+        <div className="flex justify-center gap-3">
           <button
             onClick={onGoToLoadout}
-            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-base tracking-widest rounded-md border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            className="px-6 py-2.5 text-dim font-cond font-semibold text-base tracking-[0.15em] uppercase border border-transparent hover:border-line hover:text-bone hover:bg-panel transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
           >
-            <ShieldCheck className="h-5 w-5" />
+            <ShieldCheck className="h-4 w-4" />
             {t('loadout')}
           </button>
           <button
             onClick={onGoToEditor}
-            className="px-6 py-3 bg-gray-800 text-teal-300 font-bold text-base tracking-widest rounded-md border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            className="px-6 py-2.5 text-dim font-cond font-semibold text-base tracking-[0.15em] uppercase border border-transparent hover:border-line hover:text-bone hover:bg-panel transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
           >
-            <Map className="h-5 w-5" />
+            <Map className="h-4 w-4" />
             {t('mapEditor')}
           </button>
         </div>
       </div>
-      
-      <div className="mt-8 h-8 flex items-center justify-center gap-2 font-mono text-xs">
+
+      <div className="mt-10 h-6 flex items-center justify-center gap-2 font-mono text-xs">
         {syncStatus === 'syncing' && (
-          <div className="flex items-center gap-1.5 text-teal-400/85">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex items-center gap-1.5 text-signal/85">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
             <span>{t('syncing')}</span>
           </div>
         )}
         {syncStatus === 'synced' && (
           <div className="flex items-center gap-1.5 text-emerald-400/85">
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle2 className="h-3.5 w-3.5" />
             <span>{t('savedLocally')}</span>
           </div>
         )}
         {syncStatus === 'error' && (
-          <div className="flex items-center gap-1.5 text-rose-400/85">
-            <AlertCircle className="h-4 w-4" />
+          <div className="flex items-center gap-1.5 text-danger/85">
+            <AlertCircle className="h-3.5 w-3.5" />
             <span>{t('saveError')}</span>
           </div>
         )}
         {syncStatus === 'idle' && (
-          <span className="text-gray-500/70 select-none">INTDGYISGOD + gnaWlraK</span>
+          <span className="text-dim/50 select-none">INTDGYISGOD + gnaWlraK</span>
         )}
       </div>
     </div>

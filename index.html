@@ -4,6 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Dot Agents</title>
+
+    <!-- Typography: Saira Stencil One (display/wordmark), Saira Condensed (UI), JetBrains Mono (data), Noto Sans SC (CJK fallback) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=Saira+Condensed:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // ── Dot Agents "ORDNANCE" design tokens ─────────────────────────────
+        // Palette: gunmetal-olive surfaces + safety-yellow signal accent.
+        // NOTE: `teal` is intentionally remapped to the signal-yellow ramp and
+        // `gray` to olive-gunmetal so existing utility classes retheme globally.
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ink:    '#0C0E0B',
+                        panel:  '#151813',
+                        panel2: '#1D211A',
+                        line:   '#2B3026',
+                        bone:   '#DDE1D3',
+                        dim:    '#878E7C',
+                        signal: '#F0B429',
+                        danger: '#E0532F',
+                        gray: {
+                            300: '#C6CBBD',
+                            400: '#9AA18E',
+                            500: '#767D69',
+                            600: '#4B5044',
+                            700: '#363B31',
+                            800: '#232722',
+                            900: '#161A13',
+                            950: '#0C0E0B',
+                        },
+                        teal: {
+                            300: '#F9DE81',
+                            400: '#F2C94C',
+                            500: '#E0A51B',
+                            600: '#B07E0E',
+                            700: '#7E5A0C',
+                            800: '#4A370C',
+                            900: '#2A2009',
+                            950: '#171204',
+                        },
+                    },
+                    fontFamily: {
+                        mono:    ['"JetBrains Mono"', '"Noto Sans SC"', 'monospace'],
+                        display: ['"Saira Stencil One"', '"Noto Sans SC"', 'sans-serif'],
+                        cond:    ['"Saira Condensed"', '"Noto Sans SC"', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+
     <style>
         html, body, #root {
             user-select: none !important;
@@ -14,23 +69,80 @@
             margin: 0;
             padding: 0;
         }
+        body {
+            background-color: #0C0E0B;
+            color: #DDE1D3;
+        }
         canvas {
             touch-action: none !important;
         }
+
+        /* Tactical map grid + faint signal glow at the top — menu backdrop */
+        .bg-tacgrid {
+            background-color: #0C0E0B;
+            background-image:
+                linear-gradient(rgba(221, 225, 211, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(221, 225, 211, 0.035) 1px, transparent 1px),
+                radial-gradient(ellipse 80% 50% at 50% 0%, rgba(240, 180, 41, 0.06), transparent 70%);
+            background-size: 44px 44px, 44px 44px, 100% 100%;
+        }
+
+        /* Hazard chevron stripe — the signature marking, use sparingly */
+        .hazard {
+            background-image: repeating-linear-gradient(
+                -45deg,
+                #E0A51B 0px, #E0A51B 8px,
+                transparent 8px, transparent 16px
+            );
+        }
+
+        /* Menu entrance */
+        @keyframes menu-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .menu-in { animation: menu-in 0.35s ease-out both; }
+
+        /* Selection + focus */
+        ::selection { background: #F0B429; color: #0C0E0B; }
+        :focus-visible {
+            outline: 2px solid #F0B429;
+            outline-offset: 2px;
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #0C0E0B; }
+        ::-webkit-scrollbar-thumb { background: #2B3026; border: 2px solid #0C0E0B; }
+        ::-webkit-scrollbar-thumb:hover { background: #4B5044; }
+
+        /* Range slider thumb */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px; height: 16px;
+            background: #F0B429;
+            border: 2px solid #0C0E0B;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 14px; height: 14px;
+            background: #F0B429;
+            border: 2px solid #0C0E0B;
+            border-radius: 0;
+            cursor: pointer;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
-    <script src="https://cdn.tailwindcss.com"></script>
-<script type="importmap">
-{
-  "imports": {
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
-    "react/": "https://aistudiocdn.com/react@^19.1.1/",
-    "react": "https://aistudiocdn.com/react@^19.1.1"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
 </head>
-<body class="bg-black">
+<body class="bg-ink">
     <div id="root" class="w-screen h-screen"></div>
     <script type="module" src="/index.tsx"></script>
 </body>

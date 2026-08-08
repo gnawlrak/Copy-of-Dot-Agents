@@ -89,7 +89,7 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
     const Slider: React.FC<{label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void}> = 
     ({ label, value, min, max, step, onChange }) => (
         <div className="flex flex-col">
-            <label className="text-gray-300 text-sm">{label}: <span className="font-mono text-teal-300">{value.toFixed(2)}</span></label>
+            <label className="font-mono text-[11px] uppercase tracking-[0.2em] text-dim">{label}: <span className="font-mono text-signal tabular-nums">{value.toFixed(2)}</span></label>
             <input 
                 type="range" 
                 min={min} 
@@ -97,29 +97,32 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
                 step={step} 
                 value={value} 
                 onChange={(e) => onChange(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-2 bg-panel2 appearance-none cursor-pointer"
             />
         </div>
     );
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-95 z-[100] flex flex-col p-4 text-white font-mono"
+        <div className="fixed inset-0 bg-ink/95 z-[100] flex flex-col p-4 text-bone font-mono menu-in"
              onTouchMove={handleContainerTouchMove}
              onTouchEnd={handleContainerTouchEnd}
              onTouchCancel={handleContainerTouchEnd}
         >
             {/* Header */}
-            <div className="flex justify-between items-center pb-4 border-b-2 border-gray-700">
-                <h1 className="text-2xl font-bold text-teal-300 tracking-widest">{language === 'en' ? 'CUSTOMIZE INTERFLOW CONTROLS' : '战术虚拟按键布局设置'}</h1>
+            <div className="flex justify-between items-center pb-4 border-b border-line">
+                <div className="flex flex-col">
+                    <h1 className="font-display text-xl sm:text-2xl tracking-wide text-bone">{language === 'en' ? 'CUSTOMIZE INTERFLOW CONTROLS' : '战术虚拟按键布局设置'}</h1>
+                    <div className="hazard h-1 w-24 mt-2" aria-hidden="true" />
+                </div>
                 <div className="flex gap-2">
-                    <button onClick={() => onSave(layout)} className="px-4 py-2 bg-teal-500 text-black font-bold rounded hover:bg-teal-400 cursor-pointer">{language === 'en' ? 'SAVE & CLOSE' : '保存设置并退出'}</button>
-                    <button onClick={() => setLayout(defaultLayout)} className="px-4 py-2 bg-gray-700 font-bold rounded hover:bg-gray-600 cursor-pointer">{language === 'en' ? 'RESET' : '恢复默认'}</button>
-                    <button onClick={onClose} className="px-4 py-2 bg-gray-800 font-bold rounded hover:bg-gray-700 cursor-pointer">{language === 'en' ? 'CANCEL' : '取消设定'}</button>
+                    <button onClick={() => onSave(layout)} className="px-4 py-2 bg-signal text-ink font-cond font-bold uppercase tracking-[0.15em] hover:bg-teal-400 transition-colors active:scale-[0.98] cursor-pointer">{language === 'en' ? 'SAVE & CLOSE' : '保存设置并退出'}</button>
+                    <button onClick={() => setLayout(defaultLayout)} className="px-4 py-2 bg-panel2 border border-line text-bone font-cond font-bold uppercase tracking-[0.15em] hover:border-signal hover:text-signal transition-colors active:scale-[0.98] cursor-pointer">{language === 'en' ? 'RESET' : '恢复默认'}</button>
+                    <button onClick={onClose} className="px-4 py-2 bg-panel2 border border-line text-dim font-cond font-bold uppercase tracking-[0.15em] hover:border-danger hover:text-danger transition-colors active:scale-[0.98] cursor-pointer">{language === 'en' ? 'CANCEL' : '取消设定'}</button>
                 </div>
             </div>
             
             {/* Main content area */}
-            <div ref={containerRef} className="flex-grow my-4 border-2 border-dashed border-gray-650 relative overflow-hidden bg-gray-950/60">
+            <div ref={containerRef} className="flex-grow my-4 border border-dashed border-line relative overflow-hidden bg-ink/60">
                 {Object.entries(layout.layout).map(([id, ctrlRaw]) => {
                     const control = ctrlRaw as any;
                     const baseRadius = (containerRef.current ? containerRef.current.clientHeight * 0.06 : 40) * layout.baseScale;
@@ -132,8 +135,8 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
                         width: `${radius * 2}px`,
                         height: `${radius * 2}px`,
                         transform: 'translate(-50%, -50%)',
-                        backgroundColor: draggingControl?.id === id ? 'rgba(45, 212, 191, 0.4)' : 'rgba(255, 255, 255, 0.1)',
-                        border: `2px solid ${draggingControl?.id === id ? '#2dd4bf' : 'rgba(255, 255, 255, 0.4)'}`,
+                        backgroundColor: draggingControl?.id === id ? 'rgba(240, 180, 41, 0.3)' : 'rgba(221, 225, 211, 0.08)',
+                        border: `1px solid ${draggingControl?.id === id ? '#F0B429' : 'rgba(221, 225, 211, 0.35)'}`,
                         borderRadius: '50%',
                         display: 'flex',
                         alignItems: 'center',
@@ -153,13 +156,13 @@ const ControlCustomizer: React.FC<ControlCustomizerProps> = ({ initialLayout, de
                         </div>
                     );
                 })}
-                 <div className="absolute top-2 left-2 p-2 bg-black/70 rounded-md pointer-events-none text-gray-300 text-xs shadow">
+                 <div className="absolute top-2 left-2 p-2 bg-ink/80 border border-line pointer-events-none text-dim text-xs shadow-black/40 shadow">
                     {draggingControl ? (language === 'en' ? `Editing: ${CONTROL_NAMES[draggingControl.id]?.en || draggingControl.id}` : `正在放置: ${CONTROL_NAMES[draggingControl.id]?.zh || draggingControl.id}`) : (language === 'en' ? 'Drag any button symbol to reposition on mobile screen' : '拖拽任意圆形按钮即可重组触控版面的摆放位置')}
                 </div>
             </div>
 
             {/* Footer with sliders */}
-            <div className="flex justify-center items-center gap-8 p-4 border-t-2 border-gray-700">
+            <div className="flex justify-center items-center gap-8 p-4 border-t border-line bg-panel">
                 <div className="w-full max-w-xs">
                      <Slider label={language === 'en' ? 'Overall Button Scale' : '按键全局放大比例'} value={layout.baseScale} min={0.5} max={1.5} step={0.05} onChange={(v) => setLayout(p => ({...p, baseScale: v}))} />
                 </div>

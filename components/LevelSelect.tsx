@@ -22,7 +22,7 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
 
   const getLevelTranslation = (name: string, desc: string) => {
     if (language === 'en') return { name, desc };
-    
+
     const key = name.toUpperCase();
     if (key.includes('TRAINING GROUND')) {
       return {
@@ -48,31 +48,31 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
   const renderLevelButton = (level: LevelDefinition, isCustom: boolean) => {
     const { name, desc } = getLevelTranslation(level.name, level.description);
     return (
-      <div key={level.uuid || level.name} className="flex items-stretch gap-3">
+      <div key={level.uuid || level.name} className="flex items-stretch gap-2">
         <button
           onClick={() => onSelectLevel(level)}
-          className="flex-grow p-5 bg-gray-900 border-2 border-gray-800 rounded-md text-left hover:bg-gray-800/80 hover:border-teal-500 transition-all duration-200 flex items-center gap-4 cursor-pointer group"
+          className="flex-grow p-4 bg-panel border border-line text-left hover:bg-panel2 hover:border-signal transition-all duration-200 flex items-center gap-4 cursor-pointer group"
         >
-          <div className="bg-gray-800/80 p-3 rounded-md text-teal-400 group-hover:text-teal-300 transition-colors">
-            <Play className="h-5 w-5 fill-current" />
+          <div className="bg-ink border border-line p-3 text-signal group-hover:border-signal transition-colors shrink-0">
+            <Play className="h-4 w-4 fill-current" />
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-teal-400 tracking-wider group-hover:text-teal-300 transition-colors">{name}</h2>
-            <p className="text-gray-400 text-sm mt-1">{desc}</p>
+          <div className="min-w-0">
+            <h2 className="font-cond text-xl font-bold text-bone tracking-wider group-hover:text-signal transition-colors uppercase">{name}</h2>
+            <p className="text-dim text-sm mt-0.5 font-mono">{desc}</p>
           </div>
         </button>
         {isCustom && level.uuid && (
           <div className="flex gap-2 shrink-0">
-            <button 
-              onClick={() => onEditLevel(level)} 
-              className="p-4 bg-blue-900/40 border border-blue-700/50 text-blue-300 rounded-md hover:bg-blue-800/60 hover:text-white transition-all flex items-center justify-center gap-1 cursor-pointer"
+            <button
+              onClick={() => onEditLevel(level)}
+              className="p-4 bg-panel border border-line text-dim hover:text-signal hover:border-signal transition-all flex items-center justify-center gap-1 cursor-pointer"
               title={language === 'en' ? 'Edit Map' : '编辑此地图'}
             >
               <Edit3 className="h-5 w-5" />
             </button>
-            <button 
-              onClick={() => onDeleteLevel(level.uuid!)} 
-              className="p-4 bg-red-900/40 border border-red-700/50 text-red-300 rounded-md hover:bg-red-800/60 hover:text-white transition-all flex items-center justify-center gap-1 cursor-pointer"
+            <button
+              onClick={() => onDeleteLevel(level.uuid!)}
+              className="p-4 bg-panel border border-line text-dim hover:text-danger hover:border-danger transition-all flex items-center justify-center gap-1 cursor-pointer"
               title={language === 'en' ? 'Delete Map' : '删除此地图'}
             >
               <Trash2 className="h-5 w-5" />
@@ -82,27 +82,32 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
       </div>
     );
   };
-  
-  const difficultyButtonClass = (d: Difficulty) => 
-    `px-6 py-3 font-bold text-base tracking-widest rounded-md border-2 transition-all duration-200 flex items-center gap-2 cursor-pointer ${
-        difficulty === d 
-        ? d === 'simple' ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/10' :
-          d === 'hard' ? 'bg-red-500 text-black border-red-300 shadow-md shadow-red-500/10' :
-          d === 'test' ? 'bg-indigo-500 text-white border-indigo-300 shadow-md shadow-indigo-500/10' :
-          'bg-teal-500 text-black border-teal-300 shadow-md shadow-teal-500/10'
-        : 'bg-gray-800 text-gray-400 border-gray-700/80 hover:bg-gray-700 hover:text-white'
+
+  const difficultyButtonClass = (d: Difficulty) =>
+    `px-6 py-2.5 font-cond font-bold text-base tracking-[0.15em] uppercase border transition-all duration-200 flex items-center gap-2 cursor-pointer ${
+        difficulty === d
+        ? d === 'simple' ? 'bg-emerald-500 text-ink border-emerald-400' :
+          d === 'hard' ? 'bg-danger text-ink border-red-400' :
+          d === 'test' ? 'bg-indigo-500 text-white border-indigo-400' :
+          'bg-signal text-ink border-teal-400'
+        : 'bg-panel text-dim border-line hover:bg-panel2 hover:text-bone'
     }`;
 
   return (
-    <div className="w-full max-w-4xl text-center mx-auto px-2">
-      <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-6 flex items-center justify-center gap-3">
-        <Compass className="h-8 w-8 text-teal-400 animate-pulse" />
-        {t('levelSelectTitle')}
-      </h1>
+    <div className="w-full max-w-4xl text-center mx-auto px-2 menu-in">
+      <div className="mb-8">
+        <h1 className="font-display text-4xl lg:text-5xl tracking-wide text-bone flex items-center justify-center gap-3">
+          <Compass className="h-8 w-8 text-signal" />
+          {t('levelSelectTitle')}
+        </h1>
+        <div className="hazard h-1 w-40 mx-auto mt-4" aria-hidden="true" />
+      </div>
 
-      <div className="mb-8 bg-gray-900/40 border border-gray-800 p-5 rounded-lg">
-        <h2 className="text-xs font-bold tracking-widest text-gray-500 mb-4 uppercase">{language === 'en' ? 'DIFFICULTY METRIC' : '战场烈度 (难度级别)'}</h2>
-        <div className="flex flex-col sm:flex-row justify-center items-center gap-3">
+      <div className="mb-8 bg-panel border border-line p-5">
+        <h2 className="text-[11px] font-bold tracking-[0.25em] text-dim mb-4 uppercase font-mono">
+          {language === 'en' ? '// DIFFICULTY METRIC' : '// 战场烈度 (难度级别)'}
+        </h2>
+        <div className="flex flex-col sm:flex-row justify-center items-center gap-2">
             <button onClick={() => onDifficultyChange('simple')} className={difficultyButtonClass('simple')} title={t('difficultySimple')}>
                 <Compass className="h-4 w-4" />
                 {language === 'en' ? 'SIMPLE' : '简单'}
@@ -123,23 +128,27 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
             )}
         </div>
       </div>
-      
+
       <div className="space-y-4 mb-8 max-h-[45vh] overflow-y-auto pr-2 text-left">
-        <div className="flex items-center gap-2 border-b border-gray-800/80 pb-2 mb-4">
-          <ShieldAlert className="h-5 w-5 text-teal-400" />
-          <h3 className="text-sm font-bold tracking-widest text-gray-400 uppercase">{language === 'en' ? 'OFFICIAL SIMULATIONS' : '官方认证测试场地'}</h3>
+        <div className="flex items-center gap-2 border-b border-line pb-2 mb-4">
+          <ShieldAlert className="h-4 w-4 text-signal" />
+          <h3 className="text-[11px] font-bold tracking-[0.25em] text-dim uppercase font-mono">
+            {language === 'en' ? 'OFFICIAL SIMULATIONS' : '官方认证测试场地'}
+          </h3>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-2">
           {officialLevels.map((level) => renderLevelButton(level, false))}
         </div>
 
         {customLevels.length > 0 && (
           <>
-            <div className="flex items-center gap-2 border-b border-gray-800/80 pb-2 mb-4 pt-6">
-              <Swords className="h-5 w-5 text-sky-400" />
-              <h3 className="text-sm font-bold tracking-widest text-gray-400 uppercase">{language === 'en' ? 'TACTICAL CUSTOMS' : '自定实兵演练地域'}</h3>
+            <div className="flex items-center gap-2 border-b border-line pb-2 mb-4 pt-6">
+              <Swords className="h-4 w-4 text-signal" />
+              <h3 className="text-[11px] font-bold tracking-[0.25em] text-dim uppercase font-mono">
+                {language === 'en' ? 'TACTICAL CUSTOMS' : '自定实兵演练地域'}
+              </h3>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {customLevels.map((level) => renderLevelButton(level, true))}
             </div>
           </>
@@ -148,7 +157,7 @@ const LevelSelect: React.FC<LevelSelectProps> = ({ officialLevels, customLevels,
        <div className="flex items-center justify-center mt-6">
         <button
           onClick={onCreateNew}
-          className="px-8 py-3 bg-teal-600 text-white font-bold text-base tracking-widest rounded-md hover:bg-teal-500 transition-colors flex items-center gap-2 cursor-pointer shadow-md shadow-teal-900/30"
+          className="px-8 py-3 bg-panel2 border border-line text-bone font-cond font-bold text-base tracking-[0.15em] uppercase hover:border-signal hover:text-signal transition-colors flex items-center gap-2 cursor-pointer"
         >
           <Plus className="h-5 w-5" />
           {language === 'en' ? 'CREATE NEW MAP' : '绘制自定全新地图'}

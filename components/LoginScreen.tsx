@@ -35,52 +35,70 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 text-neutral-200 font-mono">
-      <div className="max-w-md w-full bg-neutral-900 border border-teal-800 p-8 rounded-lg shadow-2xl shadow-teal-900/20">
-        <h1 className="text-3xl tracking-widest font-bold text-teal-400 mb-2 text-center">
-          TACTICAL SQUAD
-        </h1>
-        <h2 className="text-xl text-neutral-400 mb-8 text-center uppercase tracking-wide">
-          {isRegistering ? (language === 'zh' ? '用户注册' : 'USER REGISTRATION') : (language === 'zh' ? '系统登录' : 'SYSTEM LOGIN')}
-        </h2>
-        
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-sm text-neutral-400">{language === 'zh' ? '用户名' : 'USERNAME'}</label>
-            <input 
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="bg-neutral-950 border border-neutral-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-neutral-200 transition-colors"
-              required
-            />
-          </div>
-          
-          <div className="flex flex-col gap-1">
-            <label className="text-sm text-neutral-400">{language === 'zh' ? '密码' : 'PASSWORD'}</label>
-            <input 
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="bg-neutral-950 border border-neutral-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-neutral-200 transition-colors"
-              required
-            />
+    <div className="flex flex-col items-center justify-center min-h-screen bg-tacgrid text-bone font-mono px-4">
+      <div className="max-w-md w-full bg-panel border border-line shadow-2xl shadow-black/60 menu-in">
+        <div className="hazard h-1.5 w-full" aria-hidden="true" />
+        <div className="p-8">
+          <div className="text-center mb-8">
+            <h1 className="font-display text-4xl tracking-wide text-signal">
+              {t('appName')}
+            </h1>
+            <p className="mt-3 text-[11px] uppercase tracking-[0.25em] text-dim">
+              {isRegistering
+                ? (language === 'zh' ? '// 新干员档案登记' : '// NEW OPERATOR REGISTRATION')
+                : (language === 'zh' ? '// 战术终端身份验证' : '// TACTICAL TERMINAL ACCESS')}
+            </p>
           </div>
 
-          {error && <div className="text-red-400 text-sm font-bold bg-red-950/50 p-2 rounded border border-red-800">[{language === 'zh' ? '错误' : 'ERROR'}] {error}</div>}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] uppercase tracking-[0.2em] text-dim">
+                {language === 'zh' ? '用户名' : 'Callsign / Username'}
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="bg-ink border border-line px-3 py-2.5 text-bone focus:outline-none focus:border-signal transition-colors"
+                required
+              />
+            </div>
 
-          <button 
-            type="submit" 
-            className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-3 mt-4 rounded transition-all active:scale-95 tracking-widest uppercase"
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] uppercase tracking-[0.2em] text-dim">
+                {language === 'zh' ? '密码' : 'Passcode / Password'}
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="bg-ink border border-line px-3 py-2.5 text-bone focus:outline-none focus:border-signal transition-colors"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="text-danger text-sm font-bold bg-danger/10 px-3 py-2 border-l-2 border-danger">
+                [{language === 'zh' ? '错误' : 'ERROR'}] {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-signal hover:bg-teal-400 text-ink font-cond font-bold text-lg py-3 mt-2 tracking-[0.2em] uppercase transition-all active:scale-[0.98]"
+            >
+              {isRegistering ? (language === 'zh' ? '创建账户' : 'CREATE ACCOUNT') : (language === 'zh' ? '登 录' : 'LOG IN')}
+            </button>
+          </form>
+
+          <div
+            className="mt-6 text-center text-[11px] uppercase tracking-[0.15em] text-dim cursor-pointer hover:text-signal transition-colors"
+            onClick={() => setIsRegistering(!isRegistering)}
           >
-            {isRegistering ? (language === 'zh' ? '创建账户' : 'CREATE ACCOUNT') : (language === 'zh' ? '登 录' : 'LOG IN')}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center text-sm text-neutral-500 cursor-pointer hover:text-teal-400 transition-colors" onClick={() => setIsRegistering(!isRegistering)}>
-          {isRegistering 
-            ? (language === 'zh' ? '已有账户？点击登录' : 'ALREADY HAVE AN ACCOUNT? LOG IN') 
-            : (language === 'zh' ? '无账户？点击注册新用户' : 'NO ACCOUNT? REGISTER NEW USER')}
+            {isRegistering
+              ? (language === 'zh' ? '已有账户？点击登录' : 'ALREADY HAVE AN ACCOUNT? LOG IN')
+              : (language === 'zh' ? '无账户？点击注册新用户' : 'NO ACCOUNT? REGISTER NEW USER')}
+          </div>
         </div>
       </div>
     </div>

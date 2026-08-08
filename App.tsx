@@ -398,7 +398,7 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     if (!isDataLoaded) {
-      return <div className="text-2xl text-teal-300 animate-pulse">LOADING DATA...</div>
+      return <div className="font-mono text-sm tracking-[0.3em] uppercase text-signal animate-pulse">LOADING DATA...</div>
     }
     switch (gameState) {
       case 'in-game':
@@ -506,20 +506,20 @@ const App: React.FC = () => {
   const BackButton = () => (
     <button
         onClick={handleGlobalBack}
-        className="absolute top-4 left-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
+        className="absolute top-4 left-4 z-50 p-3 bg-panel/80 text-bone border border-line hover:border-signal hover:text-signal transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
         aria-label="Go Back"
     >
-        <ArrowLeft className="h-6 w-6" />
+        <ArrowLeft className="h-5 w-5" />
     </button>
   );
 
   const SettingsButton = () => (
     <button
         onClick={() => setShowSettings(true)}
-        className="absolute top-4 right-4 z-50 p-3 bg-gray-800/50 text-teal-300 rounded-full border-2 border-gray-600/50 hover:bg-gray-700 hover:border-teal-500 transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
+        className="absolute top-4 right-4 z-50 p-3 bg-panel/80 text-bone border border-line hover:border-signal hover:text-signal transition-all duration-200 cursor-pointer flex items-center justify-center shadow-md shadow-black/40"
         aria-label="Open Settings"
     >
-        <Settings className="h-6 w-6 animate-[spin_8s_linear_infinite]" />
+        <Settings className="h-5 w-5" />
     </button>
   );
 
@@ -530,7 +530,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <main className={`bg-black text-white w-screen font-mono relative flex flex-col items-center select-none ${
+    <main className={`bg-tacgrid text-bone w-screen font-mono relative flex flex-col items-center select-none ${
       gameState === 'in-game' || gameState === 'map-editor'
         ? 'h-screen overflow-hidden justify-center'
         : 'h-screen overflow-y-auto py-8 px-4 md:py-12 justify-start'
@@ -541,18 +541,20 @@ const App: React.FC = () => {
       {renderContent()}
 
       {showSettings && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-          <div className="bg-gray-900 border-2 border-teal-500 rounded-lg p-8 w-full max-w-md shadow-lg shadow-teal-500/30 overflow-y-auto max-h-[90vh]">
-            <h2 id="settings-title" className="text-3xl font-bold tracking-widest text-teal-300 mb-6 text-center">{language === 'en' ? 'SETTINGS' : '系统设置'}</h2>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] px-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <div className="bg-panel border border-line w-full max-w-md shadow-2xl shadow-black/60 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="hazard h-1.5 w-full shrink-0" aria-hidden="true" />
+            <div className="p-8 overflow-y-auto">
+            <h2 id="settings-title" className="font-display text-3xl tracking-wide text-bone mb-6 text-center">{language === 'en' ? 'SETTINGS' : '系统设置'}</h2>
             
             <AccountSettings currentUser={currentUser} onLogout={handleLogout} onNameChange={(newName) => {
                 setCurrentUser(newName);
             }} />
 
-            <div className="flex flex-col gap-2 py-4 border-b border-gray-800">
-              <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-lg text-gray-300">
+            <div className="flex flex-col gap-2 py-4 border-b border-line">
+              <label htmlFor="sensitivity-slider" className="flex items-center justify-between text-base text-gray-300">
                 <span>{language === 'en' ? 'Aim Sensitivity' : '操作瞄准灵敏度'}</span>
-                <span className="font-mono text-teal-300">{aimSensitivity.toFixed(2)}</span>
+                <span className="font-mono text-signal tabular-nums">{aimSensitivity.toFixed(2)}</span>
               </label>
               <input
                 id="sensitivity-slider"
@@ -562,22 +564,22 @@ const App: React.FC = () => {
                 step="0.05"
                 value={aimSensitivity}
                 onChange={(e) => setAimSensitivity(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-1.5 bg-gray-700 appearance-none cursor-pointer"
               />
             </div>
             
-            <div className="flex items-center justify-between py-4 border-b border-gray-800">
-              <span className="text-lg text-gray-300">{language === 'en' ? 'Language' : '界面语言'}</span>
-              <div className="flex bg-gray-800 p-1 rounded-md border border-gray-700">
+            <div className="flex items-center justify-between py-4 border-b border-line">
+              <span className="text-base text-gray-300">{language === 'en' ? 'Language' : '界面语言'}</span>
+              <div className="flex bg-ink p-1 border border-line">
                 <button 
                   onClick={() => setLanguage('zh')}
-                  className={`px-3 py-1 text-sm font-bold rounded transition-colors ${language === 'zh' ? 'bg-teal-500 text-black' : 'text-gray-400 hover:text-teal-300'}`}
+                  className={`px-3 py-1 text-sm font-bold transition-colors ${language === 'zh' ? 'bg-signal text-ink' : 'text-dim hover:text-signal'}`}
                 >
                   中文
                 </button>
                 <button 
                   onClick={() => setLanguage('en')}
-                  className={`px-3 py-1 text-sm font-bold rounded transition-colors ${language === 'en' ? 'bg-teal-500 text-black' : 'text-gray-400 hover:text-teal-300'}`}
+                  className={`px-3 py-1 text-sm font-bold transition-colors ${language === 'en' ? 'bg-signal text-ink' : 'text-dim hover:text-signal'}`}
                 >
                   EN
                 </button>
@@ -585,15 +587,15 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between py-4">
-              <span className="text-lg text-gray-300" id="sound-waves-label">{language === 'en' ? 'Show Sound Waves' : '开火显示震波范围'}</span>
+              <span className="text-base text-gray-300" id="sound-waves-label">{language === 'en' ? 'Show Sound Waves' : '开火显示震波范围'}</span>
               <button
                 onClick={() => setShowSoundWaves(!showSoundWaves)}
-                className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${showSoundWaves ? 'bg-teal-500' : 'bg-gray-700'}`}
+                className={`w-14 h-8 flex items-center p-1 cursor-pointer transition-colors duration-300 border ${showSoundWaves ? 'bg-signal border-teal-400' : 'bg-ink border-line'}`}
                 role="switch"
                 aria-checked={showSoundWaves}
                 aria-labelledby="sound-waves-label"
               >
-                <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${showSoundWaves ? 'translate-x-6' : ''}`} />
+                <div className={`bg-bone w-5 h-5 shadow-md transform transition-transform duration-300 ${showSoundWaves ? 'translate-x-7' : ''}`} />
               </button>
             </div>
              <button
@@ -601,16 +603,17 @@ const App: React.FC = () => {
                   setShowSettings(false);
                   setIsCustomizingControls(true);
               }}
-              className="mt-4 w-full px-6 py-3 bg-teal-600 text-black font-bold text-lg tracking-widest rounded-md border-2 border-teal-500 hover:bg-teal-500 transition-colors duration-200"
+              className="mt-4 w-full px-6 py-3 bg-signal text-ink font-cond font-bold text-lg tracking-[0.2em] uppercase hover:bg-teal-400 transition-colors duration-200"
             >
               {language === 'en' ? 'CUSTOMIZE CONTROLS' : '自定义布局与虚拟按键'}
             </button>
             <button
               onClick={() => setShowSettings(false)}
-              className="mt-8 w-full px-6 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+              className="mt-3 w-full px-6 py-3 bg-panel2 text-bone font-cond font-bold text-lg tracking-[0.2em] uppercase border border-line hover:border-signal hover:text-signal transition-colors duration-200"
             >
               {language === 'en' ? 'CLOSE' : '关闭并返回'}
             </button>
+            </div>
           </div>
         </div>
       )}

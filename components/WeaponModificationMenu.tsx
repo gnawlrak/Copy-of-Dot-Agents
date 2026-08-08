@@ -33,8 +33,8 @@ const StatBar: React.FC<{ label: string; baseValue: number; modifiedValue: numbe
     const delta = displayValue - baseValue;
     const previewDelta = hasPreview ? previewValue! - modifiedValue : 0;
 
-    let valueColor = 'text-white';
-    let previewChangeColor = 'text-gray-400';
+    let valueColor = 'text-bone';
+    let previewChangeColor = 'text-dim';
     if (delta !== 0) {
         const isImproved = lowerIsBetter ? delta < 0 : delta > 0;
         valueColor = isImproved ? 'text-green-400' : 'text-red-400';
@@ -50,16 +50,16 @@ const StatBar: React.FC<{ label: string; baseValue: number; modifiedValue: numbe
 
     return (
         <div>
-            <div className="flex justify-between items-baseline text-gray-400 mb-1">
-                <span className="font-bold tracking-widest uppercase text-sm">{label}</span>
-                <div className={`font-mono text-lg flex items-center gap-2 transition-colors duration-200 ${valueColor}`}>
+            <div className="flex justify-between items-baseline mb-1">
+                <span className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-dim">{label}</span>
+                <div className={`font-mono text-lg tabular-nums flex items-center gap-2 transition-colors duration-200 ${valueColor}`}>
                     <span>{formatFn(displayValue)}</span>
-                    {hasPreview && <span className={`transition-colors duration-200 text-sm ${previewChangeColor}`}>({(previewDelta >= 0 ? '+' : '')}{formatFn(previewDelta)})</span>}
+                    {hasPreview && <span className={`transition-colors duration-200 text-sm tabular-nums ${previewChangeColor}`}>({(previewDelta >= 0 ? '+' : '')}{formatFn(previewDelta)})</span>}
                 </div>
             </div>
-            <div className="w-full bg-gray-800 h-2 rounded-full relative">
+            <div className="w-full bg-ink border border-line h-2 relative">
                 <div className="absolute h-full bg-gray-600" style={{ left: `${basePercent}%`, width: '2px', top: '-4px', bottom: '-4px' }} title={`Base: ${formatFn(baseValue)}`}/>
-                <div className={`${valueColor.replace('text', 'bg').replace('-400', '-500')} h-full rounded-full transition-all duration-300`} style={{ width: `${displayPercent}%` }} />
+                <div className={`${valueColor.replace('text', 'bg').replace('-400', '-500')} h-full transition-all duration-300`} style={{ width: `${displayPercent}%` }} />
             </div>
         </div>
     );
@@ -292,20 +292,21 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
     }
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-4 h-full flex flex-col font-mono overflow-hidden">
+        <div className="w-full max-w-7xl mx-auto p-4 h-full flex flex-col font-mono overflow-hidden menu-in">
             <style>{`
                 @keyframes slide-in-right { from { transform: translateX(50%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
                 .animate-slide-in-right { animation: slide-in-right 0.3s ease-out forwards; }
                 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
                 .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
             `}</style>
-             <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-2 text-center">{weaponName.toUpperCase()}</h1>
-             <p className="text-gray-400 text-center mb-6">Configure your weapon attachments.</p>
+             <h1 className="font-display text-4xl lg:text-5xl tracking-wide text-bone text-center">{weaponName.toUpperCase()}</h1>
+             <div className="hazard h-1 w-40 mx-auto mt-3" aria-hidden="true" />
+             <p className="text-dim text-center mt-3 mb-6">Configure your weapon attachments.</p>
 
             <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
                 {/* Left Column: Stats */}
-                <div className="md:col-span-1 bg-gray-900 border-2 border-gray-800 p-6 rounded-md flex flex-col animate-fade-in">
-                    <h2 className="text-2xl font-bold text-teal-400 tracking-wider mb-6 text-center uppercase">Weapon Stats</h2>
+                <div className="md:col-span-1 bg-panel border border-line p-6 flex flex-col animate-fade-in">
+                    <h2 className="text-[11px] font-bold font-mono tracking-[0.25em] text-dim mb-6 text-center uppercase border-b border-line pb-3">Weapon Stats</h2>
                     <div className="flex-grow flex flex-col justify-center gap-y-6">
                         <StatBar label="Fire Rate" baseValue={weaponDef.fireRate} modifiedValue={modifiedStats.fireRate} previewValue={previewStats?.fireRate} lowerIsBetter format={v => `${(1/v).toFixed(1)}/s`} />
                         <StatBar label="Reload Speed" baseValue={weaponDef.reloadTime} modifiedValue={modifiedStats.reloadTime} previewValue={previewStats?.reloadTime} lowerIsBetter format={v => `${v.toFixed(1)}s`} />
@@ -315,13 +316,13 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                 </div>
                 
                 {/* Center & Right Column: Gunsmith & Attachments */}
-                <div className="md:col-span-2 bg-gray-900 border-2 border-gray-800 rounded-md flex min-h-0 relative overflow-hidden p-6 animate-fade-in" style={{animationDelay: '100ms'}}>
+                <div className="md:col-span-2 bg-panel border border-line flex min-h-0 relative overflow-hidden p-6 animate-fade-in" style={{animationDelay: '100ms'}}>
                      <div className="w-full h-full relative flex items-center justify-center flex-shrink-0 transition-all duration-300 ease-in-out" style={{ width: selectedSlot ? '50%' : '100%' }}>
                         {/* Abstract Weapon Visual */}
-                        <div className="absolute h-16 bg-gray-800 rounded-lg top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center p-4 transition-all duration-300" style={{ width: profile.visualWidth }}>
-                           <div className="w-24 h-full bg-gray-700 rounded-md flex-shrink-0"></div>
-                           <div className="flex-grow h-1/2 bg-gray-700 mx-4 rounded-sm min-w-[40px]"></div>
-                           <div className="w-8 h-full bg-gray-700 rounded-lg flex-shrink-0"></div>
+                        <div className="absolute h-16 bg-panel2 border border-line top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center p-4 transition-all duration-300" style={{ width: profile.visualWidth }}>
+                           <div className="w-24 h-full bg-gray-700 flex-shrink-0"></div>
+                           <div className="flex-grow h-1/2 bg-gray-700 mx-4 min-w-[40px]"></div>
+                           <div className="w-8 h-full bg-gray-700 flex-shrink-0"></div>
                         </div>
 
                         {/* Slot Nodes */}
@@ -334,10 +335,10 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                                 <div key={slotName} className="absolute transition-all duration-300" style={slotPositions[index]}>
                                     <button 
                                         onClick={() => setSelectedSlot(prev => prev === slotName ? null : slotName)}
-                                        className={`w-32 text-left p-2 rounded-md border-2 transition-all duration-200 backdrop-blur-sm ${isSelected ? 'bg-teal-500/30 border-teal-400 scale-110' : `${isEquipped ? equippedTier.color : 'border-gray-600'} bg-gray-900/70 hover:border-teal-500 hover:scale-105`}`}
+                                        className={`w-32 text-left p-2 border transition-all duration-200 backdrop-blur-sm ${isSelected ? 'bg-teal-500/30 border-teal-400 scale-110' : `${isEquipped ? equippedTier.color : 'border-line'} bg-panel/80 hover:border-teal-500 hover:scale-105`}`}
                                     >
-                                        <p className="font-bold uppercase tracking-widest text-sm text-gray-300">{slotName}</p>
-                                        <p className={`text-xs truncate ${isEquipped ? equippedTier.textColor : 'text-gray-500'}`}>{currentAttachments[slotName] || 'None'}</p>
+                                        <p className="font-cond font-bold uppercase tracking-[0.15em] text-sm text-bone">{slotName}</p>
+                                        <p className={`text-xs truncate ${isEquipped ? equippedTier.textColor : 'text-dim'}`}>{currentAttachments[slotName] || 'None'}</p>
                                     </button>
                                 </div>
                             )
@@ -348,18 +349,18 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                      {selectedSlot && (
                         <div className="w-1/2 h-full flex-shrink-0 pl-6 flex flex-col animate-slide-in-right">
                             <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-3xl font-bold tracking-widest text-teal-300 uppercase">{selectedSlot}</h2>
-                                <button onClick={() => setSelectedSlot(null)} className="text-4xl text-gray-500 hover:text-white transition-colors">&times;</button>
+                                <h2 className="font-display text-2xl tracking-wide text-bone uppercase">{selectedSlot}</h2>
+                                <button onClick={() => setSelectedSlot(null)} className="text-4xl text-dim hover:text-signal transition-colors">&times;</button>
                             </div>
                             <div className="flex-grow overflow-y-auto pr-2 space-y-3">
                                 {/* None Option */}
                                 <button
                                     onClick={() => handleAttachmentSelect(selectedSlot, null)}
                                     onMouseEnter={() => setHoveredAttachment(null)}
-                                    className={`w-full p-3 bg-gray-800 border-2 rounded-md text-left transition-colors duration-200 ${!currentAttachments[selectedSlot] ? 'border-teal-400 ring-2 ring-teal-400/50' : 'border-gray-700 hover:border-teal-500'}`}
+                                    className={`w-full p-3 bg-panel2 border text-left transition-colors duration-200 ${!currentAttachments[selectedSlot] ? 'border-signal ring-2 ring-signal/40' : 'border-line hover:border-signal'}`}
                                 >
-                                    <h4 className="font-bold text-gray-300">None</h4>
-                                    <p className="text-xs text-gray-500">Default configuration. Resets slot to base stats.</p>
+                                    <h4 className="font-cond font-bold tracking-wider uppercase text-bone">None</h4>
+                                    <p className="text-xs text-dim">Default configuration. Resets slot to base stats.</p>
                                 </button>
                                 {/* Attachment Options */}
                                 {weaponDef.attachmentSlots![selectedSlot].map((attachment) => {
@@ -372,13 +373,13 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                                         onClick={() => handleAttachmentSelect(selectedSlot, attachment)}
                                         onMouseEnter={() => setHoveredAttachment(attachment)}
                                         onMouseLeave={() => setHoveredAttachment(null)}
-                                        className={`w-full p-3 bg-gray-900 border-2 rounded-md text-left transition-colors duration-200 ${isSelected ? `${tier.color} ring-2 ${tier.ringColor}/50` : `border-gray-700 hover:${tier.color}`}`}
+                                        className={`w-full p-3 bg-ink border text-left transition-colors duration-200 ${isSelected ? `${tier.color} ring-2 ${tier.ringColor}/50` : `border-line hover:${tier.color}`}`}
                                     >
                                         <div className="flex justify-between items-start">
-                                            <h4 className={`font-bold ${tier.textColor}`}>{attachment.name}</h4>
-                                            <span className={`px-2 py-0.5 text-xs font-black rounded ${tier.tagColor} ${tier.textColor}`}>{tier.name}</span>
+                                            <h4 className={`font-cond font-bold tracking-wider uppercase ${tier.textColor}`}>{attachment.name}</h4>
+                                            <span className={`px-2 py-0.5 text-xs font-black ${tier.tagColor} ${tier.textColor}`}>{tier.name}</span>
                                         </div>
-                                        <p className="text-xs text-gray-400 mt-1">{attachment.description}</p>
+                                        <p className="text-xs text-dim mt-1">{attachment.description}</p>
                                     </button>
                                 )})}
                             </div>
@@ -391,7 +392,7 @@ const WeaponModificationMenu: React.FC<WeaponModificationMenuProps> = ({ weaponN
                 <div className="mt-auto pt-6 text-center">
                     <button
                         onClick={onBack}
-                        className="px-8 py-3 bg-gray-800 text-teal-300 font-bold text-lg tracking-widest rounded-md border-2 border-gray-600 hover:bg-gray-700 hover:border-teal-500 transition-colors duration-200"
+                        className="px-8 py-3 bg-panel2 border border-line text-bone font-cond font-bold text-base tracking-[0.15em] uppercase hover:border-signal hover:text-signal transition-colors duration-200 cursor-pointer"
                     >
                         BACK TO LOADOUT
                     </button>

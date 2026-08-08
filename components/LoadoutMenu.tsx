@@ -69,10 +69,10 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
         const hasAttachments = category !== 'melee' && weapon.attachmentSlots && Object.keys(weapon.attachmentSlots).length > 0;
         
         const categoryConfig = {
-            primary: { label: language === 'en' ? 'Primary Weapon' : '主战武器', icon: <Crosshair className="h-4 w-4 text-teal-400" /> },
-            secondary: { label: language === 'en' ? 'Sidearm' : '副战武器', icon: <Shield className="h-4 w-4 text-sky-400" /> },
-            melee: { label: language === 'en' ? 'Melee' : '近战防身武器', icon: <Sparkles className="h-4 w-4 text-purple-400" /> },
-            special: { label: language === 'en' ? 'Tactical Weapon' : '特殊战术武器', icon: <Zap className="h-4 w-4 text-amber-500 animate-pulse" /> },
+            primary: { label: language === 'en' ? 'Primary Weapon' : '主战武器', icon: <Crosshair className="h-4 w-4 text-signal" /> },
+            secondary: { label: language === 'en' ? 'Sidearm' : '副战武器', icon: <Shield className="h-4 w-4 text-signal" /> },
+            melee: { label: language === 'en' ? 'Melee' : '近战防身武器', icon: <Sparkles className="h-4 w-4 text-signal" /> },
+            special: { label: language === 'en' ? 'Tactical Weapon' : '特殊战术武器', icon: <Zap className="h-4 w-4 text-signal" /> },
         }[category];
 
         const weaponTrans = getWeaponTranslation(weapon.name, weapon.description);
@@ -81,26 +81,26 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
             <div className="w-full text-left">
                 <div className="flex items-center gap-2 mb-1">
                     {categoryConfig.icon}
-                    <h3 className="text-sm font-bold text-gray-500 tracking-widest uppercase">{categoryConfig.label}</h3>
+                    <h3 className="text-[11px] font-bold text-dim tracking-[0.25em] uppercase font-mono">{categoryConfig.label}</h3>
                 </div>
-                <div className="p-5 bg-gray-900 border-2 border-gray-800 rounded-xl text-left flex flex-col gap-4 shadow-sm relative group overflow-hidden hover:border-teal-900/30 transition-all duration-300">
+                <div className="p-5 bg-panel border border-line text-left flex flex-col gap-4 relative group overflow-hidden hover:border-signal transition-all duration-200">
                     <button
                         onClick={() => setSelectionPanel(category)}
-                        className="w-full text-left hover:bg-white/5 p-2 -m-2 rounded-lg transition-colors flex items-center justify-between cursor-pointer"
+                        className="w-full text-left hover:bg-white/5 p-2 -m-2 transition-colors flex items-center justify-between cursor-pointer"
                     >
                         <div className="pr-4">
-                            <h4 className="text-xl font-bold text-teal-400 tracking-wider group-hover:text-teal-300 transition-colors uppercase leading-tight">{weaponTrans.name}</h4>
-                            <p className="text-gray-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{weaponTrans.desc}</p>
+                            <h4 className="text-xl font-bold font-cond text-bone tracking-wider group-hover:text-signal transition-colors uppercase leading-tight">{weaponTrans.name}</h4>
+                            <p className="text-dim text-xs mt-1.5 leading-relaxed line-clamp-2 font-mono">{weaponTrans.desc}</p>
                         </div>
                         <div className="flex-shrink-0">
-                             <ChevronRight className="h-6 w-6 text-gray-700 group-hover:text-teal-400 transition-all transform group-hover:translate-x-1" />
+                             <ChevronRight className="h-6 w-6 text-dim group-hover:text-signal transition-all transform group-hover:translate-x-1" />
                         </div>
                     </button>
                     {hasAttachments && (
-                         <div className="pt-2 border-t border-gray-800/50">
+                         <div className="pt-2 border-t border-line">
                             <button 
                                 onClick={() => onModifyWeapon(category)}
-                                className="w-full px-6 py-2.5 bg-teal-500/10 text-teal-300 font-black text-[10px] tracking-[0.2em] rounded-md border border-teal-500/20 hover:bg-teal-500/20 hover:border-teal-500/50 hover:text-teal-200 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-inner uppercase"
+                                className="w-full px-6 py-2.5 bg-panel2 border border-line text-bone font-cond font-bold text-[11px] tracking-[0.2em] hover:border-signal hover:text-signal transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer uppercase"
                             >
                                 <Wrench className="h-3.5 w-3.5" />
                                 {t('customize')}
@@ -125,12 +125,13 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
 
         return (
             <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-end z-50">
-                <div className="w-full max-w-md h-full bg-gray-900 border-l-2 border-teal-500 p-6 flex flex-col animate-slide-in">
+                <div className="w-full max-w-md h-full bg-panel border-l border-line p-6 flex flex-col animate-slide-in">
+                    <div className="hazard h-1 -mx-6 -mt-6 mb-6" aria-hidden="true" />
                     <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-3xl font-bold tracking-widest text-teal-300 uppercase">{panelTitle} {t('weapons')}</h2>
-                        <button onClick={() => setSelectionPanel(null)} className="text-3xl text-gray-500 hover:text-white">&times;</button>
+                        <h2 className="text-3xl font-display tracking-wide text-bone uppercase">{panelTitle} {t('weapons')}</h2>
+                        <button onClick={() => setSelectionPanel(null)} className="text-3xl text-dim hover:text-signal transition-colors">&times;</button>
                     </div>
-                    <div className="flex-grow overflow-y-auto pr-2 space-y-4 font-mono">
+                    <div className="flex-grow overflow-y-auto pr-2 space-y-3 font-mono">
                         {weaponList.map(weaponName => {
                             const weapon = WEAPONS[weaponName];
                             if (!weapon) {
@@ -142,11 +143,11 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                                 <button
                                     key={weapon.name}
                                     onClick={() => handleWeaponSelect(selectionPanel, weapon.name)}
-                                    className={`w-full p-4 bg-gray-800 border-2 rounded-md text-left transition-colors duration-200 cursor-pointer ${isSelected ? 'border-teal-400 ring-2 ring-teal-400' : 'border-gray-700 hover:border-teal-500'}`}
+                                    className={`w-full p-4 bg-panel2 border text-left transition-colors duration-200 cursor-pointer ${isSelected ? 'border-signal' : 'border-line hover:border-signal'}`}
                                 >
-                                    <h4 className="text-xl font-bold text-teal-400">{trans.name}</h4>
-                                    <p className="text-sm text-gray-400 mt-1">{trans.desc}</p>
-                                    <div className="mt-3 text-xs text-gray-300 grid grid-cols-2 gap-x-4 gap-y-1">
+                                    <h4 className="text-xl font-bold font-cond text-signal uppercase tracking-wider">{trans.name}</h4>
+                                    <p className="text-sm text-dim mt-1">{trans.desc}</p>
+                                    <div className="mt-3 text-xs text-dim tabular-nums grid grid-cols-2 gap-x-4 gap-y-1">
                                         {weapon.category !== 'melee' ? (
                                             <>
                                                 <span>{language === 'en' ? 'TYPE: ' : '构造/弹药: '}{weapon.type === 'hitscan' ? (language === 'en' ? 'Hitscan' : '即时测距') : (language === 'en' ? 'Projectile' : '实体弹丸')}</span>
@@ -279,8 +280,11 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
     };
 
     return (
-        <div className="w-full max-w-screen-xl text-center p-4 flex flex-col mx-auto">
-            <h1 className="text-4xl lg:text-5xl font-bold tracking-widest text-teal-300 mb-8">{t('loadoutTitle')}</h1>
+        <div className="w-full max-w-screen-xl text-center p-4 flex flex-col mx-auto menu-in">
+            <div className="mb-8">
+                <h1 className="font-display text-4xl lg:text-5xl tracking-wide text-bone">{t('loadoutTitle')}</h1>
+                <div className="hazard h-1 w-40 mx-auto mt-4" aria-hidden="true" />
+            </div>
             
             <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
                 {/* Left Column: Throwables & Melee */}
@@ -288,33 +292,33 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                      <div>
                         <div className="flex justify-between items-center mb-1">
                             <div className="flex items-center gap-2">
-                                <Award className="h-4 w-4 text-teal-400" />
-                                <h3 className="text-sm font-bold text-gray-500 tracking-widest uppercase">{t('throwables')}</h3>
+                                <Award className="h-4 w-4 text-signal" />
+                                <h3 className="text-[11px] font-bold text-dim tracking-[0.25em] uppercase font-mono">{t('throwables')}</h3>
                             </div>
-                            <span className="text-xs font-bold bg-teal-500/10 text-teal-300 px-2 py-0.5 rounded border border-teal-500/20">{throwableTotal} / 5</span>
+                            <span className="text-xs font-bold font-mono tabular-nums bg-panel2 text-signal px-2 py-0.5 border border-line">{throwableTotal} / 5</span>
                         </div>
-                        <div className="w-full mt-2 p-4 bg-gray-900 border-2 border-gray-800 rounded-md space-y-4 shadow-sm">
+                        <div className="w-full mt-2 p-4 bg-panel border border-line space-y-4">
                             {Object.values(THROWABLES).map(item => {
                                 const localT = getThrowableTranslation(item.type);
                                 return (
                                     <div key={item.type} className="flex justify-between items-center">
                                         <div>
-                                            <h4 className="text-lg font-bold text-teal-400">{localT.name}</h4>
-                                            <p className="text-xs text-gray-500">{localT.desc}</p>
+                                            <h4 className="text-lg font-bold font-cond text-bone tracking-wide">{localT.name}</h4>
+                                            <p className="text-xs text-dim font-mono">{localT.desc}</p>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button 
                                               onClick={() => handleThrowableChange(item.type, -1)} 
                                               disabled={(currentLoadout.throwables[item.type] || 0) === 0}
-                                              className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-800 border border-gray-700 text-gray-400 font-bold disabled:opacity-40 disabled:hover:bg-gray-800 hover:bg-gray-700 hover:text-white transition-colors cursor-pointer"
+                                              className="w-8 h-8 flex items-center justify-center bg-panel2 border border-line text-dim font-bold disabled:opacity-40 disabled:hover:bg-panel2 disabled:hover:border-line disabled:hover:text-dim hover:border-signal hover:text-signal transition-colors cursor-pointer"
                                             >
                                                 <Minus className="h-3 w-3" />
                                             </button>
-                                            <span className="text-lg font-mono font-bold w-6 text-center text-white">{currentLoadout.throwables[item.type] || 0}</span>
+                                            <span className="text-lg font-mono font-bold w-6 text-center text-bone tabular-nums">{currentLoadout.throwables[item.type] || 0}</span>
                                             <button 
                                               onClick={() => handleThrowableChange(item.type, 1)} 
                                               disabled={throwableTotal >= 5}
-                                              className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-800 border border-gray-700 text-gray-400 font-bold disabled:opacity-40 disabled:hover:bg-gray-800 hover:bg-gray-700 hover:text-white transition-colors cursor-pointer"
+                                              className="w-8 h-8 flex items-center justify-center bg-panel2 border border-line text-dim font-bold disabled:opacity-40 disabled:hover:bg-panel2 disabled:hover:border-line disabled:hover:text-dim hover:border-signal hover:text-signal transition-colors cursor-pointer"
                                             >
                                                 <Plus className="h-3 w-3" />
                                             </button>
@@ -330,7 +334,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                 {/* Center Column: Visual display & Skin Selector */}
                 <div className="flex flex-col items-center justify-center h-full pt-8 md:pt-0 gap-6">
                     <div className="flex items-center justify-center relative">
-                        <div className="w-48 h-[280px] relative flex items-center justify-center animate-pulse" aria-live="polite" style={{ animationDuration: '4s' }}>
+                        <div className="w-48 h-[280px] relative flex items-center justify-center" aria-live="polite">
                             {/* Glow platform standard */}
                             <div className="absolute bottom-4 w-32 h-6 bg-teal-500/10 rounded-full blur-md"></div>
                             
@@ -348,10 +352,10 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                     </div>
 
                     {/* Operator Camo Selector */}
-                    <div className="w-full max-w-xs bg-gray-900 border-2 border-gray-800 p-4 rounded-md text-left shadow-sm">
-                        <div className="flex items-center gap-2 mb-3">
-                            <User className="h-4 w-4 text-teal-400" />
-                            <h3 className="text-xs font-bold text-gray-500 tracking-widest uppercase">{language === 'en' ? 'TACTICAL CAMO' : '特工战术迷彩'}</h3>
+                    <div className="w-full max-w-xs bg-panel border border-line p-4 text-left">
+                        <div className="flex items-center gap-2 mb-3 border-b border-line pb-2">
+                            <User className="h-4 w-4 text-signal" />
+                            <h3 className="text-[11px] font-bold text-dim tracking-[0.25em] uppercase font-mono">{language === 'en' ? 'TACTICAL CAMO' : '特工战术迷彩'}</h3>
                         </div>
                         <div className="flex flex-wrap gap-2 justify-center">
                             {AGENT_SKINS.map(s => {
@@ -362,7 +366,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                                         onClick={() => onSkinChange(s.name)}
                                         style={{ backgroundColor: s.color }}
                                         title={s.name}
-                                        className={`w-8 h-8 rounded-full border-2 cursor-pointer transition-all duration-200 flex items-center justify-center relative hover:scale-105 ${isCurrent ? 'border-teal-400 scale-110 ring-2 ring-teal-400/30' : 'border-gray-800 hover:border-gray-600'}`}
+                                        className={`w-8 h-8 rounded-full border cursor-pointer transition-all duration-200 flex items-center justify-center relative hover:scale-105 ${isCurrent ? 'border-signal scale-110' : 'border-line hover:border-signal'}`}
                                     >
                                         {isCurrent && (
                                             <Check className={`h-4 w-4 ${s.color === '#FFFFFF' ? 'text-black' : 'text-white'} drop-shadow`} />
@@ -371,7 +375,7 @@ const LoadoutMenu: React.FC<LoadoutMenuProps> = ({ currentLoadout, onLoadoutChan
                                 );
                             })}
                         </div>
-                        <p className="text-center text-[10px] text-teal-400/80 mt-2.5 uppercase tracking-wider font-bold">{currentSkinName}</p>
+                        <p className="text-center text-[10px] text-signal/80 mt-2.5 uppercase tracking-[0.2em] font-bold font-mono">{currentSkinName}</p>
                     </div>
                 </div>
 

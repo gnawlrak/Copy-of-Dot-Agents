@@ -64,15 +64,15 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
     };
 
     return (
-        <div className="flex flex-col gap-4 py-4 border-b border-gray-800">
+        <div className="flex flex-col gap-4 py-4 border-b border-line">
             <div className="flex items-center justify-between">
-                <div className="text-lg text-gray-300 flex flex-col">
-                    <span>{language === 'zh' ? '当前账户' : 'Current Account'}</span>
-                    <span className="text-sm font-bold text-teal-400">{currentUser}</span>
+                <div className="flex flex-col gap-1">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-dim">{language === 'zh' ? '当前账户' : 'Current Account'}</span>
+                    <span className="font-mono text-sm font-bold text-signal">{currentUser}</span>
                 </div>
                 <button 
                     onClick={doLogout}
-                    className="px-4 py-2 bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-200 rounded text-sm font-bold tracking-widest transition-colors"
+                    className="px-4 py-2 bg-panel2 border border-line text-danger font-cond font-bold text-sm uppercase tracking-[0.15em] hover:border-danger transition-colors active:scale-[0.98]"
                 >
                     {language === 'zh' ? '退出登录' : 'LOGOUT'}
                 </button>
@@ -83,14 +83,14 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
                     <>
                         <button 
                             onClick={() => { setIsChangingPassword(true); setMessage(''); }}
-                            className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded text-sm font-bold transition-colors"
+                            className="flex-1 py-2 bg-panel2 border border-line text-bone font-cond font-bold text-sm uppercase tracking-[0.15em] hover:border-signal hover:text-signal transition-colors active:scale-[0.98]"
                         >
                             {language === 'zh' ? '修改密码' : 'Change Password'}
                         </button>
                         {currentUser !== 'root' && (
                             <button 
                                 onClick={() => { setIsChangingName(true); setMessage(''); }}
-                                className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded text-sm font-bold transition-colors"
+                                className="flex-1 py-2 bg-panel2 border border-line text-bone font-cond font-bold text-sm uppercase tracking-[0.15em] hover:border-signal hover:text-signal transition-colors active:scale-[0.98]"
                             >
                                 {language === 'zh' ? '修改用户名' : 'Change Username'}
                             </button>
@@ -100,13 +100,13 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
             </div>
 
             {isChangingName && (
-                <form onSubmit={handleNameSubmit} className="flex flex-col gap-3 mt-2 bg-gray-950 p-4 rounded border border-gray-800">
+                <form onSubmit={handleNameSubmit} className="flex flex-col gap-3 mt-2 bg-ink p-4 border border-line">
                     <input 
                         type="text"
                         placeholder={language === 'zh' ? '新用户名' : 'New Username'}
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-sm"
+                        className="bg-ink border border-line px-3 py-2 text-bone focus:outline-none focus:border-signal text-sm font-mono"
                         required
                     />
                     <input 
@@ -114,19 +114,19 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
                         placeholder={language === 'zh' ? '当前密码' : 'Current Password'}
                         value={oldPassword}
                         onChange={(e) => setOldPassword(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-sm"
+                        className="bg-ink border border-line px-3 py-2 text-bone focus:outline-none focus:border-signal text-sm font-mono"
                         required
                     />
                     {message && (
-                        <div className={`text-xs font-bold ${isError ? 'text-red-400' : 'text-teal-400'}`}>
+                        <div className={`text-xs font-bold font-mono ${isError ? 'text-danger' : 'text-signal'}`}>
                             {message}
                         </div>
                     )}
                     <div className="flex gap-2">
-                        <button type="submit" className="flex-1 bg-teal-700 hover:bg-teal-600 border border-teal-500 text-white rounded py-2 text-sm font-bold">
+                        <button type="submit" className="flex-1 bg-signal text-ink font-cond font-bold uppercase tracking-[0.15em] py-2 text-sm hover:bg-teal-400 transition-colors active:scale-[0.98]">
                             {language === 'zh' ? '确认' : 'Confirm'}
                         </button>
-                        <button type="button" onClick={() => { setIsChangingName(false); setMessage(''); }} className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded py-2 text-sm font-bold">
+                        <button type="button" onClick={() => { setIsChangingName(false); setMessage(''); }} className="flex-1 bg-panel2 border border-line text-bone font-cond font-bold uppercase tracking-[0.15em] py-2 text-sm hover:border-signal hover:text-signal transition-colors active:scale-[0.98]">
                             {language === 'zh' ? '取消' : 'Cancel'}
                         </button>
                     </div>
@@ -134,13 +134,13 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
             )}
 
             {isChangingPassword && (
-                <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-3 mt-2 bg-gray-950 p-4 rounded border border-gray-800">
+                <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-3 mt-2 bg-ink p-4 border border-line">
                     <input 
                         type="password"
                         placeholder={language === 'zh' ? '旧密码' : 'Old Password'}
                         value={oldPassword}
                         onChange={(e) => setOldPassword(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-sm"
+                        className="bg-ink border border-line px-3 py-2 text-bone focus:outline-none focus:border-signal text-sm font-mono"
                         required
                     />
                     <input 
@@ -148,19 +148,19 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({ currentUser, o
                         placeholder={language === 'zh' ? '新密码' : 'New Password'}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:border-teal-500 text-sm"
+                        className="bg-ink border border-line px-3 py-2 text-bone focus:outline-none focus:border-signal text-sm font-mono"
                         required
                     />
                     {message && (
-                        <div className={`text-xs font-bold ${isError ? 'text-red-400' : 'text-teal-400'}`}>
+                        <div className={`text-xs font-bold font-mono ${isError ? 'text-danger' : 'text-signal'}`}>
                             {message}
                         </div>
                     )}
                     <div className="flex gap-2">
-                        <button type="submit" className="flex-1 bg-teal-700 hover:bg-teal-600 border border-teal-500 text-white rounded py-2 text-sm font-bold">
+                        <button type="submit" className="flex-1 bg-signal text-ink font-cond font-bold uppercase tracking-[0.15em] py-2 text-sm hover:bg-teal-400 transition-colors active:scale-[0.98]">
                             {language === 'zh' ? '确认' : 'Confirm'}
                         </button>
-                        <button type="button" onClick={() => setIsChangingPassword(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded py-2 text-sm font-bold">
+                        <button type="button" onClick={() => setIsChangingPassword(false)} className="flex-1 bg-panel2 border border-line text-bone font-cond font-bold uppercase tracking-[0.15em] py-2 text-sm hover:border-signal hover:text-signal transition-colors active:scale-[0.98]">
                             {language === 'zh' ? '取消' : 'Cancel'}
                         </button>
                     </div>

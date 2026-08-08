@@ -839,6 +839,7 @@ const GameCanvas = ({ level, loadout, operator, onMissionEnd, showSoundWaves, ag
   const wallsRef = useRef<Array<Wall>>([]);
   const doorsRef = useRef<Array<Door>>([]);
   const wallSegmentsRef = useRef<Array<Segment>>([]); // Static wall segments for raycasting
+  const wallOutlineRef = useRef<Array<Segment>>([]); // Union outline of all walls (seam-free rendering)
   const mousePosRef = useRef({ x: 0, y: 0 }); // World coordinates
   const mouseScreenPosRef = useRef({ x: 0, y: 0 }); // Screen coordinates
   const bulletsRef = useRef<Array<Bullet>>([]);
@@ -1606,6 +1607,58 @@ const startHealing = () => {
         return { x: player.x + ux * nearestT, y: player.y + uy * nearestT };
     }
 
+    // Computes the union outline of all wall rects: every rect edge is tested against
+    // every other rect, and portions covered by a neighboring wall (shared faces,
+    // T-junctions, overlaps) are removed. Stroking only these remaining segments
+    // renders contiguous walls as one solid mass with no seam lines.
+    const computeWallOutline = (walls: Array<{ x: number; y: number; width: number; height: number }>): Segment[] => {
+        const TOL = 0.5; // px tolerance for coincident edges
+        const outline: Segment[] = [];
+        const subtractIntervals = (base: [number, number], covers: Array<[number, number]>): Array<[number, number]> => {
+            let remaining: Array<[number, number]> = [base];
+            for (const c of covers) {
+                const next: Array<[number, number]> = [];
+                for (const r of remaining) {
+                    if (c[1] <= r[0] + TOL || c[0] >= r[1] - TOL) { next.push(r); continue; }
+                    if (c[0] > r[0] + TOL) next.push([r[0], Math.min(r[1], c[0])]);
+                    if (c[1] < r[1] - TOL) next.push([Math.max(r[0], c[1]), r[1]]);
+                }
+                remaining = next;
+            }
+            return remaining;
+        };
+        walls.forEach((a, i) => {
+            const others = walls.filter((_, j) => j !== i);
+            const ax2 = a.x + a.width;
+            const ay2 = a.y + a.height;
+            const edges: Array<{ fixed: number; from: number; to: number; horizontal: boolean; coveredBy: (b: typeof a) => boolean }> = [
+                // top edge: covered by a wall whose body spans across a.y from above
+                { fixed: a.y, from: a.x, to: ax2, horizontal: true,  coveredBy: (b) => b.y < a.y - TOL && b.y + b.height > a.y - TOL },
+                // bottom edge: covered by a wall whose body spans across ay2 from below
+                { fixed: ay2, from: a.x, to: ax2, horizontal: true,  coveredBy: (b) => b.y < ay2 + TOL && b.y + b.height > ay2 + TOL },
+                // left edge
+                { fixed: a.x, from: a.y, to: ay2, horizontal: false, coveredBy: (b) => b.x < a.x - TOL && b.x + b.width > a.x - TOL },
+                // right edge
+                { fixed: ax2, from: a.y, to: ay2, horizontal: false, coveredBy: (b) => b.x < ax2 + TOL && b.x + b.width > ax2 + TOL },
+            ];
+            for (const edge of edges) {
+                const covers: Array<[number, number]> = [];
+                for (const b of others) {
+                    if (!edge.coveredBy(b)) continue;
+                    const lo = edge.horizontal ? Math.max(b.x, edge.from) : Math.max(b.y, edge.from);
+                    const hi = edge.horizontal ? Math.min(b.x + b.width, edge.to) : Math.min(b.y + b.height, edge.to);
+                    if (hi > lo) covers.push([lo, hi]);
+                }
+                for (const [lo, hi] of subtractIntervals([edge.from, edge.to], covers)) {
+                    if (hi - lo <= TOL) continue;
+                    if (edge.horizontal) outline.push({ a: { x: lo, y: edge.fixed }, b: { x: hi, y: edge.fixed } });
+                    else outline.push({ a: { x: edge.fixed, y: lo }, b: { x: edge.fixed, y: hi } });
+                }
+            }
+        });
+        return outline;
+    };
+
     const setupMap = () => {
         if (!canvas) return;
         const scale = scaleRef.current;
@@ -1668,6 +1721,7 @@ const startHealing = () => {
             wallSegmentsRef.current.push({ a: { x: x + width, y: y + height }, b: { x, y: y + height } });
             wallSegmentsRef.current.push({ a: { x, y: y + height }, b: { x, y } });
         });
+        wallOutlineRef.current = computeWallOutline(wallsRef.current);
 
         if (level.extractionZone) {
             const ez = level.extractionZone;
@@ -1720,6 +1774,31 @@ const startHealing = () => {
         const chosenSpawns = enemyPool.slice(0, enemyCount);
         initialEnemyCountRef.current = chosenSpawns.length;
 
+        // Spawn protection setup:
+        // - `placed` tracks enemies already placed in THIS run (never the stale
+        //   enemiesRef, which still holds the previous run's enemies during .map()).
+        // - The play zone is the bounding box of all walls and posts, so relocated
+        //   enemies can never land outside the combat area (e.g. beyond the outer
+        //   shell, in the player's entry yard).
+        const placed: Array<{ x: number; y: number; radius: number }> = [];
+        let zoneMinX = Infinity, zoneMinY = Infinity, zoneMaxX = -Infinity, zoneMaxY = -Infinity;
+        for (const w of level.walls) {
+            zoneMinX = Math.min(zoneMinX, w.x * canvas.width);
+            zoneMinY = Math.min(zoneMinY, w.y * canvas.height);
+            zoneMaxX = Math.max(zoneMaxX, (w.x + w.width) * canvas.width);
+            zoneMaxY = Math.max(zoneMaxY, (w.y + w.height) * canvas.height);
+        }
+        for (const spawn of chosenSpawns) {
+            zoneMinX = Math.min(zoneMinX, spawn.x * canvas.width);
+            zoneMinY = Math.min(zoneMinY, spawn.y * canvas.height);
+            zoneMaxX = Math.max(zoneMaxX, spawn.x * canvas.width);
+            zoneMaxY = Math.max(zoneMaxY, spawn.y * canvas.height);
+        }
+        if (!isFinite(zoneMinX)) { // Walls-less map: fall back to canvas margins
+            zoneMinX = canvas.width * 0.05; zoneMaxX = canvas.width * 0.95;
+            zoneMinY = canvas.height * 0.05; zoneMaxY = canvas.height * 0.95;
+        }
+
         enemiesRef.current = chosenSpawns.map(e => {
             const startX = e.x * canvas.width;
             const startY = e.y * canvas.height;
@@ -1760,16 +1839,47 @@ const startHealing = () => {
                 baseEnemy.shootCooldownMax = 1.7; // Shoots slightly faster than simple's 2.0
             }
 
-            // Spawn protection: ensure enemies don't spawn inside walls.
-            let finalPos = { x: baseEnemy.x, y: baseEnemy.y };
-            for (const wall of wallsRef.current) {
-                const resolved = resolveCollisionWithWall({ ...finalPos, radius: baseEnemy.radius }, wall);
-                if (resolved) {
-                    finalPos = resolved;
+            // Spawn protection: keep the enemy at its post unless the post is blocked.
+            // Relocation spirals outward from the post (never a map-wide random point),
+            // so the enemy always stays near its assigned area and inside the zone.
+            const post = { x: baseEnemy.x, y: baseEnemy.y };
+            const r = baseEnemy.radius;
+            const isFree = (px: number, py: number, checkZone: boolean) => {
+                if (checkZone && (px < zoneMinX + r || px > zoneMaxX - r || py < zoneMinY + r || py > zoneMaxY - r)) return false;
+                for (const wall of wallsRef.current) {
+                    if (checkCollision({ x: px, y: py, radius: r * 1.2 }, wall)) return false;
+                }
+                for (const other of placed) {
+                    if (Math.hypot(px - other.x, py - other.y) < r + other.radius + 2 * scale) return false;
+                }
+                return true;
+            };
+
+            let finalPos = post;
+            if (!isFree(post.x, post.y, false)) {
+                let found: Point | null = null;
+                const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+                const maxRadius = Math.max(canvas.width, canvas.height) * 0.08;
+                for (let i = 1; i <= 160; i++) {
+                    const rad = Math.min(maxRadius, r * Math.sqrt(i));
+                    const ang = i * goldenAngle;
+                    const px = post.x + Math.cos(ang) * rad;
+                    const py = post.y + Math.sin(ang) * rad;
+                    if (isFree(px, py, true)) { found = { x: px, y: py }; break; }
+                }
+                if (found) {
+                    finalPos = found;
+                } else {
+                    // Last resort: push the original post out of any walls, staying on the spot.
+                    for (const wall of wallsRef.current) {
+                        const resolved = resolveCollisionWithWall({ ...finalPos, radius: r }, wall);
+                        if (resolved) finalPos = resolved;
+                    }
                 }
             }
             baseEnemy.x = finalPos.x;
             baseEnemy.y = finalPos.y;
+            placed.push({ x: finalPos.x, y: finalPos.y, radius: r });
 
             if (enemyType === 'advanced') {
                 finalEnemy = {
@@ -1801,7 +1911,7 @@ const startHealing = () => {
       const player = playerRef.current;
       
       if (isMultiplayer) {
-          // Find a safe spot that has distance to walls
+          // Find a safe spot that has distance to walls and other players
           let spawnX = level.playerStart.x * canvas.width;
           let spawnY = level.playerStart.y * canvas.height;
           let attempts = 0;
@@ -1825,6 +1935,13 @@ const startHealing = () => {
                   const distanceY = py - closestY;
                   const distanceSquared = distanceX * distanceX + distanceY * distanceY;
                   if (distanceSquared < (radius * 1.5) * (radius * 1.5)) {
+                      collides = true;
+                      break;
+                  }
+              }
+              // Avoid spawning on top of remote players
+              for (const rp of remotePlayersRef.current) {
+                  if (Math.hypot(px - rp.x, py - rp.y) < radius + (rp.radius || 10) + 4 * scale) {
                       collides = true;
                       break;
                   }
@@ -3921,14 +4038,21 @@ doorsRef.current.forEach(door => {
       const viewPoly = getVisionPolygon(playerRef.current, dynamicSegments, {width: canvas.width, height: canvas.height});
 
       const renderSceneContent = () => {
-        // Draw solid walls
+        // Draw solid walls as one mass: fill every rect first, then stroke only the
+        // union outline — shared edges between wall segments get no seam lines.
         context.fillStyle = '#374151'; // A solid, dark gray
+        wallsRef.current.forEach((wall) => {
+            context.fillRect(wall.x, wall.y, wall.width, wall.height);
+        });
         context.strokeStyle = '#4b5563'; // A slightly lighter gray for borders
         context.lineWidth = 1 * scale;
+        context.beginPath();
+        wallOutlineRef.current.forEach(seg => {
+            context.moveTo(seg.a.x, seg.a.y);
+            context.lineTo(seg.b.x, seg.b.y);
+        });
+        context.stroke();
         wallsRef.current.forEach((wall, index) => {
-            context.fillRect(wall.x, wall.y, wall.width, wall.height);
-            context.strokeRect(wall.x, wall.y, wall.width, wall.height);
-            
             // Temporary debugging labels
             if (difficulty === 'test' && index >= 4) {
                 context.save();
@@ -4346,9 +4470,15 @@ doorsRef.current.forEach(door => {
           context.shadowColor = 'rgba(100, 116, 139, 0.5)';
           context.shadowBlur = 8 * scale;
 
+          // Stroke only the union outline — no seam lines between contiguous walls.
+          context.beginPath();
+          wallOutlineRef.current.forEach(seg => {
+              context.moveTo(seg.a.x, seg.a.y);
+              context.lineTo(seg.b.x, seg.b.y);
+          });
+          context.stroke();
+
           wallsRef.current.forEach((wall, index) => {
-              context.strokeRect(wall.x, wall.y, wall.width, wall.height);
-              
               // Temporary debugging labels
               if (difficulty === 'test' && index >= 4) {
                   context.save();

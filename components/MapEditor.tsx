@@ -438,11 +438,21 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
     }
 
 
-    const toolButtonClasses = (t: EditorTool) => `px-4 py-2 rounded-md transition-colors ${tool === t ? 'bg-teal-500 text-black' : 'bg-gray-700 text-white hover:bg-gray-600'}`;
+    const toolButtonClasses = (t: EditorTool) => {
+        const base = 'px-4 py-2 font-cond font-bold uppercase tracking-[0.15em] border transition-colors cursor-pointer';
+        if (tool === t) {
+            if (t === 'extract') return `${base} bg-emerald-500 text-ink border-emerald-400`;
+            if (t === 'erase') return `${base} bg-danger text-ink border-red-400`;
+            return `${base} bg-signal text-ink border-teal-400`;
+        }
+        if (t === 'extract') return `${base} bg-panel2 text-emerald-400 border-line hover:border-emerald-400`;
+        if (t === 'erase') return `${base} bg-panel2 text-danger border-line hover:border-danger`;
+        return `${base} bg-panel2 text-dim border-line hover:text-signal hover:border-signal`;
+    };
 
     return (
-        <div className="w-full h-full flex flex-col lg:flex-row gap-4">
-            <div className="flex-grow h-[60%] lg:h-full w-full lg:w-auto bg-black border-2 border-teal-500 shadow-lg shadow-teal-500/30 rounded-md">
+        <div className="w-full h-full flex flex-col lg:flex-row gap-4 menu-in">
+            <div className="flex-grow h-[60%] lg:h-full w-full lg:w-auto bg-ink border border-line shadow-black/40">
                 <canvas 
                     ref={canvasRef} 
                     onMouseDown={handleMouseDown} 
@@ -453,34 +463,37 @@ const MapEditor: React.FC<MapEditorProps> = ({ levelToEdit, onBack }) => {
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onTouchCancel={handleTouchEnd}
-                    className="w-full h-full rounded-md touch-none"
+                    className="w-full h-full touch-none"
                     style={{ touchAction: 'none' }}
                 />
             </div>
-            <div className="w-full lg:w-96 bg-gray-900 p-4 rounded-md border-2 border-gray-700 flex flex-col gap-4">
-                <h1 className="text-2xl font-bold text-teal-300">MAP EDITOR</h1>
+            <div className="w-full lg:w-96 bg-panel p-4 border border-line flex flex-col gap-4">
+                <div>
+                    <h1 className="font-display text-2xl tracking-wide text-bone">MAP EDITOR</h1>
+                    <div className="hazard h-1 w-32 mt-2" aria-hidden="true" />
+                </div>
                 <div className="flex flex-wrap gap-2">
                     <button onClick={() => setTool('wall')} className={toolButtonClasses('wall')}>Wall</button>
                     <button onClick={() => setTool('door')} className={toolButtonClasses('door')}>Door</button>
                     <button onClick={() => setTool('enemy')} className={toolButtonClasses('enemy')}>Enemy</button>
                     <button onClick={() => setTool('player')} className={toolButtonClasses('player')}>Player</button>
-                    <button onClick={() => setTool('extract')} className={`${toolButtonClasses('extract')} bg-green-800 hover:bg-green-700 ${tool === 'extract' ? 'ring-2 ring-green-400' : ''}`}>Extract</button>
-                    <button onClick={() => setTool('erase')} className={`${toolButtonClasses('erase')} bg-red-800 hover:bg-red-700 ${tool === 'erase' ? 'ring-2 ring-red-400' : ''}`}>Erase</button>
+                    <button onClick={() => setTool('extract')} className={toolButtonClasses('extract')}>Extract</button>
+                    <button onClick={() => setTool('erase')} className={toolButtonClasses('erase')}>Erase</button>
                 </div>
-                <hr className="border-gray-700"/>
+                <hr className="border-line"/>
                 {level && <>
                     <div>
-                        <label className="block text-gray-400">Mission Name</label>
-                        <input type="text" value={level.name} onChange={e => setLevel(l => ({ ...l!, name: e.target.value }))} className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white" />
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.2em] text-dim mb-1">Mission Name</label>
+                        <input type="text" value={level.name} onChange={e => setLevel(l => ({ ...l!, name: e.target.value }))} className="w-full bg-ink border border-line p-2 text-bone focus:border-signal focus:outline-none" />
                     </div>
                     <div>
-                        <label className="block text-gray-400">Mission Description</label>
-                        <textarea value={level.description} onChange={e => setLevel(l => ({ ...l!, description: e.target.value }))} className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white h-24" />
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.2em] text-dim mb-1">Mission Description</label>
+                        <textarea value={level.description} onChange={e => setLevel(l => ({ ...l!, description: e.target.value }))} className="w-full bg-ink border border-line p-2 text-bone h-24 focus:border-signal focus:outline-none" />
                     </div>
                 </>}
                 <div className="flex-grow"></div>
-                <p className="text-sm text-gray-500 text-center">Changes are saved when you go back.</p>
-                <button onClick={handleBackClick} className="w-full py-3 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors mt-auto font-bold text-lg">SAVE & BACK</button>
+                <p className="text-xs font-mono text-dim text-center">Changes are saved when you go back.</p>
+                <button onClick={handleBackClick} className="w-full py-3 bg-signal text-ink font-cond font-bold uppercase tracking-[0.2em] text-lg hover:bg-teal-400 active:scale-[0.98] transition-all mt-auto cursor-pointer">SAVE & BACK</button>
             </div>
         </div>
     );

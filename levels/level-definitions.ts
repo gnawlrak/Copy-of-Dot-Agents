@@ -203,12 +203,12 @@ const BASTION_7: LevelDefinition = {
 
     // Perimeter Side Passages
     { x: 0.30, y: 0.60, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
-    { x: 0.70, y: 0.60, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
+    { x: 0.70, y: 0.55, direction: -Math.PI / 2, type: 'standard', hasScored: false }, 
 
     // Sector E 
     { x: 0.42, y: 0.20, direction: Math.PI / 4, type: 'advanced', hasScored: false },
     { x: 0.58, y: 0.20, direction: 3 * Math.PI / 4, type: 'advanced', hasScored: false },
-    { x: 0.5, y: 0.12, direction: -Math.PI / 2, type: 'advanced', hasScored: false }, 
+    { x: 0.5, y: 0.10, direction: -Math.PI / 2, type: 'advanced', hasScored: false }, 
     { x: 0.35, y: 0.15, direction: 0, type: 'standard', hasScored: false },
     { x: 0.65, y: 0.15, direction: Math.PI, type: 'standard', hasScored: false },
   ],
@@ -308,8 +308,8 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     // Left Lobby Entry (Lab <-> Lobby)
     { id: 109, hinge: { x: 0.35, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.95, swingDirection: 1 },
 
-    // Right Lobby Entry (Control <-> Lobby)
-    { id: 110, hinge: { x: 0.65, y: 0.22 }, length: 0.06, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.75, swingDirection: -1 },
+    // Right Lobby Entry (Control <-> Lobby) - opens left into lobby to avoid hinge wall
+    { id: 110, hinge: { x: 0.65, y: 0.22 }, length: 0.045, closedAngle: Math.PI / 2, maxOpenAngle: Math.PI * 0.65, swingDirection: 1 },
 
     // Central Locked Secure Command Room door
     { id: 111, hinge: { x: 0.457, y: 0.22 }, length: 0.086, closedAngle: 0, maxOpenAngle: Math.PI * 0.95, swingDirection: 1, locked: true },
@@ -322,8 +322,8 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
   ],
   enemies: [
     // Bottom entry guards
-    { x: 0.42, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
-    { x: 0.58, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
+    { x: 0.40, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
+    { x: 0.60, y: 0.88, direction: Math.PI / 2, type: 'standard', hasScored: false },
 
     // Central Hallway
     { x: 0.5, y: 0.6, direction: Math.PI / 2, type: 'advanced', hasScored: false },
@@ -337,7 +337,7 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     // Cooling Lab (Top Left)
     { x: 0.1, y: 0.15, direction: Math.PI / 4, type: 'standard', hasScored: false },
     { x: 0.22, y: 0.3, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
-    { x: 0.32, y: 0.12, direction: Math.PI, type: 'standard', hasScored: false },
+    { x: 0.325, y: 0.17, direction: Math.PI, type: 'standard', hasScored: false },
 
     // Heavy Machining (Bottom Right)
     { x: 0.62, y: 0.6, direction: Math.PI, type: 'advanced', hasScored: false },
@@ -348,7 +348,7 @@ const THE_FACTORY_EXPANSION: LevelDefinition = {
     // Control Center (Top Right)
     { x: 0.68, y: 0.25, direction: 0, type: 'standard', hasScored: false },
     { x: 0.88, y: 0.15, direction: Math.PI, type: 'advanced', hasScored: false },
-    { x: 0.78, y: 0.38, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
+    { x: 0.78, y: 0.42, direction: -Math.PI / 2, type: 'advanced', hasScored: false },
 
     // Central Lobby & Secure room (Top Center)
     { x: 0.5, y: 0.28, direction: Math.PI / 2, type: 'advanced', hasScored: false },
